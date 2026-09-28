@@ -1,16 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -18,6 +21,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"golang.org/x/crypto/bcrypt"
+	"nhooyr.io/websocket"
 )
 
 // ============================================================================
@@ -72,17 +76,19 @@ func loadConfig() {
 		MongoURI:       getEnv("MONGO_URI", "mongodb://localhost:27017"),
 		Database:       getEnv("MONGO_DB", "app_db"),
 		JWTSecret:      getEnv("JWT_SECRET", "super-secret-gateway-key-change-me"),
-		AllowedOrigins: []string{"*"},
+		AllowedOrigins: getAllowedOrigins(),
 		Rules: map[string]CollectionRule{
-			"portfolios": {
+			"stashes": {
 				Read:                  map[string]any{"$or": []any{map[string]any{"ownerId": "$auth.uid"}, map[string]any{"isPublic": true}}},
 				Write:                 map[string]any{"ownerId": "$auth.uid"},
-				RestrictedWriteFields: []string{"role", "isVerified"},
+				AllowedWriteFields:    []string{"ownerId", "title", "summary", "content", "tags", "isPublic"},
+				RestrictedWriteFields: []string{"role", "isVerified", "createdAt", "updatedAt"},
 			},
 			"profiles": {
-				Read:                  true,
+				Read:                  map[string]any{"_id": "$auth.uid"},
 				Write:                 map[string]any{"_id": "$auth.uid"},
-				RestrictedWriteFields: []string{"role", "permissions"},
+				AllowedWriteFields:    []string{"_id", "handle", "displayName", "bio", "avatarURL", "links", "isPublic"},
+				RestrictedWriteFields: []string{"role", "permissions", "email"},
 			},
 		},
 	}
@@ -93,12 +99,24 @@ func loadConfig() {
 		if err == nil {
 			var fileConfig Config
 			if err := json.Unmarshal(data, &fileConfig); err == nil {
-				if fileConfig.Port != "" { config.Port = fileConfig.Port }
-				if fileConfig.MongoURI != "" { config.MongoURI = fileConfig.MongoURI }
-				if fileConfig.Database != "" { config.Database = fileConfig.Database }
-				if fileConfig.JWTSecret != "" { config.JWTSecret = fileConfig.JWTSecret }
-				if len(fileConfig.AllowedOrigins) > 0 { config.AllowedOrigins = fileConfig.AllowedOrigins }
-				if len(fileConfig.Rules) > 0 { config.Rules = fileConfig.Rules }
+				if fileConfig.Port != "" {
+					config.Port = fileConfig.Port
+				}
+				if fileConfig.MongoURI != "" {
+					config.MongoURI = fileConfig.MongoURI
+				}
+				if fileConfig.Database != "" {
+					config.Database = fileConfig.Database
+				}
+				if fileConfig.JWTSecret != "" {
+					config.JWTSecret = fileConfig.JWTSecret
+				}
+				if len(fileConfig.AllowedOrigins) > 0 {
+					config.AllowedOrigins = fileConfig.AllowedOrigins
+				}
+				if len(fileConfig.Rules) > 0 {
+					config.Rules = fileConfig.Rules
+				}
 				log.Println("Loaded configuration from gateway.json")
 			}
 		}
@@ -110,6 +128,14 @@ func getEnv(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+func getAllowedOrigins() []string {
+	origins := strings.Split(getEnv("ALLOWED_ORIGINS", "*"), ",")
+	for index := range origins {
+		origins[index] = strings.TrimSpace(origins[index])
+	}
+	return origins
 }
 
 // ============================================================================
@@ -126,7 +152,7 @@ func isIDField(key string) bool {
 
 // Parses string to ObjectID ONLY when context is an explicit ID field
 func parseObjectID(v string, keyContext string) any {
-	if isIDField(keyContext) && len(v) == 24 && bson.HasHexObjectID(v) {
+	if isIDField(keyContext) && len(v) == 24 {
 		if objID, err := bson.ObjectIDFromHex(v); err == nil {
 			return objID
 		}
@@ -377,6 +403,30 @@ func sanitizeUpdatePayload(payload map[string]any, rule CollectionRule, claims *
 	return payload, nil
 }
 
+func validateProfilePayload(payload map[string]any) error {
+	handle, exists := payload["handle"]
+	if !exists {
+		return nil
+	}
+	handleString, ok := handle.(string)
+	if !ok || !isProfileHandle(handleString) {
+		return fmt.Errorf("profile handle must contain 3-32 lowercase letters, numbers, hyphens, or underscores")
+	}
+	return nil
+}
+
+func validateStashPayload(payload map[string]any) error {
+	title, exists := payload["title"]
+	if !exists {
+		return fmt.Errorf("stash title is required")
+	}
+	titleString, ok := title.(string)
+	if !ok || strings.TrimSpace(titleString) == "" || len(titleString) > 200 {
+		return fmt.Errorf("stash title must be a non-empty string up to 200 characters")
+	}
+	return nil
+}
+
 // ============================================================================
 // HTTP MIDDLEWARE & HANDLERS
 // ============================================================================
@@ -416,11 +466,104 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func originAllowed(origin string) bool {
+	if origin == "" {
+		return true
+	}
+	for _, allowedOrigin := range config.AllowedOrigins {
+		if allowedOrigin == "*" || allowedOrigin == origin {
+			return true
+		}
+	}
+	return false
+}
+
+// rateLimiter is a per-key sliding-window limiter used to slow down brute-force auth attempts.
+type rateLimiter struct {
+	mu       sync.Mutex
+	attempts map[string][]time.Time
+	limit    int
+	window   time.Duration
+}
+
+func newRateLimiter(limit int, window time.Duration) *rateLimiter {
+	rl := &rateLimiter{
+		attempts: make(map[string][]time.Time),
+		limit:    limit,
+		window:   window,
+	}
+	go rl.sweep()
+	return rl
+}
+
+func (rl *rateLimiter) allow(key string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	cutoff := time.Now().Add(-rl.window)
+	valid := rl.attempts[key][:0]
+	for _, t := range rl.attempts[key] {
+		if t.After(cutoff) {
+			valid = append(valid, t)
+		}
+	}
+	if len(valid) >= rl.limit {
+		rl.attempts[key] = valid
+		return false
+	}
+	rl.attempts[key] = append(valid, time.Now())
+	return true
+}
+
+// sweep periodically drops keys with no recent attempts so the map doesn't grow unbounded.
+func (rl *rateLimiter) sweep() {
+	ticker := time.NewTicker(rl.window)
+	defer ticker.Stop()
+	for range ticker.C {
+		rl.mu.Lock()
+		cutoff := time.Now().Add(-rl.window)
+		for key, times := range rl.attempts {
+			stillValid := false
+			for _, t := range times {
+				if t.After(cutoff) {
+					stillValid = true
+					break
+				}
+			}
+			if !stillValid {
+				delete(rl.attempts, key)
+			}
+		}
+		rl.mu.Unlock()
+	}
+}
+
+// clientIP extracts the caller's address, preferring a proxy-supplied X-Forwarded-For when present.
+func clientIP(r *http.Request) string {
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		return strings.TrimSpace(strings.Split(fwd, ",")[0])
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+func rateLimitMiddleware(limiter *rateLimiter, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !limiter.allow(clientIP(r)) {
+			writeError(w, http.StatusTooManyRequests, "Too many attempts, please try again later")
+			return
+		}
+		next(w, r)
+	}
+}
+
 func authenticate(next func(w http.ResponseWriter, r *http.Request, claims *Claims)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if !strings.HasPrefix(authHeader, "Bearer ") {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Missing or invalid Authorization header"})
+			writeError(w, http.StatusUnauthorized, "Missing or invalid Authorization header")
 			return
 		}
 
@@ -431,7 +574,7 @@ func authenticate(next func(w http.ResponseWriter, r *http.Request, claims *Clai
 		})
 
 		if err != nil || !token.Valid {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Invalid or expired token"})
+			writeError(w, http.StatusForbidden, "Invalid or expired token")
 			return
 		}
 
@@ -447,25 +590,55 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	}
 }
 
-func handleSignUp(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
-		return
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// requireMethod writes a 405 and returns false when the request method doesn't match.
+func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
+	if r.Method != method {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return false
+	}
+	return true
+}
+
+// decodeJSONBody enforces the payload size limit and decodes JSON, writing an error response on failure.
+// allowEmptyBody permits an empty body (io.EOF) to pass through unchanged.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any, allowEmptyBody bool) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxPayloadBytes)
+
+	err := json.NewDecoder(r.Body).Decode(dst)
+	if err == nil {
+		return true
+	}
+	if allowEmptyBody && errors.Is(err, io.EOF) {
+		return true
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxPayloadBytes)
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		writeError(w, http.StatusRequestEntityTooLarge, "Request body exceeds maximum limit (1MB)")
+		return false
+	}
+	writeError(w, http.StatusBadRequest, "Malformed JSON request body: "+err.Error())
+	return false
+}
+
+func handleSignUp(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
 
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Email == "" || req.Password == "" {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "Request body exceeds maximum limit (1MB)"})
-			return
-		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Email and password required"})
+	if !decodeJSONBody(w, r, &req, false) {
+		return
+	}
+	if req.Email == "" || req.Password == "" {
+		writeError(w, http.StatusBadRequest, "Email and password required")
 		return
 	}
 
@@ -475,17 +648,17 @@ func handleSignUp(w http.ResponseWriter, r *http.Request) {
 	usersCol := db.Collection("_users")
 	count, err := usersCol.CountDocuments(ctx, bson.M{"email": req.Email})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Database query failed during user check"})
+		writeError(w, http.StatusInternalServerError, "Database query failed during user check")
 		return
 	}
 	if count > 0 {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "User already exists"})
+		writeError(w, http.StatusConflict, "User already exists")
 		return
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Error hashing password"})
+		writeError(w, http.StatusInternalServerError, "Error hashing password")
 		return
 	}
 
@@ -499,13 +672,13 @@ func handleSignUp(w http.ResponseWriter, r *http.Request) {
 
 	_, err = usersCol.InsertOne(ctx, newUser)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create user"})
+		writeError(w, http.StatusInternalServerError, "Failed to create user")
 		return
 	}
 
 	token, err := generateJWT(newUser.ID.Hex(), newUser.Email, newUser.Role)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate token"})
+		writeError(w, http.StatusInternalServerError, "Failed to generate token")
 		return
 	}
 
@@ -513,24 +686,15 @@ func handleSignUp(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, maxPayloadBytes)
 
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "Request body exceeds maximum limit (1MB)"})
-			return
-		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+	if !decodeJSONBody(w, r, &req, false) {
 		return
 	}
 
@@ -540,22 +704,136 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	var user User
 	err := db.Collection("_users").FindOne(ctx, bson.M{"email": req.Email}).Decode(&user)
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Invalid email or password"})
+		writeError(w, http.StatusUnauthorized, "Invalid email or password")
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Invalid email or password"})
+		writeError(w, http.StatusUnauthorized, "Invalid email or password")
 		return
 	}
 
 	token, err := generateJWT(user.ID.Hex(), user.Email, user.Role)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate token"})
+		writeError(w, http.StatusInternalServerError, "Failed to generate token")
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"token": token, "user": user})
+}
+
+func handlePublicProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+
+	pathParts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/public/profiles/"), "/"), "/")
+	if len(pathParts) == 2 && pathParts[1] == "stashes" {
+		handlePublicStashes(w, r, pathParts[0])
+		return
+	}
+	if len(pathParts) != 1 {
+		writeError(w, http.StatusNotFound, "Public resource not found")
+		return
+	}
+	handle := pathParts[0]
+	if !isProfileHandle(handle) {
+		writeError(w, http.StatusBadRequest, "Profile handle must contain 3-32 lowercase letters, numbers, hyphens, or underscores")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	var profile bson.M
+	err := db.Collection("profiles").FindOne(
+		ctx,
+		bson.M{"handle": handle, "isPublic": true},
+		options.FindOne().SetProjection(bson.M{
+			"_id":         1,
+			"handle":      1,
+			"displayName": 1,
+			"bio":         1,
+			"avatarURL":   1,
+			"links":       1,
+		}),
+	).Decode(&profile)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			writeError(w, http.StatusNotFound, "Public profile not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "Could not load public profile")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"data": profile})
+}
+
+func handlePublicStashes(w http.ResponseWriter, r *http.Request, handle string) {
+	if !isProfileHandle(handle) {
+		writeError(w, http.StatusBadRequest, "Profile handle must contain 3-32 lowercase letters, numbers, hyphens, or underscores")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	var profile bson.M
+	err := db.Collection("profiles").FindOne(
+		ctx,
+		bson.M{"handle": handle, "isPublic": true},
+		options.FindOne().SetProjection(bson.M{"_id": 1}),
+	).Decode(&profile)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			writeError(w, http.StatusNotFound, "Public profile not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "Could not load public profile")
+		return
+	}
+
+	cursor, err := db.Collection("stashes").Find(
+		ctx,
+		bson.M{"ownerId": profile["_id"], "isPublic": true},
+		options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetProjection(bson.M{
+			"_id":       1,
+			"title":     1,
+			"summary":   1,
+			"content":   1,
+			"tags":      1,
+			"createdAt": 1,
+			"updatedAt": 1,
+		}),
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not load public stashes")
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var stashes []bson.M
+	if err := cursor.All(ctx, &stashes); err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not decode public stashes")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"data": stashes})
+}
+
+func isProfileHandle(handle string) bool {
+	if len(handle) < 3 || len(handle) > 32 {
+		return false
+	}
+	for _, character := range handle {
+		if (character < 'a' || character > 'z') &&
+			(character < '0' || character > '9') &&
+			character != '-' && character != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func generateJWT(uid, email, role string) (string, error) {
@@ -573,23 +851,20 @@ func generateJWT(uid, email, role string) (string, error) {
 }
 
 func handleDatabaseProxy(w http.ResponseWriter, r *http.Request, claims *Claims) {
-	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxPayloadBytes)
-
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(parts) < 4 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid endpoint path. Use /v1/db/{collection}/{action}"})
+		writeError(w, http.StatusBadRequest, "Invalid endpoint path. Use /v1/db/{collection}/{action}")
 		return
 	}
 	collectionName, action := parts[2], parts[3]
 
 	rule, exists := config.Rules[collectionName]
 	if !exists {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": fmt.Sprintf("Access to collection '%s' is restricted", collectionName)})
+		writeError(w, http.StatusForbidden, fmt.Sprintf("Access to collection '%s' is restricted", collectionName))
 		return
 	}
 
@@ -597,17 +872,8 @@ func handleDatabaseProxy(w http.ResponseWriter, r *http.Request, claims *Claims)
 		Query   map[string]any `json:"query"`
 		Payload map[string]any `json:"payload"`
 	}
-
-	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
-				writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "Request payload exceeds maximum allowed size (1MB)"})
-				return
-			}
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Malformed JSON request body: " + err.Error()})
-			return
-		}
+	if !decodeJSONBody(w, r, &body, true) {
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -618,17 +884,17 @@ func handleDatabaseProxy(w http.ResponseWriter, r *http.Request, claims *Claims)
 	case "find":
 		filter, err := applySecurityFilter(body.Query, rule.Read, claims)
 		if err != nil {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}
 		cursor, err := coll.Find(ctx, filter)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		var results []bson.M
 		if err := cursor.All(ctx, &results); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Error decoding cursor results: " + err.Error()})
+			writeError(w, http.StatusInternalServerError, "Error decoding cursor results: "+err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"data": results})
@@ -636,13 +902,13 @@ func handleDatabaseProxy(w http.ResponseWriter, r *http.Request, claims *Claims)
 	case "findOne":
 		filter, err := applySecurityFilter(body.Query, rule.Read, claims)
 		if err != nil {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}
 		var result bson.M
 		err = coll.FindOne(ctx, filter).Decode(&result)
 		if err != nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Document not found"})
+			writeError(w, http.StatusNotFound, "Document not found")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"data": result})
@@ -650,13 +916,27 @@ func handleDatabaseProxy(w http.ResponseWriter, r *http.Request, claims *Claims)
 	case "insertOne":
 		validatedPayload, err := authorizeAndHydrateInsert(body.Payload, rule, claims)
 		if err != nil {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+			writeError(w, http.StatusForbidden, err.Error())
 			return
+		}
+		if collectionName == "profiles" {
+			if err := validateProfilePayload(validatedPayload); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		if collectionName == "stashes" {
+			if err := validateStashPayload(validatedPayload); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			validatedPayload["createdAt"] = time.Now().UTC()
+			validatedPayload["updatedAt"] = time.Now().UTC()
 		}
 
 		res, err := coll.InsertOne(ctx, validatedPayload)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusCreated, map[string]any{"data": res})
@@ -664,19 +944,34 @@ func handleDatabaseProxy(w http.ResponseWriter, r *http.Request, claims *Claims)
 	case "updateOne":
 		filter, err := applySecurityFilter(body.Query, rule.Write, claims)
 		if err != nil {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}
 
 		sanitizedPayload, err := sanitizeUpdatePayload(body.Payload, rule, claims)
 		if err != nil {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+			writeError(w, http.StatusForbidden, err.Error())
 			return
+		}
+		if collectionName == "profiles" {
+			if err := validateProfilePayload(sanitizedPayload); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		if collectionName == "stashes" {
+			if title, exists := sanitizedPayload["title"]; exists {
+				if err := validateStashPayload(map[string]any{"title": title}); err != nil {
+					writeError(w, http.StatusBadRequest, err.Error())
+					return
+				}
+			}
+			sanitizedPayload["updatedAt"] = time.Now().UTC()
 		}
 
 		res, err := coll.UpdateOne(ctx, filter, bson.M{"$set": sanitizedPayload})
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"data": res})
@@ -684,18 +979,88 @@ func handleDatabaseProxy(w http.ResponseWriter, r *http.Request, claims *Claims)
 	case "deleteOne":
 		filter, err := applySecurityFilter(body.Query, rule.Write, claims)
 		if err != nil {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}
 		res, err := coll.DeleteOne(ctx, filter)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"data": res})
 
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Unsupported action '%s'", action)})
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Unsupported action '%s'", action))
+	}
+}
+
+type websocketResponseWriter struct {
+	header http.Header
+	body   bytes.Buffer
+}
+
+func newWebsocketResponseWriter() *websocketResponseWriter {
+	return &websocketResponseWriter{header: make(http.Header)}
+}
+
+func (writer *websocketResponseWriter) Header() http.Header {
+	return writer.header
+}
+
+func (writer *websocketResponseWriter) Write(body []byte) (int, error) {
+	return writer.body.Write(body)
+}
+
+func (writer *websocketResponseWriter) WriteHeader(_ int) {}
+
+func handleDatabaseWebSocket(w http.ResponseWriter, r *http.Request, claims *Claims) {
+	if !originAllowed(r.Header.Get("Origin")) {
+		writeError(w, http.StatusForbidden, "Origin is not allowed")
+		return
+	}
+
+	collectionName := strings.TrimPrefix(r.URL.Path, "/v1/ws/")
+	if collectionName == "" || strings.Contains(collectionName, "/") {
+		writeError(w, http.StatusBadRequest, "Use /v1/ws/{collection}")
+		return
+	}
+
+	connection, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		log.Printf("WebSocket upgrade failed: %v", err)
+		return
+	}
+	defer connection.Close(websocket.StatusNormalClosure, "")
+
+	for {
+		messageType, message, err := connection.Read(r.Context())
+		if err != nil {
+			return
+		}
+		if messageType != websocket.MessageText {
+			_ = connection.Close(websocket.StatusUnsupportedData, "text JSON messages required")
+			return
+		}
+
+		var request struct {
+			Action string `json:"action"`
+		}
+		if err := json.Unmarshal(message, &request); err != nil || request.Action == "" || strings.Contains(request.Action, "/") {
+			if err := connection.Write(r.Context(), websocket.MessageText, []byte(`{"error":"Messages require a valid action"}`)); err != nil {
+				return
+			}
+			continue
+		}
+
+		proxyRequest, err := http.NewRequestWithContext(r.Context(), http.MethodPost, "/v1/db/"+collectionName+"/"+request.Action, bytes.NewReader(message))
+		if err != nil {
+			return
+		}
+		response := newWebsocketResponseWriter()
+		handleDatabaseProxy(response, proxyRequest, claims)
+		if err := connection.Write(r.Context(), websocket.MessageText, response.body.Bytes()); err != nil {
+			return
+		}
 	}
 }
 
@@ -714,12 +1079,25 @@ func main() {
 	if err != nil {
 		log.Fatalf("❌ Failed to connect to Mongo: %v", err)
 	}
+	if err := client.Ping(ctx, nil); err != nil {
+		log.Fatalf("❌ Failed to reach Mongo: %v", err)
+	}
 	db = client.Database(config.Database)
+	_, err = db.Collection("profiles").Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "handle", Value: 1}},
+		Options: options.Index().SetUnique(true).SetSparse(true),
+	})
+	if err != nil {
+		log.Fatalf("❌ Failed to create profile handle index: %v", err)
+	}
 	log.Printf("✅ Connected to Mongo database: '%s'", config.Database)
 
-	http.HandleFunc("/v1/auth/signup", corsMiddleware(handleSignUp))
-	http.HandleFunc("/v1/auth/login", corsMiddleware(handleLogin))
+	authRateLimiter := newRateLimiter(10, 5*time.Minute)
+	http.HandleFunc("/v1/auth/signup", corsMiddleware(rateLimitMiddleware(authRateLimiter, handleSignUp)))
+	http.HandleFunc("/v1/auth/login", corsMiddleware(rateLimitMiddleware(authRateLimiter, handleLogin)))
+	http.HandleFunc("/v1/public/profiles/", corsMiddleware(handlePublicProfile))
 	http.HandleFunc("/v1/db/", corsMiddleware(authenticate(handleDatabaseProxy)))
+	http.HandleFunc("/v1/ws/", authenticate(handleDatabaseWebSocket))
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "time": time.Now().String()})
 	})

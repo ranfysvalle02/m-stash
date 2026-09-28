@@ -1,105 +1,121 @@
 # m-stash
 
-----
+`m-stash` is a small Go gateway for MongoDB applications. It owns signup and login, verifies JWTs, applies document-level MongoDB JSON policies, and exposes a deliberate public-profile surface without exposing database credentials to browsers.
 
-What makes this project explosive as an open-source tool is that it restores the "backend-less" superpower MongoDB stripped away in late 2025, giving MongoDB developers the instant, client-facing experience PostgreSQL users enjoy with Supabase. It allows a React, Vue, Svelte, or mobile app to communicate directly with any MongoDB deployment (Atlas or self-hosted) without writing repetitive Express API routes, while ensuring bulletproof, document-level security.
+## Core model
 
-### The Coolest Features
+The default configuration separates identity, private data, and public data:
 
-* **Seamless AST Query Rewriting (DLAC Engine):** Frontend developers can issue standard MongoDB queries like `db.collection('portfolios').find({ category: 'tech' })`. The gateway intercepts the request, parses the user's JWT, and dynamically rewrites the query tree into `{ $and: [{ category: 'tech' }, { ownerId: 'user_123' }] }` before forwarding it to MongoDB. Bypassing security from the browser is mathematically impossible because enforcement happens at the proxy layer.
-* **Context-Aware BSON ObjectID Normalization:** A notorious MongoDB pain point is query failure when a frontend client sends `"_id": "60d5..."` as a string instead of `ObjectID("60d5...")`. The proxy recursively walks the AST—even through complex operators like `{"_id": {"$in": ["60d5...", "60d6..."]}}`—and automatically casts 24-character hex strings to `ObjectID`s when targeting identifier fields. Regular 24-character hex strings (like Git commit SHAs or API keys) are preserved as strings.
-* **Self-Hydrating Inserts & Field-Mask Safeguards:** When a user creates a new record, the proxy automatically hydrates identity fields mandated by security policy (e.g., auto-attaching `ownerId: claims.UID`). If a malicious client attempts to spoof their `ownerId` or write to restricted schema fields like `role` or `isVerified`, the gateway rejects the payload with a `403 Forbidden`.
-* **Native Go Concurrency in a ~15MB Binary:** Unlike Node.js proxies that carry multi-hundred-megabyte `node_modules` folders, heavy idle RAM usage, and single-threaded event loop bottlenecks, this Go engine compiles into a single static binary. It handles thousands of concurrent database requests using lightweight goroutines while idling at under 15MB RAM—meaning it can run permanently on free-tier containers on Fly.io, Railway, or Render.
-* **Zero DSL Policy Configuration (`gateway.json`):** Instead of forcing developers to learn a custom policy language (like Rego, Cedar, or AWS IAM syntax), security policies are written using standard MongoDB query syntax. If a developer knows how to query MongoDB, they already know how to write access rules.
-* **Embedded Auth & Storage:** Out-of-the-box password hashing (bcrypt) and session management (`/v1/auth/signup`, `/v1/auth/login`) store user accounts directly inside a `_users` collection in your existing Mongo database, making the gateway completely self-contained without needing third-party auth vendors.
-
------
-
-When software architects treat Authentication (AuthN) and Authorization (AuthZ) as separate silos, they recreate the exact middleware friction this proxy is built to eliminate.
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        FULL-STACK AUTH ENGINE                          │
-│                                                                        │
-│   1. Authentication (AuthN)            2. Authorization (AuthZ)        │
-│   "WHO ARE YOU?"                       "WHAT CAN YOU TOUCH?"           │
-│   ┌────────────────────────┐           ┌───────────────────────────┐   │
-│   │ • Signup / Login       │ ──JWT──►  │ • AST Query Rewriter      │   │
-│   │ • Password Hashing     │  Claims   │ • $auth.uid Injection     │   │
-│   │ • JWT Minting & Claims │           │ • Field-Level Write Masks │   │
-│   └────────────────────────┘           └───────────────────────────┘   │
-└────────────────────────────────────────────────────────────────────────┘
-
-```
-
----
-
-### The Difference: AuthN vs. AuthZ
-
-| Layer | Responsibility | What it Handles in the Go Gateway |
+| Surface | Access | Purpose |
 | --- | --- | --- |
-| **Authentication (AuthN)** | **Identity Verification** ("Who are you?") | `/v1/auth/signup`, `/v1/auth/login`, bcrypt password hashing, JWT minting, session validation, user record creation in `_users`. |
-| **Authorization (AuthZ)** | **Permission & Data Isolation** ("What can you read/write?") | Dynamic AST query rewriter, injecting claims (`$auth.uid`) into BSON queries, field-level write masks, collection rule enforcement. |
+| `_users` | Gateway only | Email, password hash, role, and account metadata. Never available through the database proxy. |
+| `profiles` | Owner through authenticated API | A user's editable profile document. Its `_id` is the authenticated user's ID. |
+| `GET /v1/public/profiles/{handle}` | Anyone | A stable public profile page. Only `handle`, `displayName`, `bio`, `avatarURL`, and `links` are returned. |
+| `stashes` | Owner-managed; signed-in readers can also see public stashes | A user's posts, notes, or saved work. Each stash is private by default or publishable with `isPublic: true`. |
+| `GET /v1/public/profiles/{handle}/stashes` | Anyone | All public stashes for one published profile, returned with a safe public projection. |
 
----
+Public profile reads bypass the general database proxy intentionally. The endpoint requires a lowercase handle and queries only `isPublic: true` documents with an allowlisted MongoDB projection. Adding private fields to `profiles` later cannot expose them by accident.
 
-### Why Combining Them into "One System" is the Strategic Win
+The same pattern applies to stashes. Owners create, edit, and delete only their own stashes through the authenticated API. Signed-in callers can also discover any published stash through the generic API; visitors use the profile-scoped public endpoint and cannot create, edit, or delete any stash.
 
-If you only build an Authorization Proxy, developers still have to plug in Auth0, Clerk, or Firebase Auth to handle users. That creates three massive architectural problems:
+## Profile fields
 
-#### 1. Identity Fragmentation (The Sync Problem)
-
-When AuthN lives in Auth0 and database data lives in MongoDB Atlas, user identities become fragmented. You end up maintaining a shadow user table in MongoDB to link Auth0 `user_id`s with internal document relationships. By embedding AuthN directly inside the gateway, user identity lives right inside MongoDB's `_users` collection natively.
-
-#### 2. The Token Hydration Loop
-
-AuthN and AuthZ feed off each other in real-time. During login, the AuthN engine mints a JWT packed with custom claims:
+Clients may write only these fields to `profiles`:
 
 ```json
 {
-  "uid": "usr_99",
-  "email": "alex@startup.com",
-  "role": "org_admin"
+  "handle": "ada-lovelace",
+  "displayName": "Ada Lovelace",
+  "bio": "Mathematician and programmer.",
+  "avatarURL": "https://cdn.example.com/ada.jpg",
+  "links": [{ "label": "Website", "url": "https://example.com" }],
+  "isPublic": true
 }
-
 ```
 
-The AuthZ rewriter engine instantly consumes those claims to hydrate MongoDB rules dynamically:
+`_id` is hydrated from the JWT on insert and cannot be changed. `email`, `role`, and `permissions` are never writable through this API. A public handle contains 3-32 lowercase letters, numbers, hyphens, or underscores.
+
+## Stash fields
+
+Each stash has a required `title`, plus optional `summary`, `content`, and `tags`. Set `isPublic` to `true` to include it in that user's public listing. The gateway assigns `ownerId`, `createdAt`, and `updatedAt`; a supplied `ownerId` must exactly match the signed-in user, and timestamps cannot be supplied by clients.
 
 ```json
-// Rule Policy
-{ "tenantId": "$auth.role", "ownerId": "$auth.uid" }
-
-// Rewritten BSON Query sent to Atlas
-{ "tenantId": "org_admin", "ownerId": "usr_99" }
-
+{
+  "title": "Shipping notes",
+  "summary": "What changed in version one.",
+  "content": "Long-form content lives here.",
+  "tags": ["release", "product"],
+  "isPublic": true
+}
 ```
 
-When AuthN and AuthZ share the same binary, claim hydration happens instantly in memory without external token verification round-trips.
+## Deploy
 
-#### 3. Complete Developer Ergonomics (The "Supabase Effect")
+`m-stash` is distributed as a statically compiled Go binary in a small Alpine Docker image. It listens on `PORT` (default `4000`). Railway, Fly.io, and Render terminate TLS, exposing HTTP routes as HTTPS and WebSockets as WSS.
 
-Developers don't want to wire together three different cloud services just to build an MVP. They want **one SDK** that handles identity and database calls:
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `MONGO_URI` | Yes | MongoDB or Atlas connection URI. |
+| `MONGO_DB` | Yes | Database name. |
+| `JWT_SECRET` | Yes | Long random secret used to sign user sessions. |
+| `ALLOWED_ORIGINS` | Production | Comma-separated browser origins, such as `https://app.example.com`. Defaults to `*`. |
+| `PORT` | No | Listener port. Cloud providers set this automatically. |
 
-```javascript
-import { createClient } from '@mongo-open-auth/client';
+For Atlas, configure network access for the deployment provider. Use a provider-supported static outbound address when available; do not assume there is one universal egress range for every plan.
 
-const db = createClient({ endpoint: 'https://api.mygateway.dev' });
+### Local container
 
-// 1. Authentication (AuthN)
-const { token } = await db.auth.login({ email, password });
-
-// 2. Authorization & Database Access (AuthZ)
-const myData = await db.collection('projects').find({ active: true });
-
+```sh
+docker build -t m-stash .
+docker run --rm -p 4000:4000 \
+  -e MONGO_URI='mongodb+srv://...' \
+  -e MONGO_DB='app_db' \
+  -e JWT_SECRET='replace-with-a-long-random-secret' \
+  -e ALLOWED_ORIGINS='http://localhost:3000' \
+  m-stash
 ```
 
----
+Check readiness with `curl http://localhost:4000/healthz`.
 
-### The Strategic Positioning
+### Railway
 
-If you only solve **Data Access (AuthZ)**, you built a niche database proxy.
+The included [railway.json](railway.json) configures Dockerfile builds and `/healthz` health checks.
 
-If you solve **Identity (AuthN) + Data Access (AuthZ)** together, you built **the open-source Firebase/Supabase equivalent for MongoDB**.
+```sh
+railway init
+railway variables set MONGO_URI='mongodb+srv://...' MONGO_DB='app_db' JWT_SECRET='replace-with-a-long-random-secret' ALLOWED_ORIGINS='https://app.example.com'
+railway up
+```
 
-That combination captures developers at the exact moment they choose their auth layer, locking in MongoDB Atlas as their permanent database foundation.
+### Fly.io
+
+```sh
+fly launch --no-deploy
+fly secrets set MONGO_URI='mongodb+srv://...' MONGO_DB='app_db' JWT_SECRET='replace-with-a-long-random-secret' ALLOWED_ORIGINS='https://app.example.com'
+fly deploy
+```
+
+Use internal port `4000` when prompted.
+
+### Render
+
+The included [render.yaml](render.yaml) is a Render Blueprint. Push the repository to a Git provider, select **New** then **Blueprint**, and connect the repository. Before creating the service, set `MONGO_URI` and `ALLOWED_ORIGINS`; Render generates `JWT_SECRET`, builds the Docker image, and verifies `/healthz`.
+
+### Vercel
+
+Vercel Functions cannot host persistent WebSocket connections or this long-lived server. Deploy the gateway to Railway, Fly.io, or Render, then use its public URL from a Vercel frontend.
+
+## API
+
+All database operations use `POST /v1/db/{collection}/{action}` and a JWT bearer token. Supported actions are `find`, `findOne`, `insertOne`, `updateOne`, and `deleteOne`.
+
+```json
+{
+  "query": { "status": "active" },
+  "payload": { "title": "Example" }
+}
+```
+
+Persistent clients can use `wss://your-gateway.example/v1/ws/{collection}` with the same bearer token during the upgrade. Send the same JSON plus an `action` field.
+
+Public clients use `GET /v1/public/profiles/{handle}` and `GET /v1/public/profiles/{handle}/stashes` without a token. The complete deploy-to-profile-and-stash walkthrough is in [quickstart.md](quickstart.md).
