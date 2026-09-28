@@ -22,7 +22,6 @@ COPY --from=build /out/m-stash /usr/local/bin/m-stash
 
 WORKDIR /app
 ENV PORT=4000
-ENV M_STASH_CONFIG=/etc/m-stash/gateway.json
 EXPOSE 4000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

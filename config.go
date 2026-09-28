@@ -1,39 +1,30 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 )
 
-type CollectionRule struct {
-	Read                  any      `json:"read"`
-	Write                 any      `json:"write"`
-	AllowedWriteFields    []string `json:"allowed_write_fields"`
-	RestrictedWriteFields []string `json:"restricted_write_fields"`
-}
-
 type Config struct {
-	Port                string                    `json:"port"`
-	MongoURI            string                    `json:"mongo_uri"`
-	Database            string                    `json:"database"`
-	JWTSecret           string                    `json:"jwt_secret"`
-	JWTIssuer           string                    `json:"jwt_issuer"`
-	JWTAudience         string                    `json:"jwt_audience"`
-	TrustProxy          bool                      `json:"trust_proxy"`
-	MetricsToken        string                    `json:"-"`
-	AllowedOrigins      []string                  `json:"allowed_origins"`
-	Rules               map[string]CollectionRule `json:"rules"`
-	AccessTokenTTL      time.Duration             `json:"-"`
-	RefreshSessionTTL   time.Duration             `json:"-"`
-	SessionCookieSecure bool                      `json:"-"`
-	AdminEmail          string                    `json:"-"`
-	AdminPassword       string                    `json:"-"`
+	Port                string
+	MongoURI            string
+	Database            string
+	JWTSecret           string
+	JWTIssuer           string
+	JWTAudience         string
+	TrustProxy          bool
+	MetricsToken        string
+	AllowedOrigins      []string
+	AccessTokenTTL      time.Duration
+	RefreshSessionTTL   time.Duration
+	SessionCookieSecure bool
+	AdminEmail          string
+	AdminPassword       string
+	ServiceToken        string
 }
 
 func loadConfig() (Config, error) {
@@ -53,7 +44,10 @@ func loadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	adminEmail, err := validateBootstrapAdminCredentials(getEnv("ADMIN_EMAIL", ""), getEnv("ADMIN_PASSWORD", ""))
+	adminEmail, err := validateBootstrapAdminCredentials(
+		getEnv("ADMIN_EMAIL", ""),
+		getEnv("ADMIN_PASSWORD", ""),
+	)
 	if err != nil {
 		return Config{}, err
 	}
@@ -72,58 +66,7 @@ func loadConfig() (Config, error) {
 		SessionCookieSecure: sessionCookieSecure,
 		AdminEmail:          adminEmail,
 		AdminPassword:       getEnv("ADMIN_PASSWORD", ""),
-		Rules: map[string]CollectionRule{
-			"stashes": {
-				Read:                  map[string]any{"$or": []any{map[string]any{"ownerId": "$auth.uid"}, map[string]any{"isPublic": true}}},
-				Write:                 map[string]any{"ownerId": "$auth.uid"},
-				AllowedWriteFields:    []string{"ownerId", "title", "summary", "content", "tags", "isPublic"},
-				RestrictedWriteFields: []string{"role", "isVerified", "createdAt", "updatedAt"},
-			},
-			"profiles": {
-				Read:                  map[string]any{"_id": "$auth.uid"},
-				Write:                 map[string]any{"_id": "$auth.uid"},
-				AllowedWriteFields:    []string{"_id", "handle", "displayName", "bio", "avatarURL", "links", "isPublic"},
-				RestrictedWriteFields: []string{"role", "permissions", "email"},
-			},
-		},
-	}
-	configFile := getEnv("M_STASH_CONFIG", "gateway.json")
-	if _, err := os.Stat(configFile); err == nil {
-		data, err := os.ReadFile(configFile)
-		if err != nil {
-			return Config{}, fmt.Errorf("read configuration file %q: %w", configFile, err)
-		}
-		var fileConfig Config
-		if err := json.Unmarshal(data, &fileConfig); err != nil {
-			return Config{}, fmt.Errorf("parse configuration file %q: %w", configFile, err)
-		}
-		if fileConfig.Port != "" {
-			loadedConfig.Port = fileConfig.Port
-		}
-		if fileConfig.MongoURI != "" {
-			loadedConfig.MongoURI = fileConfig.MongoURI
-		}
-		if fileConfig.Database != "" {
-			loadedConfig.Database = fileConfig.Database
-		}
-		if fileConfig.JWTSecret != "" {
-			loadedConfig.JWTSecret = fileConfig.JWTSecret
-		}
-		if fileConfig.JWTIssuer != "" {
-			loadedConfig.JWTIssuer = fileConfig.JWTIssuer
-		}
-		if fileConfig.JWTAudience != "" {
-			loadedConfig.JWTAudience = fileConfig.JWTAudience
-		}
-		if len(fileConfig.AllowedOrigins) > 0 {
-			loadedConfig.AllowedOrigins = fileConfig.AllowedOrigins
-		}
-		if len(fileConfig.Rules) > 0 {
-			loadedConfig.Rules = fileConfig.Rules
-		}
-		log.Printf("Loaded configuration from %s", configFile)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return Config{}, fmt.Errorf("check configuration file %q: %w", configFile, err)
+		ServiceToken:        getEnv("SERVICE_TOKEN", ""),
 	}
 
 	if len(loadedConfig.JWTSecret) < 32 {
@@ -131,6 +74,9 @@ func loadConfig() (Config, error) {
 	}
 	if loadedConfig.MetricsToken != "" && len(loadedConfig.MetricsToken) < 32 {
 		return Config{}, errors.New("METRICS_TOKEN must be at least 32 characters when configured")
+	}
+	if loadedConfig.ServiceToken != "" && len(loadedConfig.ServiceToken) < 32 {
+		return Config{}, errors.New("SERVICE_TOKEN must be at least 32 characters when configured")
 	}
 	if loadedConfig.JWTIssuer == "" || loadedConfig.JWTAudience == "" {
 		return Config{}, errors.New("JWT_ISSUER and JWT_AUDIENCE must be configured")
@@ -184,9 +130,18 @@ func validateBootstrapAdminCredentials(email, password string) (string, error) {
 }
 
 func getAllowedOrigins() []string {
-	origins := strings.Split(getEnv("ALLOWED_ORIGINS", "*"), ",")
-	for index := range origins {
-		origins[index] = strings.TrimSpace(origins[index])
+	rawOrigins := strings.TrimSpace(getEnv("ALLOWED_ORIGINS", ""))
+	if rawOrigins == "" {
+		return []string{"*"}
+	}
+	origins := make([]string, 0)
+	for _, rawOrigin := range strings.Split(rawOrigins, ",") {
+		if origin := strings.TrimSpace(rawOrigin); origin != "" {
+			origins = append(origins, origin)
+		}
+	}
+	if len(origins) == 0 {
+		return []string{"*"}
 	}
 	return origins
 }

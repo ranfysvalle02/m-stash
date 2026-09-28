@@ -1,26 +1,27 @@
-# m-stash Operator UI
+# m-stash Workspace
 
-This is the embedded React interface for m-stash. It helps an operator verify the secure MongoDB data path: authenticate, create a private record in the included sample collection, inspect the policy-limited query result, and configure the service.
+This embedded React workspace demonstrates the m-stash product model:
 
-The UI is not a separate product or deployment. Production builds are written to `frontend/dist` and embedded in the Go binary by [ui.go](../ui.go). The Go service serves the UI, API, and browser-session cookies from one origin.
+- Open registration claims a personal username namespace.
+- Personal data is owner-scoped and never takes an owner ID from the browser.
+- Deployment administrators manage one shared application-data scope.
+- Standard users can read shared records intended for signed-in audiences.
+
+Production assets are written to `frontend/dist` and embedded by the Go service, so the UI, API, and browser-session cookies share one origin.
 
 ## Development
 
-Start the Go API from the repository root on port `4000`, then run Vite:
+Start the Go API on port `4000`, then run:
 
 ```sh
 npm run dev
 ```
 
-Vite proxies `/v1` requests to `http://127.0.0.1:4000`. Useful commands:
+Vite proxies `/v1` requests to `http://127.0.0.1:4000`.
 
 ```sh
 npm run lint
 npm run build
 ```
 
-Run `make test` from the repository root to build this UI and run the Go tests together.
-
-## Product boundary
-
-The UI can inspect only data allowed by the server's collection rules. It does not receive MongoDB credentials and it does not configure authorization policy from the browser. Configure policies through `M_STASH_CONFIG` and keep credentials in the deployment environment or secret manager.
+The browser never receives MongoDB credentials, a service token, or a namespace ownership value. m-stash derives ownership from the authenticated account for every personal mutation.

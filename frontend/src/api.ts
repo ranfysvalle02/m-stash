@@ -4,61 +4,62 @@ export interface UserClaims {
   role: string
 }
 
-export interface ProfileLink {
-  label: string
-  url: string
-}
-
-export interface ProfileInput {
-  handle: string
-  displayName: string
-  bio: string
-  avatarURL: string
-  links: ProfileLink[]
-  isPublic: boolean
-}
-
-export interface Profile extends ProfileInput {
+export interface Namespace {
   id: string
-}
-
-export interface StashInput {
-  title: string
-  summary: string
-  content: string
-  tags: string[]
-  isPublic: boolean
-}
-
-export interface Stash extends StashInput {
-  id: string
-  createdAt: string
-  updatedAt: string
-}
-
-export interface StashPreview extends Omit<Stash, 'content'> {}
-
-export interface PublicStash {
-  _id: string
-  author?: {
-    handle: string
-    displayName: string
-    avatarURL?: string
-  }
-  title: string
-  summary?: string
-  content?: string
-  tags?: string[]
-  createdAt: string
-  updatedAt: string
-}
-
-export interface PublicProfile {
-  handle: string
+  slug: string
+  kind: 'personal' | 'shared'
   displayName: string
   bio?: string
   avatarURL?: string
-  links?: ProfileLink[]
+  isPublic: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface NamespaceIdentityInput {
+  displayName: string
+  bio: string
+  avatarURL: string
+  isPublic: boolean
+}
+
+export interface ResourceInput {
+  slug: string
+  title: string
+  summary: string
+  content: string
+  data?: Record<string, unknown>
+  visibility: 'private' | 'authenticated' | 'public'
+}
+
+export interface Resource extends ResourceInput {
+  id: string
+  type: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ResourcePreview extends Omit<Resource, 'content' | 'data'> {}
+
+export interface PublicNamespace {
+  slug: string
+  displayName: string
+  bio?: string
+  avatarURL?: string
+}
+
+export interface PublicResourcePreview {
+  type: string
+  slug: string
+  title: string
+  summary?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PublicResource extends PublicResourcePreview {
+  content?: string
+  data?: Record<string, unknown>
 }
 
 export interface Page<T> {
@@ -66,13 +67,6 @@ export interface Page<T> {
   page: {
     limit: number
     nextCursor: string | null
-  }
-}
-
-export interface DocumentPage {
-  data: Record<string, unknown>[]
-  page: {
-    limit: number
   }
 }
 
@@ -102,13 +96,9 @@ function csrfToken() {
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
-  if (response.status === 204) {
-    return undefined as T
-  }
+  if (response.status === 204) return undefined as T
   const payload = (await response.json().catch(() => ({}))) as { error?: string }
-  if (!response.ok) {
-    throw new APIError(response.status, payload.error ?? 'The request could not be completed.')
-  }
+  if (!response.ok) throw new APIError(response.status, payload.error ?? 'The request could not be completed.')
   return payload as T
 }
 
@@ -120,13 +110,7 @@ async function refreshSession() {
       method: 'POST',
       credentials: 'include',
       headers: { 'X-CSRF-Token': csrfToken() },
-    })
-      .then(async (response) => {
-        await parseResponse(response)
-      })
-      .finally(() => {
-        refreshPromise = undefined
-      })
+    }).then(async (response) => { await parseResponse(response) }).finally(() => { refreshPromise = undefined })
   }
   return refreshPromise
 }
@@ -135,14 +119,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const { body, retrySession = true, headers: providedHeaders, ...fetchOptions } = options
   const headers = new Headers(providedHeaders)
   const method = (fetchOptions.method ?? 'GET').toUpperCase()
-  if (body !== undefined) {
-    headers.set('Content-Type', 'application/json')
-  }
+  if (body !== undefined) headers.set('Content-Type', 'application/json')
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
     const token = csrfToken()
-    if (token) {
-      headers.set('X-CSRF-Token', token)
-    }
+    if (token) headers.set('X-CSRF-Token', token)
   }
 
   const response = await fetch(path, {
@@ -151,26 +131,36 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: 'include',
   })
-  if (
-    retrySession &&
-    (response.status === 401 || response.status === 403) &&
-    !path.startsWith('/v1/auth/')
-  ) {
+  if (retrySession && (response.status === 401 || response.status === 403) && !path.startsWith('/v1/auth/')) {
     try {
       await refreshSession()
       return request<T>(path, { ...options, retrySession: false })
     } catch {
-      // The original API error gives callers the clearest user-facing outcome.
+      // Preserve the original API error for callers.
     }
   }
   return parseResponse<T>(response)
 }
 
 export const api = {
-  async verifySession() {
-    const response = await request<{ active: boolean; claims: UserClaims }>('/v1/auth/verify', {
-      retrySession: false,
+  async signUpWithNamespace(email: string, password: string, username: string) {
+    return request<{ token: string; user: { id: string; email: string; role: string }; namespace: Namespace }>('/v1/auth/signup', {
+      method: 'POST', body: { email, password, username }, retrySession: false,
     })
+  },
+
+  async logIn(email: string, password: string) {
+    return request<APIEnvelope<{ id: string; email: string; role: string }>>('/v1/auth/login', {
+      method: 'POST', body: { email, password }, retrySession: false,
+    })
+  },
+
+  async logOut() {
+    return request<void>('/v1/auth/logout', { method: 'POST', retrySession: false })
+  },
+
+  async verifySession() {
+    const response = await request<{ active: boolean; claims: UserClaims }>('/v1/auth/verify', { retrySession: false })
     return response.claims
   },
 
@@ -179,105 +169,84 @@ export const api = {
     return api.verifySession()
   },
 
-  async signUp(email: string, password: string) {
-    return request<APIEnvelope<{ id: string; email: string; role: string }>>('/v1/auth/signup', {
-      method: 'POST',
-      body: { email, password },
-      retrySession: false,
-    })
-  },
-
-  async logIn(email: string, password: string) {
-    return request<APIEnvelope<{ id: string; email: string; role: string }>>('/v1/auth/login', {
-      method: 'POST',
-      body: { email, password },
-      retrySession: false,
-    })
-  },
-
-  async logOut() {
-    return request<void>('/v1/auth/logout', { method: 'POST', retrySession: false })
-  },
-
-  async getProfile() {
-    const response = await request<APIEnvelope<Profile>>('/v1/me/profile')
+  async getNamespace() {
+    const response = await request<APIEnvelope<Namespace>>('/v1/me/namespace')
     return response.data
   },
 
-  async saveProfile(profile: ProfileInput) {
-    const response = await request<APIEnvelope<Profile>>('/v1/me/profile', {
-      method: 'PUT',
-      body: profile,
-    })
+  async saveNamespace(input: NamespaceIdentityInput) {
+    const response = await request<APIEnvelope<Namespace>>('/v1/me/namespace', { method: 'PUT', body: input })
     return response.data
   },
 
-  async listStashes(status: 'all' | 'draft' | 'published', cursor?: string | null) {
-    const search = new URLSearchParams({ status, limit: '20' })
-    if (cursor) {
-      search.set('cursor', cursor)
-    }
-    return request<Page<StashPreview>>(`/v1/me/stashes?${search.toString()}`)
-  },
-
-  async createStash(stash: StashInput) {
-    const response = await request<APIEnvelope<Stash>>('/v1/me/stashes', {
-      method: 'POST',
-      body: stash,
-    })
-    return response.data
-  },
-
-  async getStash(id: string) {
-    const response = await request<APIEnvelope<Stash>>(`/v1/me/stashes/${id}`)
-    return response.data
-  },
-
-  async saveStash(id: string, stash: StashInput) {
-    const response = await request<APIEnvelope<Stash>>(`/v1/me/stashes/${id}`, {
-      method: 'PUT',
-      body: stash,
-    })
-    return response.data
-  },
-
-  async deleteStash(id: string) {
-    return request<void>(`/v1/me/stashes/${id}`, { method: 'DELETE' })
-  },
-
-  async discoverStashes(tag?: string, cursor?: string | null) {
+  async listResources(type: string, cursor?: string | null) {
     const search = new URLSearchParams({ limit: '20' })
-    if (tag) {
-      search.set('tag', tag)
-    }
-    if (cursor) {
-      search.set('cursor', cursor)
-    }
-    return request<Page<PublicStash>>(`/v1/public/stashes?${search.toString()}`)
+    if (cursor) search.set('cursor', cursor)
+    return request<Page<ResourcePreview>>(`/v1/me/resources/${encodeURIComponent(type)}?${search.toString()}`)
   },
 
-  async getPublicStash(id: string) {
-    const response = await request<APIEnvelope<PublicStash>>(`/v1/public/stashes/${id}`)
+  async createResource(type: string, resource: ResourceInput) {
+    const response = await request<APIEnvelope<Resource>>(`/v1/me/resources/${encodeURIComponent(type)}`, { method: 'POST', body: resource })
     return response.data
   },
 
-  async getPublicProfile(handle: string) {
-    const response = await request<APIEnvelope<PublicProfile>>(`/v1/public/profiles/${handle}`)
+  async getResource(type: string, slug: string) {
+    const response = await request<APIEnvelope<Resource>>(`/v1/me/resources/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`)
     return response.data
   },
 
-  async getPublicProfileStashes(handle: string, cursor?: string | null) {
+  async saveResource(type: string, slug: string, resource: ResourceInput) {
+    const response = await request<APIEnvelope<Resource>>(`/v1/me/resources/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`, { method: 'PUT', body: resource })
+    return response.data
+  },
+
+  async deleteResource(type: string, slug: string) {
+    return request<void>(`/v1/me/resources/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`, { method: 'DELETE' })
+  },
+
+  async getSharedNamespace() {
+    const response = await request<APIEnvelope<Namespace>>('/v1/shared/namespace')
+    return response.data
+  },
+
+  async listSharedResources(type: string, cursor?: string | null) {
     const search = new URLSearchParams({ limit: '20' })
-    if (cursor) {
-      search.set('cursor', cursor)
-    }
-    return request<Page<PublicStash>>(`/v1/public/profiles/${handle}/stashes?${search.toString()}`)
+    if (cursor) search.set('cursor', cursor)
+    return request<Page<ResourcePreview>>(`/v1/shared/resources/${encodeURIComponent(type)}?${search.toString()}`)
   },
 
-  async findDocuments(collection: string, query: Record<string, unknown>, limit = 30) {
-    return request<DocumentPage>(`/v1/db/${encodeURIComponent(collection)}/find`, {
-      method: 'POST',
-      body: { query, limit },
-    })
+  async createSharedResource(type: string, resource: ResourceInput) {
+    const response = await request<APIEnvelope<Resource>>(`/v1/shared/resources/${encodeURIComponent(type)}`, { method: 'POST', body: resource })
+    return response.data
+  },
+
+  async getSharedResource(type: string, slug: string) {
+    const response = await request<APIEnvelope<Resource>>(`/v1/shared/resources/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`)
+    return response.data
+  },
+
+  async saveSharedResource(type: string, slug: string, resource: ResourceInput) {
+    const response = await request<APIEnvelope<Resource>>(`/v1/shared/resources/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`, { method: 'PUT', body: resource })
+    return response.data
+  },
+
+  async deleteSharedResource(type: string, slug: string) {
+    return request<void>(`/v1/shared/resources/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`, { method: 'DELETE' })
+  },
+
+  async getPublicNamespace(username: string) {
+    const response = await request<APIEnvelope<PublicNamespace>>(`/v1/public/${encodeURIComponent(username)}`)
+    return response.data
+  },
+
+  async listPublicResources(username: string, type: string, cursor?: string | null) {
+    const search = new URLSearchParams({ limit: '20' })
+    if (cursor) search.set('cursor', cursor)
+    return request<Page<PublicResourcePreview>>(`/v1/public/${encodeURIComponent(username)}/${encodeURIComponent(type)}?${search.toString()}`)
+  },
+
+  async getPublicResource(username: string, type: string, slug: string) {
+    const response = await request<APIEnvelope<PublicResource>>(`/v1/public/${encodeURIComponent(username)}/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`)
+    return response.data
   },
 }

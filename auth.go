@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,10 +12,13 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 	"golang.org/x/crypto/bcrypt"
 )
 
 const bcryptCost = 12
+
+const sharedServiceRole = "service"
 
 type Claims struct {
 	UID   string `json:"uid"`
@@ -95,6 +99,31 @@ func (app *application) authenticate(next func(w http.ResponseWriter, r *http.Re
 	}
 }
 
+func (app *application) authenticateSharedResource(next func(w http.ResponseWriter, r *http.Request, claims *Claims)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if app.matchesServiceToken(r.Header.Get("Authorization")) {
+			if r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodDelete {
+				writeError(w, http.StatusForbidden, "Service credentials are limited to shared resource mutations")
+				return
+			}
+			next(w, r.WithContext(withAuthenticationSource(r.Context(), bearerAuthentication)), &Claims{UID: bson.NilObjectID.Hex(), Role: sharedServiceRole})
+			return
+		}
+		app.authenticate(next)(w, r)
+	}
+}
+
+func (app *application) matchesServiceToken(authorization string) bool {
+	if app.config.ServiceToken == "" || !strings.HasPrefix(authorization, "Bearer ") {
+		return false
+	}
+	token := strings.TrimPrefix(authorization, "Bearer ")
+	if len(token) != len(app.config.ServiceToken) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(token), []byte(app.config.ServiceToken)) == 1
+}
+
 func (app *application) handleSignUp(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -103,42 +132,44 @@ func (app *application) handleSignUp(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
+		Username string `json:"username"`
 	}
 	if !decodeJSONBody(w, r, &request, false) {
 		return
 	}
 	request.Email = normalizeEmail(request.Email)
+	request.Username = normalizeNamespaceSlug(request.Username)
 	if err := validateSignUpCredentials(request.Email, request.Password); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := validateNamespaceSlug(request.Username); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	users := app.database.Collection("_users")
-	count, err := users.CountDocuments(ctx, bson.M{"email": request.Email})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Database query failed during user check")
-		return
-	}
-	if count > 0 {
-		writeError(w, http.StatusConflict, "User already exists")
-		return
-	}
 
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(request.Password), bcryptCost)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Error hashing password")
 		return
 	}
+	now := time.Now().UTC()
 	user := User{
 		ID:           bson.NewObjectID(),
 		Email:        request.Email,
 		PasswordHash: string(passwordHash),
 		Role:         "user",
-		CreatedAt:    time.Now(),
+		CreatedAt:    now,
 	}
-	if _, err := users.InsertOne(ctx, user); err != nil {
+	namespace := newPersonalNamespace(user.ID, request.Username, now)
+	if err := app.createAccountWithPersonalNamespace(ctx, user, namespace); err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			writeError(w, http.StatusConflict, "Email or username is already claimed")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "Failed to create user")
 		return
 	}
@@ -152,7 +183,7 @@ func (app *application) handleSignUp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to create browser session")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"token": token, "user": user})
+	writeJSON(w, http.StatusCreated, map[string]any{"token": token, "user": user, "namespace": namespace})
 }
 
 func (app *application) handleLogin(w http.ResponseWriter, r *http.Request) {

@@ -1,117 +1,122 @@
-# Integrate An Application
+# Integrate m-stash
 
-Use `https://m-stash.onrender.com` as the API base URL for the application owned by this m-stash deployment. m-stash is an application gateway, not a self-service multi-tenant database: independently operated applications need their own m-stash deployment, MongoDB database, `JWT_SECRET`, and collection policy.
+m-stash is a reusable identity and scoped-data API. A frontend can register users, give each one an immutable username, store profile-like records in their personal namespace, and read deployment-controlled shared data. A trusted backend can mutate shared state without receiving a user's password or MongoDB access.
 
-## 1. Prepare the gateway
-
-The service owner must complete these Render settings before connecting a separate browser application:
-
-1. In **Render > m-stash > Environment**, set `ALLOWED_ORIGINS` to the exact browser origin, for example `https://app.example.com`. Use a comma-separated list for multiple known origins.
-2. Redeploy the service after changing an environment variable.
-3. Keep `SESSION_COOKIE_SECURE=true` and `TRUST_PROXY=true` for Render HTTPS.
-
-The deployed service already permits the bundled `profiles` and `stashes` collections. Do not use `stashes` as an application model unless its owner-scoped fields are what your application needs.
-
-For a new collection, the service owner must add a deployment-owned policy and rebuild the Docker image. There is no API that lets a client change policy at runtime. For example, create `gateway.json`:
-
-```json
-{
-  "rules": {
-    "tasks": {
-      "read": { "ownerId": "$auth.uid" },
-      "write": { "ownerId": "$auth.uid" },
-      "allowed_write_fields": ["ownerId", "title", "completed"],
-      "restricted_write_fields": ["role", "createdAt"]
-    }
-  }
-}
-```
-
-Then include it in the image before deployment:
-
-```dockerfile
-COPY gateway.json /etc/m-stash/gateway.json
-```
-
-The Docker image already uses `/etc/m-stash/gateway.json` as `M_STASH_CONFIG`. A policy file replaces the built-in rule set, so include the `profiles` or `stashes` rules too when the application still needs them.
-
-## 2. Register or sign in a user
-
-Set the API base URL once:
+Set the API URL once:
 
 ```sh
 export API_URL='https://m-stash.onrender.com'
 ```
 
-Create an account, or call `/v1/auth/login` with the same body for an existing account:
+## Register users from a frontend
+
+Registration is intentionally open. Call it from your signup flow with the email, password, and username your product collected.
 
 ```sh
 curl --request POST "$API_URL/v1/auth/signup" \
   --header 'Content-Type: application/json' \
-  --data '{"email":"person@example.com","password":"use-a-long-unique-password"}'
+  --data '{"email":"ada@example.com","password":"a-long-unique-password","username":"ada"}'
 ```
 
-The response contains `token` and `user`. Send the token from a trusted server, native app, or other bearer-token client:
+The response includes a bearer `token`, a `user`, and a personal `namespace`. The same call also establishes an HttpOnly browser session when called from the m-stash origin.
+
+Use normal login to restore a session:
 
 ```sh
-export TOKEN='token from the signup or login response'
+curl --request POST "$API_URL/v1/auth/login" \
+  --header 'Content-Type: application/json' \
+  --data '{"email":"ada@example.com","password":"a-long-unique-password"}'
 ```
 
-For a browser hosted on the same origin as m-stash, signup and login also issue `HttpOnly` session cookies. Do not expose `MONGO_URI`, `JWT_SECRET`, an admin password, or a privileged service token to browser code.
+For a separate browser origin, configure `ALLOWED_ORIGINS` with the exact origin before production use. The current blank setting permits all origins for development but does not enable credentialed cross-origin cookies.
 
-## 3. Make an authenticated data request
+## Personal namespace API
 
-Every protected request is a `POST` to:
+Personal resources are automatically scoped to the authenticated caller. Do not submit an owner ID or namespace ID.
+
+```sh
+export TOKEN='token from signup or login'
+
+curl --request POST "$API_URL/v1/me/resources/profile" \
+  --header "Authorization: Bearer $TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "slug":"main",
+    "title":"Ada",
+    "summary":"Application profile",
+    "content":"# Ada",
+    "data":{"theme":"sunset"},
+    "visibility":"private"
+  }'
+```
+
+Use any valid type: `profile`, `preference`, `save`, `submission`, `portfolio`, or a product-specific term. Types are 3-32 lowercase letters, numbers, and hyphens; slugs are 3-64 characters using the same alphabet.
 
 ```text
-/v1/db/{collection}/{action}
+GET    /v1/me/namespace
+PUT    /v1/me/namespace
+GET    /v1/me/resources/{type}?limit=20
+GET    /v1/me/resources/{type}/{slug}
+PUT    /v1/me/resources/{type}/{slug}
+DELETE /v1/me/resources/{type}/{slug}
 ```
 
-Supported actions are `find`, `findOne`, `insertOne`, `updateOne`, and `deleteOne`. This sample uses the bundled owner-scoped `stashes` collection:
+Personal visibility is `private` or `public`. Public records resolve at `/{username}/{type}/{slug}` only if the personal namespace is public too.
+
+## Shared application API
+
+Each deployment has one shared control-plane scope. It is appropriate for server-owned or deployment-owned data including configuration, leaderboards, inventory catalogs, published announcements, and precomputed results.
+
+```text
+GET    /v1/shared/namespace
+GET    /v1/shared/resources/{type}?limit=20
+GET    /v1/shared/resources/{type}/{slug}
+POST   /v1/shared/resources/{type}
+PUT    /v1/shared/resources/{type}/{slug}
+DELETE /v1/shared/resources/{type}/{slug}
+```
+
+Every authenticated user may read shared records marked `authenticated` or `public`. Administrators may read all shared records and write any of them. Writes can also use the deployment's `SERVICE_TOKEN`:
 
 ```sh
-curl --request POST "$API_URL/v1/db/stashes/insertOne" \
-  --header "Authorization: Bearer $TOKEN" \
+curl --request PUT "$API_URL/v1/shared/resources/leaderboard/weekly" \
+  --header "Authorization: Bearer $SERVICE_TOKEN" \
   --header 'Content-Type: application/json' \
-  --data '{"payload":{"title":"First record","summary":"Created through m-stash","isPublic":false}}'
+  --data '{
+    "title":"Weekly leaderboard",
+    "summary":"Server-computed scores",
+    "content":"Updated by the scoring worker.",
+    "data":{"entries":[{"username":"ada","score":9001}]},
+    "visibility":"authenticated"
+  }'
 ```
 
-Read only the records the current policy permits:
+`SERVICE_TOKEN` is mutation-only: it cannot read shared resources, call personal routes, or act as a user. Keep it only in trusted backend infrastructure.
+
+Shared visibility has three values:
+
+| Value | Who can read it |
+| --- | --- |
+| `private` | Deployment administrators only. |
+| `authenticated` | Any signed-in user. |
+| `public` | Anyone via `/v1/public/shared/resources/{type}/{slug}`. |
+
+## Public routes
 
 ```sh
-curl --request POST "$API_URL/v1/db/stashes/find" \
-  --header "Authorization: Bearer $TOKEN" \
-  --header 'Content-Type: application/json' \
-  --data '{"query":{},"limit":20}'
+curl "$API_URL/v1/public/ada/profile/main"
+curl "$API_URL/v1/public/shared/resources/announcement/release-notes"
 ```
 
-The gateway adds the collection policy to every query and write. For owner-scoped rules, omit `ownerId` on inserts: m-stash writes it from the authenticated user. Do not treat client-supplied filters as authorization.
+Public collection endpoints use cursor pagination. Pass `page.nextCursor` as `cursor`; limits range from 1 through 100.
 
-## 4. Verify and operate
-
-Confirm a token for a downstream service without sharing `JWT_SECRET`:
+## Verify and operate
 
 ```sh
-curl "$API_URL/v1/auth/verify" \
-  --header "Authorization: Bearer $TOKEN"
-```
-
-Check the service contract and health during setup or monitoring:
-
-```sh
+curl "$API_URL/v1/auth/verify" --header "Authorization: Bearer $TOKEN"
 curl "$API_URL/.well-known/m-stash.json"
 curl "$API_URL/healthz"
 curl "$API_URL/readyz"
 ```
 
-Use `X-Request-ID` from every response when investigating a request. The optional WebSocket surface is `wss://m-stash.onrender.com/v1/ws/{collection}` and accepts the same bearer token plus the same action body as the HTTP API.
-
-## 5. Add public data only deliberately
-
-For the bundled sample collection, set `isPublic: true` only for records intended for anyone to read. Public discovery is separate from the database proxy:
-
-```text
-GET https://m-stash.onrender.com/v1/public/stashes?limit=20
-```
-
-Custom public routes should use purpose-built allowlisted projections. Do not make a private collection public by setting a broad proxy rule.
+Every signup and mutation uses a MongoDB transaction and writes a durable outbox event in the same commit. Run MongoDB as a replica set or sharded cluster.

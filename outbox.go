@@ -41,6 +41,7 @@ type outboxEvent struct {
 	SchemaVersion string         `bson:"schemaVersion" json:"schemaVersion"`
 	OccurredAt    time.Time      `bson:"occurredAt" json:"occurredAt"`
 	RequestID     string         `bson:"requestId" json:"requestId"`
+	NamespaceID   string         `bson:"namespaceId,omitempty" json:"namespaceId,omitempty"`
 	Actor         outboxActor    `bson:"actor" json:"actor"`
 	Resource      outboxResource `bson:"resource" json:"resource"`
 	Data          bson.M         `bson:"data" json:"data"`
@@ -48,9 +49,10 @@ type outboxEvent struct {
 }
 
 type mutationEvent struct {
-	Type       string
-	ResourceID string
-	Data       bson.M
+	Type        string
+	ResourceID  string
+	NamespaceID string
+	Data        bson.M
 }
 
 type mutationOutcome struct {
@@ -126,6 +128,7 @@ func newOutboxEvent(id bson.ObjectID, occurredAt time.Time, requestID string, cl
 		SchemaVersion: outboxSchemaVersion,
 		OccurredAt:    occurredAt,
 		RequestID:     requestID,
+		NamespaceID:   event.NamespaceID,
 		Actor:         outboxActor{ID: claims.UID, Role: claims.Role},
 		Resource:      outboxResource{Collection: collectionName, ID: event.ResourceID},
 		Data:          event.Data,

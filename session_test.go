@@ -17,7 +17,7 @@ func TestCookieAuthenticatedWriteRequiresCSRFToken(t *testing.T) {
 		t.Fatalf("generate access token: %v", err)
 	}
 
-	request := httptest.NewRequest(http.MethodPost, "/v1/me/stashes", nil)
+	request := httptest.NewRequest(http.MethodPost, "/v1/me/resources/project", nil)
 	request.AddCookie(&http.Cookie{Name: accessCookieName, Value: accessToken})
 	request.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "csrf-token"})
 	response := httptest.NewRecorder()

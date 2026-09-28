@@ -9,7 +9,7 @@ import (
 
 func TestApplicationHandlerServesClientRoute(t *testing.T) {
 	app := newApplication(Config{AllowedOrigins: []string{"*"}}, nil, nil)
-	request := httptest.NewRequest(http.MethodGet, "/app/posts", nil)
+	request := httptest.NewRequest(http.MethodGet, "/app/resources/project", nil)
 	response := httptest.NewRecorder()
 
 	app.Handler(nil).ServeHTTP(response, request)

@@ -43,24 +43,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create user email index: %v", err)
 	}
-	if err := bootstrapAdmin(ctx, database, appConfig); err != nil {
-		log.Fatalf("Failed to bootstrap administrator: %v", err)
-	}
-	_, err = database.Collection("profiles").Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "handle", Value: 1}},
-		Options: options.Index().SetUnique(true).SetSparse(true),
-	})
-	if err != nil {
-		log.Fatalf("❌ Failed to create profile handle index: %v", err)
-	}
-	_, err = database.Collection("stashes").Indexes().CreateMany(ctx, []mongo.IndexModel{
-		{Keys: bson.D{{Key: "ownerId", Value: 1}, {Key: "isPublic", Value: 1}, {Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}},
-		{Keys: bson.D{{Key: "ownerId", Value: 1}, {Key: "isPublic", Value: 1}, {Key: "tags", Value: 1}, {Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}},
-		{Keys: bson.D{{Key: "isPublic", Value: 1}, {Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}},
-		{Keys: bson.D{{Key: "isPublic", Value: 1}, {Key: "tags", Value: 1}, {Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}},
-	})
-	if err != nil {
-		log.Fatalf("❌ Failed to create public stash indexes: %v", err)
+	if err := ensureNamespaceIndexes(ctx, database); err != nil {
+		log.Fatalf("Failed to create namespace indexes: %v", err)
 	}
 	if err := ensureOutboxIndexes(ctx, database); err != nil {
 		log.Fatalf("Failed to create outbox indexes: %v", err)
@@ -71,14 +55,19 @@ func main() {
 	if err := ensureSessionIndexes(ctx, database); err != nil {
 		log.Fatalf("Failed to create browser-session indexes: %v", err)
 	}
+	app := newApplication(appConfig, database, client)
+	if err := ensureSharedNamespace(ctx, app); err != nil {
+		log.Fatalf("Failed to initialize shared namespace: %v", err)
+	}
+	if err := bootstrapAdmin(ctx, app); err != nil {
+		log.Fatalf("Failed to bootstrap administrator: %v", err)
+	}
 	log.Printf("✅ Connected to Mongo database: '%s'", appConfig.Database)
 	if appConfig.MetricsToken == "" {
 		log.Print("Metrics endpoint disabled because METRICS_TOKEN is not configured")
 	}
 
 	authRateLimiter := newAuthRateLimiter(database, 10, 5*time.Minute)
-	app := newApplication(appConfig, database, client)
-
 	server := &http.Server{
 		Addr:              ":" + appConfig.Port,
 		Handler:           app.Handler(authRateLimiter),

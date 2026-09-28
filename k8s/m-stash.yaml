@@ -8,24 +8,6 @@ data:
   jwt_issuer: m-stash
   jwt_audience: m-stash
   trust_proxy: "false"
-  gateway.json: |
-    {
-      "allowed_origins": ["https://app.example.com"],
-      "rules": {
-        "stashes": {
-          "read": {"$or": [{"ownerId": "$auth.uid"}, {"isPublic": true}]},
-          "write": {"ownerId": "$auth.uid"},
-          "allowed_write_fields": ["ownerId", "title", "summary", "content", "tags", "isPublic"],
-          "restricted_write_fields": ["role", "isVerified", "createdAt", "updatedAt"]
-        },
-        "profiles": {
-          "read": {"_id": "$auth.uid"},
-          "write": {"_id": "$auth.uid"},
-          "allowed_write_fields": ["_id", "handle", "displayName", "bio", "avatarURL", "links", "isPublic"],
-          "restricted_write_fields": ["role", "permissions", "email"]
-        }
-      }
-    }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -74,6 +56,24 @@ spec:
                 secretKeyRef:
                   name: m-stash-secrets
                   key: METRICS_TOKEN
+            - name: ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: m-stash-secrets
+                  key: ADMIN_EMAIL
+                  optional: true
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: m-stash-secrets
+                  key: ADMIN_PASSWORD
+                  optional: true
+            - name: SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: m-stash-secrets
+                  key: SERVICE_TOKEN
+                  optional: true
             - name: JWT_ISSUER
               valueFrom:
                 configMapKeyRef:
@@ -89,12 +89,6 @@ spec:
                 configMapKeyRef:
                   name: m-stash-config
                   key: trust_proxy
-            - name: M_STASH_CONFIG
-              value: /etc/m-stash/gateway.json
-          volumeMounts:
-            - name: config
-              mountPath: /etc/m-stash
-              readOnly: true
           readinessProbe:
             httpGet:
               path: /readyz
@@ -119,10 +113,6 @@ spec:
             capabilities:
               drop: ["ALL"]
             readOnlyRootFilesystem: true
-      volumes:
-        - name: config
-          configMap:
-            name: m-stash-config
 ---
 apiVersion: v1
 kind: Service

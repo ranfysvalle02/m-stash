@@ -12,15 +12,15 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-func TestParsePublicStashPageCursorRoundTrip(t *testing.T) {
+func TestParseResourcePageCursorRoundTrip(t *testing.T) {
 	createdAt := time.Date(2026, time.September, 28, 12, 0, 0, 0, time.UTC)
 	id := bson.NewObjectID()
-	cursor := encodePublicStashCursor(createdAt, id)
-	req := httptest.NewRequest("GET", "/v1/public/profiles/ada/stashes?limit=7&cursor="+cursor, nil)
+	cursor := encodeResourceCursor(createdAt, id)
+	req := httptest.NewRequest("GET", "/v1/public/ada/project?limit=7&cursor="+cursor, nil)
 
-	limit, parsedCursor, err := parsePublicStashPage(req)
+	limit, parsedCursor, err := parseResourcePage(req)
 	if err != nil {
-		t.Fatalf("parsePublicStashPage() error = %v", err)
+		t.Fatalf("parseResourcePage() error = %v", err)
 	}
 	if limit != 7 {
 		t.Fatalf("limit = %d, want 7", limit)
@@ -30,18 +30,18 @@ func TestParsePublicStashPageCursorRoundTrip(t *testing.T) {
 	}
 }
 
-func TestParsePublicStashPageRejectsInvalidLimit(t *testing.T) {
+func TestParseResourcePageRejectsInvalidLimit(t *testing.T) {
 	for _, rawLimit := range []string{"0", "101", "invalid"} {
-		req := httptest.NewRequest("GET", "/v1/public/profiles/ada/stashes?limit="+rawLimit, nil)
-		if _, _, err := parsePublicStashPage(req); err == nil {
+		req := httptest.NewRequest("GET", "/v1/public/ada/project?limit="+rawLimit, nil)
+		if _, _, err := parseResourcePage(req); err == nil {
 			t.Errorf("limit %q was accepted", rawLimit)
 		}
 	}
 }
 
-func TestWritePublicStashPageEncodesEmptyDataAsArray(t *testing.T) {
+func TestWriteResourcePageEncodesEmptyDataAsArray(t *testing.T) {
 	response := httptest.NewRecorder()
-	writePublicStashPage(response, make([]publicStashPreview, 0), defaultPublicPageSize, nil)
+	writeResourcePage(response, make([]resourcePreview, 0), defaultResourcePageSize)
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
@@ -57,12 +57,12 @@ func TestWritePublicStashPageEncodesEmptyDataAsArray(t *testing.T) {
 	}
 }
 
-func TestPublicStashCursorFilterUsesObjectID(t *testing.T) {
+func TestResourceCursorFilterUsesObjectID(t *testing.T) {
 	createdAt := time.Date(2026, time.September, 28, 12, 0, 0, 0, time.UTC)
 	id := bson.NewObjectID()
-	filter, err := publicStashCursorFilter(&publicStashCursor{CreatedAt: createdAt, ID: id.Hex()})
+	filter, err := resourceCursorFilter(&resourcePageCursor{CreatedAt: createdAt, ID: id.Hex()})
 	if err != nil {
-		t.Fatalf("publicStashCursorFilter() error = %v", err)
+		t.Fatalf("resourceCursorFilter() error = %v", err)
 	}
 
 	conditions := filter["$or"].(bson.A)
@@ -81,11 +81,12 @@ func TestNewOutboxEvent(t *testing.T) {
 		occurredAt,
 		"request-123",
 		&Claims{UID: "507f1f77bcf86cd799439011", Role: "user"},
-		"stashes",
+		resourceCollectionName,
 		&mutationEvent{
-			Type:       "m-stash.stashes.updateOne.v1",
-			ResourceID: "507f1f77bcf86cd799439012",
-			Data:       bson.M{"changedFields": []string{"title"}},
+			Type:        "m-stash.resources.updateOne.v1",
+			ResourceID:  "507f1f77bcf86cd799439012",
+			NamespaceID: "507f1f77bcf86cd799439013",
+			Data:        bson.M{"changedFields": []string{"title"}},
 		},
 	)
 
@@ -95,7 +96,7 @@ func TestNewOutboxEvent(t *testing.T) {
 	if event.SchemaVersion != outboxSchemaVersion || event.Delivery.State != "pending" || event.Delivery.Attempts != 0 {
 		t.Fatalf("event delivery contract = %#v", event)
 	}
-	if event.Actor.ID != "507f1f77bcf86cd799439011" || event.Resource.Collection != "stashes" || event.Resource.ID == "" {
+	if event.Actor.ID != "507f1f77bcf86cd799439011" || event.Resource.Collection != resourceCollectionName || event.Resource.ID == "" || event.NamespaceID != "507f1f77bcf86cd799439013" {
 		t.Fatalf("event actor/resource = %#v", event)
 	}
 }
@@ -109,20 +110,6 @@ func TestRateLimitIdentifierIsOpaqueAndWindowScoped(t *testing.T) {
 	}
 	if first == rateLimitIdentifier("signup", "203.0.113.5", windowStart) {
 		t.Fatal("rate limit identifier does not separate scopes")
-	}
-}
-
-func TestValidateClientQuery(t *testing.T) {
-	if err := validateClientQuery(map[string]any{"tags": map[string]any{"$in": []any{"go", "mongo"}}}, 0); err != nil {
-		t.Fatalf("allowed query rejected: %v", err)
-	}
-	for _, query := range []map[string]any{
-		{"$where": "sleep(1000)"},
-		{"$expr": map[string]any{"$eq": []any{1, 1}}},
-	} {
-		if err := validateClientQuery(query, 0); err == nil {
-			t.Errorf("unsafe query %v was accepted", query)
-		}
 	}
 }
 
@@ -171,15 +158,32 @@ func TestAuthenticateRequiresConfiguredIssuerAndAudience(t *testing.T) {
 	}
 }
 
-func TestValidateQueryLimit(t *testing.T) {
-	if limit, err := validateQueryLimit(0); err != nil || limit != defaultQueryPageSize {
-		t.Fatalf("default query limit = %d, %v", limit, err)
+func TestServiceCredentialIsLimitedToSharedResourceMutations(t *testing.T) {
+	app := newApplication(Config{ServiceToken: "test-service-token-with-at-least-32-characters"}, nil, nil)
+	handled := false
+	handler := app.authenticateSharedResource(func(w http.ResponseWriter, _ *http.Request, claims *Claims) {
+		handled = true
+		if claims.Role != sharedServiceRole || claims.UID != bson.NilObjectID.Hex() {
+			t.Fatalf("service claims = %#v", claims)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	mutation := httptest.NewRequest(http.MethodPost, "/v1/shared/resources/score", nil)
+	mutation.Header.Set("Authorization", "Bearer "+app.config.ServiceToken)
+	mutationResponse := httptest.NewRecorder()
+	handler(mutationResponse, mutation)
+	if !handled || mutationResponse.Code != http.StatusNoContent {
+		t.Fatalf("service mutation handled=%t status=%d", handled, mutationResponse.Code)
 	}
-	if limit, err := validateQueryLimit(maxQueryPageSize); err != nil || limit != maxQueryPageSize {
-		t.Fatalf("maximum query limit = %d, %v", limit, err)
-	}
-	if _, err := validateQueryLimit(maxQueryPageSize + 1); err == nil {
-		t.Fatal("oversized query limit was accepted")
+
+	handled = false
+	read := httptest.NewRequest(http.MethodGet, "/v1/shared/resources/score", nil)
+	read.Header.Set("Authorization", "Bearer "+app.config.ServiceToken)
+	readResponse := httptest.NewRecorder()
+	handler(readResponse, read)
+	if handled || readResponse.Code != http.StatusForbidden {
+		t.Fatalf("service read handled=%t status=%d", handled, readResponse.Code)
 	}
 }
 
@@ -200,6 +204,14 @@ func TestServiceManifest(t *testing.T) {
 		t.Fatalf("apiVersion = %v, want v1", manifest["apiVersion"])
 	}
 	capabilities := manifest["capabilities"].(map[string]any)
+	namespace := capabilities["namespace"].(map[string]any)
+	if namespace["resources"] != "/v1/me/resources/{type}/{slug}" || namespace["public"] != "/v1/public/{username}/{type}/{slug}" {
+		t.Fatalf("namespace capability = %#v", namespace)
+	}
+	sharedNamespace := capabilities["sharedNamespace"].(map[string]any)
+	if sharedNamespace["publicResources"] != "/v1/public/shared/resources/{type}/{slug}" {
+		t.Fatalf("shared namespace capability = %#v", sharedNamespace)
+	}
 	outbox := capabilities["eventOutbox"].(map[string]any)
 	if outbox["delivery"] != "transactional-outbox" || outbox["schemaVersion"] != outboxSchemaVersion {
 		t.Fatalf("outbox capability = %#v", outbox)
@@ -227,7 +239,7 @@ func TestApplicationHandlerHealth(t *testing.T) {
 
 func TestMetricsEndpointRequiresToken(t *testing.T) {
 	app := newApplication(Config{MetricsToken: "test-metrics-token-with-at-least-32-characters"}, nil, nil)
-	app.metrics.recordOutboxEvent("m-stash.stashes.insertOne.v1")
+	app.metrics.recordOutboxEvent("m-stash.resources.insertOne.v1")
 	app.metrics.recordRateLimitRejection()
 
 	unauthorizedRequest := httptest.NewRequest(http.MethodGet, "/metrics", nil)
@@ -247,19 +259,19 @@ func TestMetricsEndpointRequiresToken(t *testing.T) {
 	if contentType := response.Header().Get("Content-Type"); contentType != "text/plain; version=0.0.4; charset=utf-8" {
 		t.Fatalf("metrics content type = %q", contentType)
 	}
-	if body := response.Body.String(); !strings.Contains(body, "m_stash_outbox_events_total{type=\"m-stash.stashes.insertOne.v1\"} 1") {
+	if body := response.Body.String(); !strings.Contains(body, "m_stash_outbox_events_total{type=\"m-stash.resources.insertOne.v1\"} 1") {
 		t.Fatalf("outbox metric missing from response: %s", body)
 	} else if !strings.Contains(body, "m_stash_auth_rate_limit_rejections_total 1") {
 		t.Fatalf("rate-limit metric missing from response: %s", body)
 	}
 }
 
-func TestDatabaseProxyBlocksInternalCollections(t *testing.T) {
-	app := newApplication(Config{}, nil, nil)
-	request := httptest.NewRequest(http.MethodPost, "/v1/db/_m_stash_outbox/find", nil)
+func TestApplicationHandlerDoesNotExposeRetiredGatewayRoute(t *testing.T) {
+	app := newApplication(Config{AllowedOrigins: []string{"*"}}, nil, nil)
+	request := httptest.NewRequest(http.MethodPost, "/v1/db/resources/find", nil)
 	response := httptest.NewRecorder()
-	app.handleDatabaseProxy(response, request, &Claims{})
-	if response.Code != http.StatusForbidden {
-		t.Fatalf("internal collection status = %d, want %d", response.Code, http.StatusForbidden)
+	app.Handler(nil).ServeHTTP(response, request)
+	if response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("retired gateway status = %d, want %d", response.Code, http.StatusMethodNotAllowed)
 	}
 }

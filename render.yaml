@@ -17,6 +17,8 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
+      - key: SERVICE_TOKEN
+        sync: false
       - key: METRICS_TOKEN
         generateValue: true
       - key: ALLOWED_ORIGINS

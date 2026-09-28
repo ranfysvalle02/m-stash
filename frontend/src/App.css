@@ -92,6 +92,9 @@ input::placeholder, textarea::placeholder { color: #92948f; }
 .switch-row { align-items: start; border-top: 1px solid #ded6c9; border-bottom: 1px solid #ded6c9; display: flex; gap: .75rem; padding: 1rem 0; }
 .switch-row input { accent-color: #e95136; flex: 0 0 auto; min-height: 1rem; margin: .16rem 0 0; width: 1rem; }
 .switch-row small { color: #71808a; display: block; font-size: .8rem; font-weight: 500; line-height: 1.45; margin-top: .2rem; }
+.visibility-select { border-top: 1px solid #ded6c9; border-bottom: 1px solid #ded6c9; padding: 1rem 0; }
+.visibility-select select { background: #fffdf8; border: 1px solid #cfc8ba; border-radius: 5px; color: #18222d; min-height: 2.65rem; padding: .65rem .72rem; width: 100%; }
+.visibility-select small { color: #71808a; font-size: .8rem; font-weight: 500; line-height: 1.45; }
 .form-actions { align-items: center; display: flex; gap: 1rem; justify-content: flex-end; }
 .save-state { align-items: center; color: #688078; display: flex; font-size: .8rem; gap: .3rem; margin: 0; }
 .save-state.error { color: #b3412d; }
@@ -214,3 +217,7 @@ input, textarea { transition: border-color .2s ease, box-shadow .25s ease, backg
 .empty-actions { display: flex; flex-wrap: wrap; gap: .7rem; }
 
 @media (max-width: 760px) { .activation-state, .discovery-empty { padding: 2.25rem 1.2rem; }.empty-actions { width: 100%; }.empty-actions .button { flex: 1; } }
+
+.visibility-select { border-color: var(--line); }
+.visibility-select select { background: rgba(3, 17, 23, .86); border-color: var(--line); color: var(--text); }
+.visibility-select small { color: var(--muted); }

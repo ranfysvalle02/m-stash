@@ -35,15 +35,13 @@ func (app *application) Handler(rateLimiter *authRateLimiter) http.Handler {
 	mux.HandleFunc("/v1/auth/refresh", app.corsMiddleware(app.handleSessionRefresh))
 	mux.HandleFunc("/v1/auth/logout", app.corsMiddleware(app.handleSessionLogout))
 	mux.HandleFunc("/v1/auth/verify", app.corsMiddleware(app.authenticate(handleTokenVerification)))
-	mux.HandleFunc("/v1/me/profile", app.corsMiddleware(app.authenticate(app.handleMeProfile)))
-	mux.HandleFunc("/v1/me/stashes", app.corsMiddleware(app.authenticate(app.handleMeStashes)))
-	mux.HandleFunc("/v1/me/stashes/", app.corsMiddleware(app.authenticate(app.handleMeStashes)))
+	mux.HandleFunc("/v1/me/namespace", app.corsMiddleware(app.authenticate(app.handleMeNamespace)))
+	mux.HandleFunc("/v1/me/resources/", app.corsMiddleware(app.authenticate(app.handleMeResources)))
+	mux.HandleFunc("/v1/shared/namespace", app.corsMiddleware(app.authenticate(app.handleSharedNamespace)))
+	mux.HandleFunc("/v1/shared/resources/", app.corsMiddleware(app.authenticateSharedResource(app.handleSharedResources)))
 	mux.HandleFunc("/.well-known/m-stash.json", app.corsMiddleware(app.handleServiceManifest))
-	mux.HandleFunc("/v1/public/stashes", app.corsMiddleware(app.handlePublicDiscovery))
-	mux.HandleFunc("/v1/public/stashes/", app.corsMiddleware(app.handlePublicDiscovery))
-	mux.HandleFunc("/v1/public/profiles/", app.corsMiddleware(app.handlePublicProfile))
-	mux.HandleFunc("/v1/db/", app.corsMiddleware(app.authenticate(app.handleDatabaseProxy)))
-	mux.HandleFunc("/v1/ws/", app.authenticate(app.handleDatabaseWebSocket))
+	mux.HandleFunc("/v1/public/shared/resources/", app.corsMiddleware(app.handlePublicSharedResources))
+	mux.HandleFunc("/v1/public/", app.corsMiddleware(app.handlePublicNamespace))
 	mux.HandleFunc("/metrics", app.handleMetrics)
 	mux.HandleFunc("/healthz", app.handleHealth)
 	mux.HandleFunc("/readyz", app.handleReadiness)
@@ -66,9 +64,18 @@ func (app *application) handleServiceManifest(w http.ResponseWriter, r *http.Req
 			"audience":             app.config.JWTAudience,
 		},
 		"capabilities": map[string]any{
-			"publicDiscovery": "/v1/public/stashes",
-			"webSocket":       "/v1/ws/{collection}",
-			"databaseProxy":   "/v1/db/{collection}/{action}",
+			"namespace": map[string]string{
+				"mine":      "/v1/me/namespace",
+				"resources": "/v1/me/resources/{type}/{slug}",
+				"public":    "/v1/public/{username}/{type}/{slug}",
+			},
+			"sharedNamespace": map[string]string{
+				"namespace":       "/v1/shared/namespace",
+				"resources":       "/v1/shared/resources/{type}/{slug}",
+				"publicResources": "/v1/public/shared/resources/{type}/{slug}",
+				"read":            "authenticated users",
+				"write":           "administrators or trusted services",
+			},
 			"eventOutbox": map[string]any{
 				"delivery":      "transactional-outbox",
 				"schemaVersion": outboxSchemaVersion,

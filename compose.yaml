@@ -1,30 +1,10 @@
 services:
-  mongo-keyfile:
-    image: mongo:8
-    restart: "no"
-    command:
-      - /bin/sh
-      - -ec
-      - |
-        if [ ! -f /etc/mongo-keyfile/keyfile ]; then
-          umask 077
-          head -c 756 /dev/urandom | base64 > /etc/mongo-keyfile/keyfile
-        fi
-        chown 999:999 /etc/mongo-keyfile/keyfile
-        chmod 400 /etc/mongo-keyfile/keyfile
-    volumes:
-      - mongo-keyfile:/etc/mongo-keyfile
-
   mongo:
     image: mongo:8
     restart: unless-stopped
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/keyfile"]
-    depends_on:
-      mongo-keyfile:
-        condition: service_completed_successfully
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     volumes:
       - mongo-data:/data/db
-      - mongo-keyfile:/etc/mongo-keyfile:ro
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s
@@ -42,7 +22,7 @@ services:
       - /bin/sh
       - -ec
       - |
-        mongosh "mongodb://mongo:27017/?replicaSet=rs0" --quiet --eval '
+        mongosh "mongodb://mongo:27017/?directConnection=true" --quiet --eval '
           try { rs.status() } catch (error) { rs.initiate({_id: "rs0", members: [{_id: 0, host: "mongo:27017"}]}) }
           while (!db.hello().isWritablePrimary) { sleep(1) }
         '
@@ -63,6 +43,7 @@ services:
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      SERVICE_TOKEN: ${SERVICE_TOKEN:-}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
     depends_on:
@@ -77,4 +58,3 @@ services:
 
 volumes:
   mongo-data:
-  mongo-keyfile:

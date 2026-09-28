@@ -145,16 +145,12 @@ func metricRoute(path string) string {
 		return "/v1/auth/login"
 	case path == "/v1/auth/verify":
 		return "/v1/auth/verify"
-	case strings.HasPrefix(path, "/v1/db/"):
-		return "/v1/db/{collection}/{action}"
-	case strings.HasPrefix(path, "/v1/ws/"):
-		return "/v1/ws/{collection}"
-	case strings.HasPrefix(path, "/v1/public/profiles/"):
-		return "/v1/public/profiles/{handle}"
-	case strings.HasPrefix(path, "/v1/public/stashes/"):
-		return "/v1/public/stashes/{id}"
-	case path == "/v1/public/stashes":
-		return "/v1/public/stashes"
+	case path == "/v1/me/namespace":
+		return "/v1/me/namespace"
+	case strings.HasPrefix(path, "/v1/me/resources/"):
+		return "/v1/me/resources/{type}/{slug}"
+	case strings.HasPrefix(path, "/v1/public/"):
+		return "/v1/public/{username}/{type}/{slug}"
 	default:
 		return "unmatched"
 	}
