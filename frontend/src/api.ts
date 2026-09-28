@@ -69,6 +69,13 @@ export interface Page<T> {
   }
 }
 
+export interface DocumentPage {
+  data: Record<string, unknown>[]
+  page: {
+    limit: number
+  }
+}
+
 interface APIEnvelope<T> {
   data: T
 }
@@ -265,5 +272,12 @@ export const api = {
       search.set('cursor', cursor)
     }
     return request<Page<PublicStash>>(`/v1/public/profiles/${handle}/stashes?${search.toString()}`)
+  },
+
+  async findDocuments(collection: string, query: Record<string, unknown>, limit = 30) {
+    return request<DocumentPage>(`/v1/db/${encodeURIComponent(collection)}/find`, {
+      method: 'POST',
+      body: { query, limit },
+    })
   },
 }

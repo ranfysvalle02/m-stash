@@ -1,10 +1,10 @@
 # m-stash
 
-`m-stash` is a small Go gateway for MongoDB applications. It owns signup and login, verifies JWTs, applies document-level MongoDB JSON policies, and exposes a deliberate public-profile surface without exposing database credentials to browsers.
+`m-stash` is a Go gateway for MongoDB applications. It owns signup and login, verifies JWTs, applies document-level MongoDB JSON policies, and exposes deliberate public data surfaces without exposing database credentials to browsers. It fits profiles, inventories, leaderboards, operational state, and the included flexible `stashes` starter collection.
 
-## Creator workspace
+## Embedded workspace
 
-The gateway serves an embedded, same-origin creator workspace at `/`. It includes signup and login, first-run profile setup, a Markdown post editor with preview and publish controls, owner-only drafts, public profiles, and global discovery. It is compiled into the same Go binary and Docker image as the API, so no second frontend deployment is required.
+The gateway serves an embedded, same-origin application workspace at `/`. It includes signup and login, optional profiles, a flexible stash editor with private/public sharing, policy-backed record inspection, public profiles, and global discovery. It is compiled into the same Go binary and Docker image as the API, so no second frontend deployment is required.
 
 For local UI development, start the API on port `4000` and run `npm --prefix frontend run dev`; Vite proxies `/v1` requests to the API. Run `make build` to compile the production UI and Go binary together, or `make test` to build the UI before running Go tests.
 
@@ -17,7 +17,7 @@ The default configuration separates identity, private data, and public data:
 | `_users` | Gateway only | Email, password hash, role, and account metadata. Never available through the database proxy. |
 | `profiles` | Owner through authenticated API | A user's editable profile document. Its `_id` is the authenticated user's ID. |
 | `GET /v1/public/profiles/{handle}` | Anyone | A stable public profile page. Only `handle`, `displayName`, `bio`, `avatarURL`, and `links` are returned. |
-| `stashes` | Owner-managed; signed-in readers can also see public stashes | A user's posts, notes, or saved work. Each stash is private by default or publishable with `isPublic: true`. |
+| `stashes` | Owner-managed; signed-in readers can also see public stashes | Flexible owned items: saved context, release artifacts, shared resources, or any lightweight app record. Each stash is private by default and can be shared with `isPublic: true`. |
 | `GET /v1/public/profiles/{handle}/stashes` | Anyone | Cursor-paginated public stashes for one published profile, returned with a safe public projection. |
 | `GET /v1/public/stashes` | Anyone | Global cursor-paginated discovery feed of compact public-stash previews. |
 | `GET /v1/public/stashes/{id}` | Anyone | Full public content for one published stash. |
@@ -141,7 +141,7 @@ Check readiness with `curl http://localhost:4000/healthz`, then open `http://loc
 
 ### Docker Compose
 
-The included [compose.yaml](compose.yaml) starts a single-node MongoDB replica set and the gateway together. Copy the example environment file, replace all placeholders, then start the stack:
+The included [compose.yaml](compose.yaml) starts an unauthenticated single-node MongoDB replica set on its private Docker network and the gateway together. This is intentionally for local development only; production must use a secured MongoDB deployment. Copy the example environment file, replace its secret placeholders, then start the stack:
 
 ```sh
 cp .env.example .env

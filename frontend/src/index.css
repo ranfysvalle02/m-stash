@@ -1,6 +1,7 @@
 :root {
-  color: #18222d;
-  background: #f4f1e8;
+  color: #f1fff7;
+  background: #061217;
+  color-scheme: dark;
   font-family: 'Avenir Next', Avenir, 'Century Gothic', sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -9,7 +10,7 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; min-height: 100svh; }
+body { background: #061217; margin: 0; min-width: 320px; min-height: 100svh; }
 button, input, textarea { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { cursor: pointer; }
