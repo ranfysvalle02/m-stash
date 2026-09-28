@@ -83,8 +83,8 @@ func ensureOutboxIndexes(ctx context.Context, database *mongo.Database) error {
 	return nil
 }
 
-func executeMutationWithOutbox(ctx context.Context, claims *Claims, collectionName, action string, mutate func(context.Context) (mutationOutcome, error)) (any, error) {
-	session, err := mongoClient.StartSession()
+func (app *application) executeMutationWithOutbox(ctx context.Context, claims *Claims, collectionName, action string, mutate func(context.Context) (mutationOutcome, error)) (any, error) {
+	session, err := app.mongoClient.StartSession()
 	if err != nil {
 		return nil, fmt.Errorf("start MongoDB transaction: %w", err)
 	}
@@ -104,7 +104,7 @@ func executeMutationWithOutbox(ctx context.Context, claims *Claims, collectionNa
 		}
 
 		event := newOutboxEvent(eventID, occurredAt, requestIDFromContext(ctx), claims, collectionName, outcome.Event)
-		if _, err := db.Collection(outboxCollectionName).InsertOne(transactionContext, event); err != nil {
+		if _, err := app.database.Collection(outboxCollectionName).InsertOne(transactionContext, event); err != nil {
 			return nil, fmt.Errorf("write outbox event: %w", err)
 		}
 		emittedEventType = event.Type
@@ -114,7 +114,7 @@ func executeMutationWithOutbox(ctx context.Context, claims *Claims, collectionNa
 		return nil, err
 	}
 	if emittedEventType != "" {
-		metrics.recordOutboxEvent(emittedEventType)
+		app.metrics.recordOutboxEvent(emittedEventType)
 	}
 	return result, nil
 }

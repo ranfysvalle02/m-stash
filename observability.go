@@ -5,10 +5,8 @@ import (
 	"context"
 	"crypto/subtle"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -40,11 +38,6 @@ type metricsRegistry struct {
 	outboxEvent map[string]uint64
 	rateLimited uint64
 }
-
-var (
-	metrics = newMetricsRegistry()
-	logger  = slog.New(slog.NewJSONHandler(os.Stdout, nil))
-)
 
 func newMetricsRegistry() *metricsRegistry {
 	return &metricsRegistry{
@@ -83,7 +76,7 @@ func (registry *metricsRegistry) recordRateLimitRejection() {
 	registry.mu.Unlock()
 }
 
-func requestIDMiddleware(next http.Handler) http.Handler {
+func (app *application) requestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := incomingRequestID(r.Header.Get("X-Request-ID"))
 		w.Header().Set("X-Request-ID", requestID)
@@ -91,7 +84,7 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 
 		route := metricRoute(r.URL.Path)
 		startedAt := time.Now()
-		metrics.requestStarted()
+		app.metrics.requestStarted()
 		response := &observabilityResponseWriter{ResponseWriter: w}
 		defer func() {
 			status := response.status
@@ -99,8 +92,8 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 				status = http.StatusOK
 			}
 			duration := time.Since(startedAt)
-			metrics.observeRequest(r.Method, route, status, duration)
-			logger.Info("http_request",
+			app.metrics.observeRequest(r.Method, route, status, duration)
+			app.logger.Info("http_request",
 				"request_id", requestID,
 				"method", r.Method,
 				"route", route,
@@ -167,26 +160,26 @@ func metricRoute(path string) string {
 	}
 }
 
-func handleMetrics(w http.ResponseWriter, r *http.Request) {
+func (app *application) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	if config.MetricsToken == "" || !validMetricsToken(r.Header.Get("Authorization")) {
+	if app.config.MetricsToken == "" || !app.validMetricsToken(r.Header.Get("Authorization")) {
 		http.NotFound(w, r)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(metrics.prometheus())
+	_, _ = w.Write(app.metrics.prometheus())
 }
 
-func validMetricsToken(authorization string) bool {
+func (app *application) validMetricsToken(authorization string) bool {
 	providedToken, ok := strings.CutPrefix(authorization, "Bearer ")
 	if !ok {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(providedToken), []byte(config.MetricsToken)) == 1
+	return subtle.ConstantTimeCompare([]byte(providedToken), []byte(app.config.MetricsToken)) == 1
 }
 
 func (registry *metricsRegistry) prometheus() []byte {

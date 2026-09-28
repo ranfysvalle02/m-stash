@@ -93,8 +93,8 @@ func rateLimitIdentifier(scope, key string, windowStart time.Time) string {
 	return hex.EncodeToString(digest[:])
 }
 
-func clientIP(r *http.Request) string {
-	if config.TrustProxy && r.Header.Get("X-Forwarded-For") != "" {
+func clientIP(r *http.Request, trustProxy bool) string {
+	if trustProxy && r.Header.Get("X-Forwarded-For") != "" {
 		fwd := r.Header.Get("X-Forwarded-For")
 		return strings.TrimSpace(strings.Split(fwd, ",")[0])
 	}
@@ -104,16 +104,16 @@ func clientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-func rateLimitMiddleware(limiter *authRateLimiter, scope string, next http.HandlerFunc) http.HandlerFunc {
+func (app *application) rateLimitMiddleware(limiter *authRateLimiter, scope string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		allowed, err := limiter.allow(r.Context(), scope, clientIP(r))
+		allowed, err := limiter.allow(r.Context(), scope, clientIP(r, app.config.TrustProxy))
 		if err != nil {
-			logger.Error("authentication rate-limit check failed", "request_id", requestIDFromContext(r.Context()), "scope", scope, "error", err)
+			app.logger.Error("authentication rate-limit check failed", "request_id", requestIDFromContext(r.Context()), "scope", scope, "error", err)
 			writeError(w, http.StatusServiceUnavailable, "Authentication is temporarily unavailable")
 			return
 		}
 		if !allowed {
-			metrics.recordRateLimitRejection()
+			app.metrics.recordRateLimitRejection()
 			writeError(w, http.StatusTooManyRequests, "Too many attempts, please try again later")
 			return
 		}

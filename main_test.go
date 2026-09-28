@@ -109,10 +109,8 @@ func TestValidateClientQuery(t *testing.T) {
 }
 
 func TestAuthenticateRequiresConfiguredIssuerAndAudience(t *testing.T) {
-	originalConfig := config
-	t.Cleanup(func() { config = originalConfig })
-	config = Config{JWTSecret: "test-secret", JWTIssuer: "test-issuer", JWTAudience: "test-audience"}
-	token, err := generateJWT("507f1f77bcf86cd799439011", "ada@example.com", "user")
+	app := newApplication(Config{JWTSecret: "test-secret", JWTIssuer: "test-issuer", JWTAudience: "test-audience"}, nil, nil)
+	token, err := app.generateJWT("507f1f77bcf86cd799439011", "ada@example.com", "user")
 	if err != nil {
 		t.Fatalf("generateJWT() error = %v", err)
 	}
@@ -120,7 +118,7 @@ func TestAuthenticateRequiresConfiguredIssuerAndAudience(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/auth/verify", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
-	authenticate(func(w http.ResponseWriter, r *http.Request, claims *Claims) {
+	app.authenticate(func(w http.ResponseWriter, r *http.Request, claims *Claims) {
 		if claims.Subject != claims.UID {
 			t.Errorf("subject %q does not match uid %q", claims.Subject, claims.UID)
 		}
@@ -141,13 +139,13 @@ func TestAuthenticateRequiresConfiguredIssuerAndAudience(t *testing.T) {
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		},
 	}
-	invalidToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, invalidClaims).SignedString([]byte(config.JWTSecret))
+	invalidToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, invalidClaims).SignedString([]byte(app.config.JWTSecret))
 	if err != nil {
 		t.Fatalf("sign invalid token: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+invalidToken)
 	response = httptest.NewRecorder()
-	authenticate(func(w http.ResponseWriter, r *http.Request, claims *Claims) {
+	app.authenticate(func(w http.ResponseWriter, r *http.Request, claims *Claims) {
 		w.WriteHeader(http.StatusNoContent)
 	})(response, req)
 	if response.Code != http.StatusForbidden {
@@ -168,13 +166,11 @@ func TestValidateQueryLimit(t *testing.T) {
 }
 
 func TestServiceManifest(t *testing.T) {
-	originalConfig := config
-	t.Cleanup(func() { config = originalConfig })
-	config = Config{JWTIssuer: "test-issuer", JWTAudience: "test-audience"}
+	app := newApplication(Config{JWTIssuer: "test-issuer", JWTAudience: "test-audience"}, nil, nil)
 
 	request := httptest.NewRequest(http.MethodGet, "/.well-known/m-stash.json", nil)
 	response := httptest.NewRecorder()
-	handleServiceManifest(response, request)
+	app.handleServiceManifest(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("manifest status = %d, want %d", response.Code, http.StatusOK)
 	}
@@ -192,29 +188,41 @@ func TestServiceManifest(t *testing.T) {
 	}
 }
 
+func TestApplicationHandlerHealth(t *testing.T) {
+	app := newApplication(Config{AllowedOrigins: []string{"*"}}, nil, nil)
+	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	response := httptest.NewRecorder()
+
+	app.Handler(nil).ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("health status = %d, want %d", response.Code, http.StatusOK)
+	}
+	var health map[string]string
+	if err := json.NewDecoder(response.Body).Decode(&health); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if health["status"] != "ok" {
+		t.Fatalf("health status payload = %q, want ok", health["status"])
+	}
+}
+
 func TestMetricsEndpointRequiresToken(t *testing.T) {
-	originalConfig := config
-	originalMetrics := metrics
-	t.Cleanup(func() {
-		config = originalConfig
-		metrics = originalMetrics
-	})
-	config = Config{MetricsToken: "test-metrics-token-with-at-least-32-characters"}
-	metrics = newMetricsRegistry()
-	metrics.recordOutboxEvent("m-stash.stashes.insertOne.v1")
-	metrics.recordRateLimitRejection()
+	app := newApplication(Config{MetricsToken: "test-metrics-token-with-at-least-32-characters"}, nil, nil)
+	app.metrics.recordOutboxEvent("m-stash.stashes.insertOne.v1")
+	app.metrics.recordRateLimitRejection()
 
 	unauthorizedRequest := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	unauthorizedResponse := httptest.NewRecorder()
-	handleMetrics(unauthorizedResponse, unauthorizedRequest)
+	app.handleMetrics(unauthorizedResponse, unauthorizedRequest)
 	if unauthorizedResponse.Code != http.StatusNotFound {
 		t.Fatalf("unauthorized metrics status = %d, want %d", unauthorizedResponse.Code, http.StatusNotFound)
 	}
 
 	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-	request.Header.Set("Authorization", "Bearer "+config.MetricsToken)
+	request.Header.Set("Authorization", "Bearer "+app.config.MetricsToken)
 	response := httptest.NewRecorder()
-	handleMetrics(response, request)
+	app.handleMetrics(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("metrics status = %d, want %d", response.Code, http.StatusOK)
 	}
@@ -229,9 +237,10 @@ func TestMetricsEndpointRequiresToken(t *testing.T) {
 }
 
 func TestDatabaseProxyBlocksInternalCollections(t *testing.T) {
+	app := newApplication(Config{}, nil, nil)
 	request := httptest.NewRequest(http.MethodPost, "/v1/db/_m_stash_outbox/find", nil)
 	response := httptest.NewRecorder()
-	handleDatabaseProxy(response, request, &Claims{})
+	app.handleDatabaseProxy(response, request, &Claims{})
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("internal collection status = %d, want %d", response.Code, http.StatusForbidden)
 	}
