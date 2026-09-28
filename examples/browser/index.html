@@ -66,12 +66,12 @@
       <section class="auth-layout" id="auth-shell">
         <div class="intro">
           <p class="eyebrow">Browser reference implementation</p>
-          <h1>Make identity the data boundary.</h1>
-          <p>A deliberately small client for the m-stash API. Signed-in people receive a private data home; the deployment owns shared app facts such as its name, version, and configuration. The browser never supplies an owner ID.</p>
+          <h1>Two scopes. One access model.</h1>
+          <p>A deliberately small client for the m-stash API. Signed-in people own personal records; the deployment owns shared app records such as name, version, and configuration. The browser never supplies an owner ID.</p>
           <ol class="value-list">
-            <li><strong>01</strong><span>Create an account with a permanent username and private data home.</span></li>
-            <li><strong>02</strong><span>Save typed resources without sending an owner or namespace ID.</span></li>
-            <li><strong>03</strong><span>Read shared app data, from release configuration to leaderboards, managed by the deployment.</span></li>
+            <li><strong>01</strong><span>Create an account with a permanent username and personal scope.</span></li>
+            <li><strong>02</strong><span>Save typed records without sending an owner or namespace ID.</span></li>
+            <li><strong>03</strong><span>Read deployment-owned app records, from release configuration to leaderboards.</span></li>
           </ol>
         </div>
         <div class="auth-station">
@@ -101,8 +101,8 @@
           <aside class="workspace-sidebar">
             <div class="identity"><p class="eyebrow">Active session</p><div class="identity-email" id="identity-email"></div><p class="identity-role" id="identity-role"></p></div>
             <nav class="workspace-tabs" aria-label="Workspace">
-              <button aria-controls="personal-panel" aria-selected="true" data-tab="personal" type="button">Personal data</button>
-              <button aria-controls="shared-panel" aria-selected="false" data-tab="shared" type="button">Shared data</button>
+              <button aria-controls="personal-panel" aria-selected="true" data-tab="personal" type="button">Personal scope</button>
+              <button aria-controls="shared-panel" aria-selected="false" data-tab="shared" type="button">Shared app data</button>
               <button aria-controls="inspector-panel" aria-selected="false" data-tab="inspector" type="button">Inspector</button>
             </nav>
             <button class="button secondary danger" id="sign-out" type="button">Clear local token</button>
@@ -110,8 +110,8 @@
           </aside>
           <div class="workspace-main">
             <section class="workspace-panel" id="personal-panel" role="tabpanel">
-              <div class="workspace-head"><div><p class="eyebrow">Your namespace</p><h2>Personal data</h2></div><p>Save one resource at a time. The first save creates it; later saves replace the same type and slug.</p></div>
-              <div class="namespace-strip"><div><strong id="namespace-name">Loading your namespace...</strong><p id="namespace-detail">Your namespace is resolved from the token, not from this form.</p></div><button class="button secondary" id="load-namespace" type="button">Refresh</button></div>
+              <div class="workspace-head"><div><p class="eyebrow">Your personal scope</p><h2>Personal data</h2></div><p>Save one record at a time. The first save creates it; later saves replace the same type and slug.</p></div>
+              <div class="namespace-strip"><div><strong id="namespace-name">Loading your personal scope...</strong><p id="namespace-detail">Your scope is resolved from the token, not from this form.</p></div><button class="button secondary" id="load-namespace" type="button">Refresh</button></div>
               <form id="resource-form">
                 <div class="resource-grid">
                   <label>Type <input id="resource-type" required value="profile" /></label>
@@ -125,8 +125,8 @@
             </section>
             <section class="workspace-panel" hidden id="shared-panel" role="tabpanel">
               <div class="workspace-head"><div><p class="eyebrow">Deployment scope</p><h2>Shared app data</h2></div><p>Read the app facts your deployment publishes once for every user: name, version, configuration, feature flags, catalogs, and leaderboards. Administrators and trusted backend services control writes.</p></div>
-              <form class="connection-row" id="shared-form"><label>Resource type <input id="shared-type" required value="config" /><small>Examples: config for app name or version, feature-flag, catalog, leaderboard, announcement.</small></label><button class="button" type="submit">Load records</button></form>
-              <p aria-live="polite" class="notice" id="shared-message">Choose a resource type to inspect shared data.</p>
+              <form class="connection-row" id="shared-form"><label>Data bucket <input id="shared-type" required value="config" /><small>Examples: config for app name or version, feature-flag, catalog, leaderboard, announcement.</small></label><button class="button" type="submit">Load records</button></form>
+              <p aria-live="polite" class="notice" id="shared-message">Choose a bucket to inspect deployment-owned records.</p>
               <div class="empty-result" id="shared-empty">No shared records loaded yet.</div><ul class="shared-list" hidden id="shared-results"></ul>
             </section>
             <section class="workspace-panel" hidden id="inspector-panel" role="tabpanel">
@@ -175,7 +175,7 @@
         });
       }
       function renderNamespace() {
-        if (!state.namespace) { $("namespace-name").textContent = "Personal namespace unavailable"; $("namespace-detail").textContent = "This account has no personal namespace. Deployment admins can still work with shared data."; return; }
+        if (!state.namespace) { $("namespace-name").textContent = "Personal scope unavailable"; $("namespace-detail").textContent = "This account has no personal scope. Deployment admins can still work with shared app data."; return; }
         $("namespace-name").textContent = `/${state.namespace.slug}`;
         $("namespace-detail").textContent = `${state.namespace.displayName || state.namespace.slug} - ${state.namespace.isPublic ? "public namespace" : "private namespace"}`;
       }
@@ -226,7 +226,7 @@
       document.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => setTab(button.dataset.tab)));
       $("signup-username").addEventListener("input", (event) => {
         const input = event.currentTarget; input.value = input.value.trim().toLowerCase(); const issue = input.value ? usernameIssue(input.value) : "";
-        $("username-help").textContent = issue || (input.value ? `Permanent route: /${input.value}` : "3-32 lowercase letters or numbers, with single - or _ separators.");
+        $("username-help").textContent = issue || (input.value ? `Permanent public route: /${input.value}` : "3-32 lowercase letters or numbers, with single - or _ separators.");
         $("username-help").className = `field-note ${issue ? "invalid" : input.value ? "valid" : ""}`; $("signup-submit").disabled = Boolean(issue);
       });
       $("signup-form").addEventListener("submit", async (event) => {

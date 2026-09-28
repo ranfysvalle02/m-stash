@@ -1,6 +1,6 @@
 # Integrate m-stash
 
-m-stash is a reusable identity and scoped-data API. A frontend can register users, give each one an immutable username, store profile-like records in their personal namespace, and read deployment-controlled shared data. A trusted backend can mutate shared state without receiving a user's password or MongoDB access.
+m-stash is an ownership layer for application data. It gives a frontend two server-enforced scopes: personal records derived from the signed-in account, and shared app records owned by the deployment. Types are buckets; visibility belongs to each record. A trusted backend can mutate shared records without receiving a user's password or MongoDB access.
 
 For a no-build browser reference, serve [examples/browser/index.html](examples/browser/index.html) from the m-stash deployment itself. It deliberately calls `location.origin`, so the API domain is fixed to the domain hosting the page. The client keeps its bearer token only in memory and demonstrates signup, login, personal resources, and authenticated shared reads.
 
@@ -69,7 +69,7 @@ Personal visibility is `private` or `public`. Public records resolve at `/{usern
 
 ## Shared application API
 
-Each deployment has one shared control-plane scope. It is appropriate for server-owned or deployment-owned data including configuration, leaderboards, inventory catalogs, published announcements, and precomputed results.
+Each deployment has one shared app scope for records the application owns: app name and version, configuration, feature flags, catalogs, leaderboards, announcements, and precomputed results. Types are reusable buckets; an administrator can keep one record private while publishing another in the same bucket.
 
 ```text
 GET    /v1/shared/namespace
@@ -106,6 +106,8 @@ Shared visibility has three values:
 | `public` | Anyone via `/v1/public/shared/resources/{type}/{slug}`. |
 
 ## Public routes
+
+The embedded UI exposes public deployment data without a username at `/public`. Browse a typed shared-data bucket at `/public/{type}` and an individual public record at `/public/{type}/{slug}`. An administrator creates the bucket by using a shared resource type, then chooses `public` visibility for each record that should appear there.
 
 ```sh
 curl "$API_URL/v1/public/ada/profile/main"

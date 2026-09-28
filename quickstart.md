@@ -1,6 +1,6 @@
 # m-stash Quickstart
 
-Deploy m-stash once, then let any frontend register users and claim stable usernames through its API. This guide uses Render, but the runtime contract is ordinary environment configuration plus a transactional MongoDB deployment.
+Deploy m-stash once to give an application two server-enforced data scopes: personal records for signed-in users and shared app records for the deployment. This guide uses Render, but the runtime contract is ordinary environment configuration plus a transactional MongoDB deployment.
 
 ## 1. Provision the deployment
 
@@ -55,7 +55,7 @@ The public route is now `https://your-service.onrender.com/player-one/profile/ma
 
 ## 4. Store shared application data
 
-The deployment's shared scope is for data the application controls. Signed-in users can read `authenticated` records, but only admins or a trusted backend can write them.
+The deployment's shared app scope holds data the application controls: app name, version, configuration, feature flags, catalogs, and leaderboards. Types are buckets; visibility belongs to each record. Signed-in users can read `authenticated` records, but only admins or a trusted backend can write them.
 
 ```sh
 export SERVICE_TOKEN='store-this-only-in-your-backend'

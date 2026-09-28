@@ -153,6 +153,15 @@ function App() {
               />
             }
           />
+          <Route path="/public" element={<PublicSharedDataPage />} />
+          <Route
+            path="/public/:type"
+            element={<PublicSharedResourceCollectionPage />}
+          />
+          <Route
+            path="/public/:type/:slug"
+            element={<PublicSharedResourcePage />}
+          />
           <Route
             path="/:username/:type/:slug"
             element={<PublicResourcePage />}
@@ -221,7 +230,7 @@ function AuthenticationPage({
       <section className="auth-panel" aria-labelledby="auth-title">
         <p className="eyebrow">Identity-scoped application data</p>
         <h1 id="auth-title">
-          {isSignUp ? "Create your data home." : "Welcome back."}
+          {isSignUp ? "Create your personal scope." : "Welcome back."}
         </h1>
         <form onSubmit={submit}>
           <label>
@@ -373,7 +382,7 @@ function WorkspaceGate({
             namespace ? (
               <NamespaceDashboard scope="personal" canWrite />
             ) : (
-              <Navigate replace to="/app/shared/config" />
+              <Navigate replace to="/app/shared" />
             )
           }
         />
@@ -383,7 +392,7 @@ function WorkspaceGate({
             namespace ? (
               <NamespaceResourceEditor scope="personal" canWrite />
             ) : (
-              <Navigate replace to="/app/shared/config" />
+              <Navigate replace to="/app/shared" />
             )
           }
         />
@@ -393,9 +402,13 @@ function WorkspaceGate({
             namespace ? (
               <NamespaceResourceEditor scope="personal" canWrite />
             ) : (
-              <Navigate replace to="/app/shared/config" />
+              <Navigate replace to="/app/shared" />
             )
           }
+        />
+        <Route
+          path="shared"
+          element={<SharedDataHome canWrite={claims.role === "admin"} />}
         />
         <Route
           path="shared/:type"
@@ -430,7 +443,7 @@ function WorkspaceGate({
             namespace ? (
               <NamespaceSettings />
             ) : (
-              <Navigate replace to="/app/shared/config" />
+              <Navigate replace to="/app/shared" />
             )
           }
         />
@@ -440,7 +453,7 @@ function WorkspaceGate({
           element={
             <Navigate
               replace
-              to={namespace ? "resources/record" : "shared/config"}
+              to={namespace ? "resources/record" : "shared"}
             />
           }
         />
@@ -475,7 +488,7 @@ function WorkspaceShell({
       <aside className={menuOpen ? "sidebar open" : "sidebar"}>
         <Link
           className="wordmark"
-          to={namespace ? "/app/resources/record" : "/app/shared/config"}
+          to={namespace ? "/app/resources/record" : "/app/shared"}
         >
           <span>m</span>stash
         </Link>
@@ -497,17 +510,9 @@ function WorkspaceShell({
               </NavLink>
             </>
           )}
-          <NavLink onClick={() => setMenuOpen(false)} to="/app/shared/config">
-            <Database aria-hidden="true" size={18} /> Shared data
+          <NavLink onClick={() => setMenuOpen(false)} to="/app/shared">
+            <Database aria-hidden="true" size={18} /> Shared app data
           </NavLink>
-          {claims.role === "admin" && (
-            <NavLink
-              onClick={() => setMenuOpen(false)}
-              to="/app/shared/config/new"
-            >
-              <PenLine aria-hidden="true" size={18} /> New shared record
-            </NavLink>
-          )}
           {namespace && (
             <NavLink onClick={() => setMenuOpen(false)} to="/app/namespace">
               <Settings aria-hidden="true" size={18} /> Namespace
@@ -521,6 +526,12 @@ function WorkspaceShell({
           {namespace?.isPublic && (
             <Link className="site-link" to={`/${namespace.slug}`}>
               <Globe2 aria-hidden="true" size={17} /> View namespace{" "}
+              <ArrowUpRight aria-hidden="true" size={15} />
+            </Link>
+          )}
+          {claims.role === "admin" && (
+            <Link className="site-link" to="/public">
+              <Globe2 aria-hidden="true" size={17} /> View deployment public data{" "}
               <ArrowUpRight aria-hidden="true" size={15} />
             </Link>
           )}
@@ -555,7 +566,7 @@ function WorkspaceShell({
           </button>
           <Link
             className="wordmark"
-            to={namespace ? "/app/resources/record" : "/app/shared/config"}
+            to={namespace ? "/app/resources/record" : "/app/shared"}
           >
             <span>m</span>stash
           </Link>
@@ -570,10 +581,10 @@ function WorkspaceShell({
             </Link>
           ) : claims.role === "admin" ? (
             <Link
-              aria-label="Create shared record"
+              aria-label="Manage shared data"
               className="icon-button"
-              title="Create shared record"
-              to="/app/shared/config/new"
+              title="Manage shared data"
+              to="/app/shared"
             >
               <Plus aria-hidden="true" size={21} />
             </Link>
@@ -584,6 +595,108 @@ function WorkspaceShell({
         {children}
       </div>
     </div>
+  );
+}
+
+function SharedDataHome({ canWrite }: { canWrite: boolean }) {
+  const navigate = useNavigate();
+  const [type, setType] = useState("config");
+  const normalizedType = normalizeResourceType(type);
+  const typeIssue = resourceTypeValidationMessage(normalizedType);
+  function openBucket(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!typeIssue) navigate(`/app/shared/${normalizedType}`);
+  }
+  return (
+    <main className="dashboard-page shared-data-home">
+      <div className="page-heading compact">
+        <p className="eyebrow">Deployment-owned app data</p>
+        <h1>Shared app data</h1>
+        <p>
+          Types are reusable buckets. Create as many as the application needs,
+          then set visibility per record: private for operators, signed-in for
+          members, or public for anyone at a deployment URL.
+        </p>
+      </div>
+      <section className="workspace-guide-callout">
+        <div>
+          <p className="eyebrow">
+            <Globe2 aria-hidden="true" size={15} /> Public is a visibility,
+            not a bucket
+          </p>
+          <h2>Publish the app facts people need.</h2>
+          <p>
+            A public config record can expose an app name or version; a private
+            config record can hold operator-only details. Both belong in the
+            same typed bucket and remain controlled by the deployment.
+          </p>
+        </div>
+        <Link className="button secondary" to="/public">
+          <Globe2 aria-hidden="true" size={16} /> View deployment public data
+        </Link>
+      </section>
+      <section className="shared-bucket-selector" aria-labelledby="bucket-selector-title">
+        <div>
+          <p className="eyebrow">Open or create a bucket</p>
+          <h2 id="bucket-selector-title">Choose a data type</h2>
+          <p>
+            Use a type that names the application concern, such as config,
+            catalog, feature-flag, leaderboard, or a custom type.
+          </p>
+        </div>
+        <form className="records-query" onSubmit={openBucket}>
+          <label>
+            Data type
+            <input
+              autoCapitalize="none"
+              aria-describedby="shared-type-help"
+              aria-invalid={Boolean(typeIssue)}
+              maxLength={32}
+              onChange={(event) => setType(event.target.value)}
+              placeholder="config"
+              spellCheck={false}
+              value={type}
+            />
+            <small
+              className={
+                typeIssue ? "username-feedback invalid" : "username-feedback"
+              }
+              id="shared-type-help"
+            >
+              {typeIssue || "This type becomes a durable shared-data bucket."}
+            </small>
+          </label>
+          <button className="button primary" disabled={Boolean(typeIssue)} type="submit">
+            <ArrowUpRight aria-hidden="true" size={17} /> Open bucket
+          </button>
+        </form>
+        {canWrite && !typeIssue && (
+          <Link
+            className="button secondary"
+            to={`/app/shared/${normalizedType}/new`}
+          >
+            <Plus aria-hidden="true" size={17} /> Create a {normalizedType} record
+          </Link>
+        )}
+      </section>
+      <section className="shared-bucket-grid" aria-label="Suggested shared data buckets">
+        {sharedDataBuckets.map((bucket) => (
+          <Link key={bucket.type} to={`/app/shared/${bucket.type}`}>
+            <span>{bucket.type}</span>
+            <h2>{bucket.title}</h2>
+            <p>{bucket.description}</p>
+            <ArrowUpRight aria-hidden="true" size={17} />
+          </Link>
+        ))}
+      </section>
+      {!canWrite && (
+        <p className="profile-visibility-note">
+          <ShieldCheck aria-hidden="true" size={16} /> You can read shared
+          records available to your account. Only deployment administrators can
+          create, edit, or publish them.
+        </p>
+      )}
+    </main>
   );
 }
 
@@ -704,17 +817,25 @@ function NamespaceDashboard({
           </p>
           <h2>
             {shared
-              ? "Shared state stays deployment-controlled."
+              ? "Shared app data stays deployment-controlled."
               : "Every resource belongs to your namespace."}
           </h2>
           <p>
             {shared
-              ? "Authenticated members can read safe shared records. Administrators and trusted backend services control every write."
+              ? "Types are buckets, while visibility belongs to each record. Administrators and trusted backend services control writes; public records appear at deployment URLs under /public."
               : "m-stash derives the namespace from your signed-in account, so a browser cannot write to someone else’s route."}
           </p>
         </div>
-        <Link className="button secondary" to="/app/guide">
-          <ShieldCheck aria-hidden="true" size={16} /> How it works
+        <Link className="button secondary" to={shared ? "/public" : "/app/guide"}>
+          {shared ? (
+            <>
+              <Globe2 aria-hidden="true" size={16} /> Public deployment data
+            </>
+          ) : (
+            <>
+              <ShieldCheck aria-hidden="true" size={16} /> How it works
+            </>
+          )}
         </Link>
       </section>
       {error && (
@@ -734,7 +855,7 @@ function NamespaceDashboard({
           <p>
             {shared
               ? canWrite
-                ? `Create a shared ${type} for configuration, catalog data, announcements, or trusted backend snapshots.`
+                ? `Create a shared ${type} record, then choose whether it stays private, serves signed-in users, or publishes at /public/${type}/... .`
                 : "An administrator has not published shared data of this type yet."
               : `Create a private ${type} first, then make it public when its canonical route is ready to share.`}
           </p>
@@ -986,7 +1107,7 @@ function NamespaceResourceEditor({
           </select>
           <small>
             {shared
-              ? "Signed-in entries are visible to every account. Public entries are also intended for external sharing."
+              ? `Signed-in entries are visible to every account. Public entries are available without an account at /public/${type}/${resource.slug || "your-record"}.`
               : "Public entries resolve through your username/type/slug route."}
           </small>
         </label>
@@ -1089,11 +1210,11 @@ function NamespaceSettings() {
   return (
     <main className="settings-page">
       <div className="page-heading compact">
-        <p className="eyebrow">Personal namespace</p>
+        <p className="eyebrow">Profile and sharing</p>
         <h1>@{namespace.slug}</h1>
         <p>
-          Your username is permanent. Change your public profile without
-          changing the route applications use to find your public data.
+          Your username is permanent. Keep the profile current and choose
+          whether its public records can be discovered at this route.
         </p>
       </div>
       <form className="profile-form" onSubmit={save}>
@@ -1141,9 +1262,9 @@ function NamespaceSettings() {
             type="checkbox"
           />
           <span>
-            <strong>Public namespace</strong>
+            <strong>Publish this profile</strong>
             <small>
-              When disabled, public URLs return no namespace or resource data.
+              When disabled, this profile and its public records stay hidden.
             </small>
           </span>
         </label>
@@ -1181,32 +1302,32 @@ function NamespaceLookupPage() {
       <main className="discovery-page">
         <div className="discover-intro">
           <p className="eyebrow">
-            <Compass aria-hidden="true" size={15} /> Identity-derived data
+            <Compass aria-hidden="true" size={15} /> Application data ownership
           </p>
-          <h1>Make identity the data boundary.</h1>
+          <h1>Two scopes. One source of truth.</h1>
           <p>
-            m-stash turns a signed-in account into a private data home. Build
-            profiles, preferences, saves, and publishable records without
-            asking a browser to name an owner or handle database credentials.
+            m-stash gives every application personal data for signed-in people
+            and shared data for the deployment. Ownership comes from identity,
+            so browsers never send owner IDs or database credentials.
           </p>
-            <div className="discover-actions">
-              <Link className="button primary" to="/signup">
-                <UserRound aria-hidden="true" size={17} /> Create a data home
-              </Link>
-              <Link className="discover-guide-link" to="/guide">
-                See the model <ArrowUpRight aria-hidden="true" size={16} />
-              </Link>
-            </div>
+          <div className="discover-actions">
+            <Link className="button primary" to="/signup">
+              <UserRound aria-hidden="true" size={17} /> Create account
+            </Link>
+            <Link className="discover-guide-link" to="/guide">
+              See the model <ArrowUpRight aria-hidden="true" size={16} />
+            </Link>
+          </div>
         </div>
         <section className="scope-model" aria-labelledby="scope-model-title">
           <header>
             <p className="eyebrow">Two scopes, one ownership model</p>
             <h2 id="scope-model-title">
-              Personal for people. Shared for the app.
+              Personal data for people. Shared data for the app.
             </h2>
           </header>
           <article>
-            <h3>Personal data</h3>
+            <h3>Personal scope</h3>
             <p>
               Each account owns its profiles, preferences, saves, and
               user-created records. m-stash resolves that owner from the
@@ -1214,7 +1335,7 @@ function NamespaceLookupPage() {
             </p>
           </article>
           <article>
-            <h3>Shared app data</h3>
+            <h3>Shared app scope</h3>
             <p>
               Deployment administrators and trusted services own the facts
               every user should see: app name, app version, configuration,
@@ -1224,11 +1345,11 @@ function NamespaceLookupPage() {
         </section>
         <section className="public-lookup" aria-labelledby="public-lookup-title">
           <div>
-            <p className="eyebrow">Published routes</p>
-            <h2 id="public-lookup-title">View published user data</h2>
+            <p className="eyebrow">Optional publishing</p>
+            <h2 id="public-lookup-title">Browse a public profile</h2>
             <p>
-              Public sharing is opt-in. Enter a username to view the resources
-              that account has chosen to publish.
+              Publishing is opt-in. Enter a username to view records that
+              account has chosen to share publicly.
             </p>
           </div>
           <form
@@ -1259,7 +1380,7 @@ function NamespaceLookupPage() {
                 }
                 id="namespace-lookup-help"
               >
-                {usernameIssue || "Enter the exact username for a published route."}
+                {usernameIssue || "Enter a username with a published profile."}
               </small>
             </label>
             <button
@@ -1267,11 +1388,270 @@ function NamespaceLookupPage() {
               disabled={!username || Boolean(usernameIssue)}
               type="submit"
             >
-              <ArrowUpRight aria-hidden="true" size={17} /> View published data
+              <ArrowUpRight aria-hidden="true" size={17} /> View profile
             </button>
           </form>
         </section>
       </main>
+    </PublicLayout>
+  );
+}
+
+const sharedDataBuckets = [
+  {
+    type: "config",
+    title: "Configuration",
+    description: "App name, version, supported clients, and release settings.",
+  },
+  {
+    type: "feature-flag",
+    title: "Feature flags",
+    description: "Deployment-controlled capabilities available to clients.",
+  },
+  {
+    type: "catalog",
+    title: "Catalogs",
+    description: "Published inventories, plans, reference data, or menus.",
+  },
+  {
+    type: "leaderboard",
+    title: "Leaderboards",
+    description: "Server-computed scores and ranked public results.",
+  },
+] as const;
+
+function normalizeResourceType(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function resourceTypeValidationMessage(value: string) {
+  if (value.length < 3 || value.length > 32) {
+    return "Use 3-32 lowercase letters, numbers, or hyphens.";
+  }
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value)) {
+    return "Start and end with a letter or number; use single hyphens between words.";
+  }
+  return "";
+}
+
+function PublicSharedDataPage() {
+  const navigate = useNavigate();
+  const [type, setType] = useState("config");
+  const normalizedType = normalizeResourceType(type);
+  const typeIssue = resourceTypeValidationMessage(normalizedType);
+  function openBucket(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!typeIssue) navigate(`/public/${normalizedType}`);
+  }
+  return (
+    <PublicLayout>
+      <main className="discovery-page public-data-page">
+        <div className="discover-intro">
+          <p className="eyebrow">
+            <Globe2 aria-hidden="true" size={15} /> Deployment public data
+          </p>
+          <h1>Public app data.</h1>
+          <p>
+            This is the deployment's public surface: app records deliberately
+            published for anyone to read, independent of personal profiles.
+          </p>
+        </div>
+        <section className="public-lookup" aria-labelledby="public-bucket-title">
+          <div>
+            <p className="eyebrow">Public buckets</p>
+            <h2 id="public-bucket-title">Browse a public bucket</h2>
+            <p>
+              A type is a bucket such as config, feature-flag, catalog, or
+              leaderboard. Only records explicitly marked public appear here.
+            </p>
+          </div>
+          <form className="records-query" onSubmit={openBucket}>
+            <label>
+              Data type
+              <input
+                autoCapitalize="none"
+                aria-describedby="public-type-help"
+                aria-invalid={Boolean(typeIssue)}
+                maxLength={32}
+                onChange={(event) => setType(event.target.value)}
+                placeholder="config"
+                spellCheck={false}
+                value={type}
+              />
+              <small
+                className={
+                  typeIssue ? "username-feedback invalid" : "username-feedback"
+                }
+                id="public-type-help"
+              >
+                {typeIssue || "Enter a public shared-data bucket."}
+              </small>
+            </label>
+            <button className="button primary" disabled={Boolean(typeIssue)} type="submit">
+              <ArrowUpRight aria-hidden="true" size={17} /> Open bucket
+            </button>
+          </form>
+        </section>
+        <section className="shared-bucket-grid" aria-label="Suggested public data buckets">
+          {sharedDataBuckets.map((bucket) => (
+            <Link key={bucket.type} to={`/public/${bucket.type}`}>
+              <span>{bucket.type}</span>
+              <h2>{bucket.title}</h2>
+              <p>{bucket.description}</p>
+              <ArrowUpRight aria-hidden="true" size={17} />
+            </Link>
+          ))}
+        </section>
+      </main>
+    </PublicLayout>
+  );
+}
+
+function PublicSharedResourceCollectionPage() {
+  const { type = "" } = useParams();
+  const [resources, setResources] = useState<PublicResourcePreview[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void api
+      .listPublicSharedResources(type)
+      .then((page) => {
+        if (active) {
+          setResources(page.data);
+          setNextCursor(page.page.nextCursor);
+        }
+      })
+      .catch((requestError) => {
+        if (active) setError(messageFromError(requestError));
+      });
+    return () => {
+      active = false;
+    };
+  }, [type]);
+  async function loadMore() {
+    if (!nextCursor) return;
+    try {
+      const page = await api.listPublicSharedResources(type, nextCursor);
+      setResources([...resources, ...page.data]);
+      setNextCursor(page.page.nextCursor);
+    } catch (requestError) {
+      setError(messageFromError(requestError));
+    }
+  }
+  return (
+    <PublicLayout>
+      <main className="discovery-page">
+        <Link className="back-link" to="/public">
+          <ArrowLeft aria-hidden="true" size={17} /> Deployment public data
+        </Link>
+        <div className="discover-intro">
+          <p className="eyebrow">Public deployment bucket</p>
+          <h1>{type}</h1>
+          <p>Deployment-owned {type} records published for anyone to read.</p>
+        </div>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        {resources.length === 0 && !error ? (
+          <section className="empty-state discovery-empty">
+            <Globe2 aria-hidden="true" size={28} />
+            <h2>No public {type} records yet.</h2>
+            <p>
+              The deployment has not published any records in this bucket yet.
+            </p>
+          </section>
+        ) : (
+          <div className="public-post-list">
+            {resources.map((resource) => (
+              <article className="public-post-preview" key={resource.slug}>
+                <div>
+                  <div className="post-meta">
+                    <time dateTime={resource.createdAt}>
+                      {displayDate(resource.createdAt)}
+                    </time>
+                    <span className="tag">{resource.type}</span>
+                  </div>
+                  <h2>
+                    <Link to={`/public/${resource.type}/${resource.slug}`}>
+                      {resource.title}
+                    </Link>
+                  </h2>
+                  <p>
+                    {resource.summary ||
+                      "Open this deployment-published record to view the details."}
+                  </p>
+                </div>
+                <Link
+                  aria-label={`Open ${resource.title}`}
+                  className="read-link"
+                  to={`/public/${resource.type}/${resource.slug}`}
+                >
+                  <ArrowUpRight aria-hidden="true" size={19} />
+                </Link>
+              </article>
+            ))}
+          </div>
+        )}
+        {nextCursor && (
+          <div className="load-more">
+            <button
+              className="button secondary"
+              onClick={() => void loadMore()}
+              type="button"
+            >
+              Load more
+            </button>
+          </div>
+        )}
+      </main>
+    </PublicLayout>
+  );
+}
+
+function PublicSharedResourcePage() {
+  const { type = "", slug = "" } = useParams();
+  const [resource, setResource] = useState<PublicResource>();
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void api
+      .getPublicSharedResource(type, slug)
+      .then((value) => {
+        if (active) setResource(value);
+      })
+      .catch((requestError) => {
+        if (active) setError(messageFromError(requestError));
+      });
+    return () => {
+      active = false;
+    };
+  }, [slug, type]);
+  return (
+    <PublicLayout>
+      {error ? (
+        <StatePage title="This deployment record is unavailable" detail={error} />
+      ) : !resource ? (
+        <LoadingPage />
+      ) : (
+        <main className="reader-page">
+          <Link className="back-link" to={`/public/${type}`}>
+            <ArrowLeft aria-hidden="true" size={17} /> Public {type}
+          </Link>
+          <header className="article-header">
+            <p className="eyebrow">
+              /public/{resource.type}/{resource.slug}
+            </p>
+            <h1>{resource.title}</h1>
+            {resource.summary && <p>{resource.summary}</p>}
+          </header>
+          <article className="markdown-body">
+            <Markdown content={resource.content ?? ""} />
+          </article>
+        </main>
+      )}
     </PublicLayout>
   );
 }
@@ -1503,15 +1883,14 @@ function GuideContent() {
     <>
       <header className="guide-intro">
         <p className="eyebrow">
-          <ShieldCheck aria-hidden="true" size={15} /> Identity-derived
-          application data
+          <ShieldCheck aria-hidden="true" size={15} /> The ownership model
         </p>
-        <h1>Give every account a real data boundary.</h1>
+        <h1>Ownership is the data model.</h1>
         <p>
-          m-stash derives personal writes from the signed-in account and keeps
-          app-wide facts in one deployment-managed shared scope. Store app
-          name, version, configuration, feature flags, catalogs, or
-          leaderboards once; signed-in clients read the published result.
+          m-stash resolves personal writes from the signed-in account. The
+          deployment owns shared app data such as name, version, configuration,
+          feature flags, catalogs, and leaderboards. Clients receive only what
+          their identity and a record's visibility permit.
         </p>
       </header>
       <section className="guide-section workflow-section">
@@ -1519,7 +1898,7 @@ function GuideContent() {
           <p className="eyebrow">
             <BookOpen aria-hidden="true" size={15} /> The core model
           </p>
-          <h2>Personal user data, shared app facts.</h2>
+          <h2>Two scopes. One server-enforced rule.</h2>
         </div>
         <ol className="workflow-list">
           <li>
@@ -1536,8 +1915,8 @@ function GuideContent() {
             <div>
               <h3>Store</h3>
               <p>
-                Profiles, preferences, saves, and content receive typed stable
-                routes.
+                Profiles, preferences, saves, and app records live in typed
+                buckets with durable routes.
               </p>
             </div>
           </li>
@@ -1546,9 +1925,9 @@ function GuideContent() {
             <div>
               <h3>Scope</h3>
               <p>
-                Personal data is owner-scoped. App name, app version,
-                configuration, catalogs, and leaderboards are
-                deployment-scoped.
+                Personal records belong to an account. Shared app records
+                belong to the deployment. Visibility decides who can read each
+                record.
               </p>
             </div>
           </li>
@@ -1581,11 +1960,13 @@ function GuideContent() {
             </p>
           </article>
           <article>
-            <h3>Shared and public data</h3>
+            <h3>Shared app data</h3>
             <p>
               Administrators and trusted backends control app-wide facts such
-              as app name, version, and feature configuration. Public personal
+              as app name, version, and feature configuration. Public shared
               records resolve at routes such as{" "}
+              <code>/public/config/release</code>; public personal records
+              resolve at{" "}
               <code>/alex-dev/record/profile</code>.
             </p>
           </article>
@@ -1605,7 +1986,8 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
           <span>m</span>stash
         </Link>
         <nav>
-          <Link to="/discover">Explore public data</Link>
+          <Link to="/discover">User data</Link>
+          <Link to="/public">Deployment data</Link>
           <Link to="/guide">How it works</Link>
           <Link
             className="button secondary small-button"
@@ -1629,7 +2011,7 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
           <span>m</span>stash
         </Link>
         <Link to="/guide">Platform guide</Link>
-        <p>Identity-derived data boundaries.</p>
+        <p>Application data, owned by design.</p>
       </footer>
     </div>
   );

@@ -249,4 +249,15 @@ export const api = {
     const response = await request<APIEnvelope<PublicResource>>(`/v1/public/${encodeURIComponent(username)}/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`)
     return response.data
   },
+
+  async listPublicSharedResources(type: string, cursor?: string | null) {
+    const search = new URLSearchParams({ limit: '20' })
+    if (cursor) search.set('cursor', cursor)
+    return request<Page<PublicResourcePreview>>(`/v1/public/shared/resources/${encodeURIComponent(type)}?${search.toString()}`)
+  },
+
+  async getPublicSharedResource(type: string, slug: string) {
+    const response = await request<APIEnvelope<PublicResource>>(`/v1/public/shared/resources/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`)
+    return response.data
+  },
 }

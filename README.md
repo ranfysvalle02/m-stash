@@ -1,17 +1,17 @@
 # m-stash
 
-m-stash is an identity-derived data layer for applications caught between authentication and a database. Authentication knows who a user is; MongoDB does not know which user may own a record. m-stash turns that identity into the authorization boundary: it gives a frontend registration, browser sessions, bearer tokens, and data scopes the server can prove the caller owns.
+m-stash is an ownership layer for application data. It sits between authentication and MongoDB, turning a signed-in identity into the server-enforced answer to: who owns this record, and who may read it?
 
-Use it for profiles and preferences, game saves, leaderboards, high-score snapshots, catalogs, feature configuration, public portfolios, community submissions, or any application that needs identity-aware data without exposing MongoDB to a browser. Public routes are an opt-in publishing surface on top of that ownership model.
+Every application gets two scopes: personal records owned by an account and shared app records owned by the deployment. Typed buckets organize records; per-record visibility keeps them private, available to signed-in users, or deliberately public. Use it for profiles and preferences, game saves, feature configuration, catalogs, leaderboards, public portfolios, and community submissions without exposing MongoDB to a browser.
 
 ## The model
 
-m-stash has two deliberately separate planes:
+m-stash has two deliberately separate scopes:
 
 | Plane | Provisioning | What it controls |
 | --- | --- | --- |
-| **Personal namespace** | Open `POST /v1/auth/signup` | A user claims one immutable username and owns all resources under it. |
-| **Deployment control plane** | `ADMIN_EMAIL` + `ADMIN_PASSWORD` environment variables | The operator manages the single shared scope and can administer a deployment without claiming a public username. |
+| **Personal scope** | Open `POST /v1/auth/signup` | A user claims one immutable username and owns the records in their scope. |
+| **Shared app scope** | `ADMIN_EMAIL` + `ADMIN_PASSWORD` environment variables | The deployment owner manages app records for every user without claiming a public username. |
 
 A signup creates a user, personal namespace, and owner membership in one MongoDB transaction. The caller never supplies an owner ID or namespace ID. A deployment admin is an authentication principal with an `admin` role; it may also be a normal registered user, but m-stash never invents a personal namespace for it.
 
@@ -28,6 +28,8 @@ Each registered account gets a stable route such as `/alex`. Its typed resources
 ### Shared app data
 
 Every deployment has one managed shared scope for application-controlled data. It is the home for facts shared by the whole app: an app name and version, configuration, feature flags, catalogs, leaderboards, announcements, and server-computed results. Deployment administrators and trusted services own this data; users consume the visibility level the deployment publishes.
+
+Types are reusable data buckets, such as `config`, `feature-flag`, `catalog`, or `leaderboard`. Visibility belongs to each record, not the bucket: an administrator can keep one `config` record private while publishing another. Public deployment records have human routes at `/public/{type}/{slug}` in the embedded UI and anonymous API routes at `/v1/public/shared/resources/{type}/{slug}`. Browse a public bucket at `/public/{type}` or `/v1/public/shared/resources/{type}`.
 
 - Every signed-in user may read `authenticated` and `public` shared resources.
 - Only an administrator or trusted backend service may write shared resources.
