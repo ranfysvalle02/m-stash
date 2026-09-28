@@ -256,4 +256,4 @@ Set `METRICS_TOKEN` to enable `GET /metrics`; call it with `Authorization: Beare
 
 Persistent clients can use `wss://your-gateway.example/v1/ws/{collection}` with the same bearer token during the upgrade. Send the same JSON plus an `action` field.
 
-Public clients use `GET /v1/public/profiles/{handle}` and `GET /v1/public/profiles/{handle}/stashes` without a token. The complete secure-MongoDB setup walkthrough is in [quickstart.md](quickstart.md).
+Public clients use `GET /v1/public/profiles/{handle}` and `GET /v1/public/profiles/{handle}/stashes` without a token. The complete secure-MongoDB setup walkthrough is in [quickstart.md](quickstart.md); apps connecting to the deployed gateway can follow [integration.md](integration.md).
