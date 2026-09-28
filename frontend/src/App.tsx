@@ -221,7 +221,7 @@ function AuthenticationPage({
       <section className="auth-panel" aria-labelledby="auth-title">
         <p className="eyebrow">Identity-scoped application data</p>
         <h1 id="auth-title">
-          {isSignUp ? "Claim your route." : "Welcome back."}
+          {isSignUp ? "Create your data home." : "Welcome back."}
         </h1>
         <form onSubmit={submit}>
           <label>
@@ -1181,64 +1181,71 @@ function NamespaceLookupPage() {
       <main className="discovery-page">
         <div className="discover-intro">
           <p className="eyebrow">
-            <Compass aria-hidden="true" size={15} /> Namespace-native access
+            <Compass aria-hidden="true" size={15} /> Identity-derived data
           </p>
-          <h1>Identity, data, and durable routes.</h1>
+          <h1>Make identity the data boundary.</h1>
           <p>
-            Open a public namespace, or claim a username for profiles,
-            preferences, saves, and anything your application needs to own.
+            m-stash turns a signed-in account into a private data home. Build
+            profiles, preferences, saves, and publishable records without
+            asking a browser to name an owner or handle database credentials.
           </p>
+          <div className="discover-actions">
+            <Link className="button primary" to="/signup">
+              <UserRound aria-hidden="true" size={17} /> Create a data home
+            </Link>
+            <Link className="discover-guide-link" to="/guide">
+              See the model <ArrowUpRight aria-hidden="true" size={16} />
+            </Link>
+          </div>
         </div>
-        <form
-          className="records-query"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!usernameIssue) navigate(`/${username}`);
-          }}
-        >
-          <label>
-            Open a namespace
-            <input
-              autoCapitalize="none"
-              aria-describedby="namespace-lookup-help"
-              aria-invalid={Boolean(usernameIssue)}
-              onChange={(event) =>
-                setUsername(normalizeUsername(event.target.value))
-              }
-              placeholder="alex-dev"
-              spellCheck={false}
-              value={username}
-            />
-            <small
-              className={
-                usernameIssue
-                  ? "username-feedback invalid"
-                  : "username-feedback"
-              }
-              id="namespace-lookup-help"
-            >
-              {usernameIssue || "Enter an exact public username."}
-            </small>
-          </label>
-          <button
-            className="button primary"
-            disabled={!username || Boolean(usernameIssue)}
-            type="submit"
+        <section className="public-lookup" aria-labelledby="public-lookup-title">
+          <div>
+            <p className="eyebrow">Published routes</p>
+            <h2 id="public-lookup-title">View public data</h2>
+            <p>
+              Public sharing is opt-in. Enter a username to view the resources
+              that account has chosen to publish.
+            </p>
+          </div>
+          <form
+            className="records-query"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!usernameIssue) navigate(`/${username}`);
+            }}
           >
-            <ArrowUpRight aria-hidden="true" size={17} /> Open
-          </button>
-        </form>
-        <section className="empty-state discovery-empty">
-          <ShieldCheck aria-hidden="true" size={28} />
-          <p className="eyebrow">Drop-in application boundary</p>
-          <h2>Claim an identity. Keep application data in its scope.</h2>
-          <p>
-            m-stash maps every resource to an immutable namespace before it
-            writes to MongoDB.
-          </p>
-          <Link className="button secondary" to="/signup">
-            <Plus aria-hidden="true" size={17} /> Create account
-          </Link>
+            <label>
+              Public username
+              <input
+                autoCapitalize="none"
+                aria-describedby="namespace-lookup-help"
+                aria-invalid={Boolean(usernameIssue)}
+                onChange={(event) =>
+                  setUsername(normalizeUsername(event.target.value))
+                }
+                placeholder="alex-dev"
+                spellCheck={false}
+                value={username}
+              />
+              <small
+                className={
+                  usernameIssue
+                    ? "username-feedback invalid"
+                    : "username-feedback"
+                }
+                id="namespace-lookup-help"
+              >
+                {usernameIssue || "Enter the exact username for a published route."}
+              </small>
+            </label>
+            <button
+              className="button primary"
+              disabled={!username || Boolean(usernameIssue)}
+              type="submit"
+            >
+              <ArrowUpRight aria-hidden="true" size={17} /> View public data
+            </button>
+          </form>
         </section>
       </main>
     </PublicLayout>
@@ -1472,10 +1479,10 @@ function GuideContent() {
     <>
       <header className="guide-intro">
         <p className="eyebrow">
-          <ShieldCheck aria-hidden="true" size={15} /> Namespace-native
+            <ShieldCheck aria-hidden="true" size={15} /> Identity-derived
           application data
         </p>
-        <h1>Give every account a durable data home.</h1>
+        <h1>Give every account a real data boundary.</h1>
         <p>
           m-stash derives personal writes from the signed-in account and keeps
           shared data in one deployment-managed scope. Browsers never choose a
@@ -1571,7 +1578,7 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
           <span>m</span>stash
         </Link>
         <nav>
-          <Link to="/discover">Find a namespace</Link>
+          <Link to="/discover">Explore public data</Link>
           <Link to="/guide">How it works</Link>
           <Link
             className="button secondary small-button"
@@ -1595,7 +1602,7 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
           <span>m</span>stash
         </Link>
         <Link to="/guide">Platform guide</Link>
-        <p>Namespace-native MongoDB access.</p>
+        <p>Identity-derived data boundaries.</p>
       </footer>
     </div>
   );

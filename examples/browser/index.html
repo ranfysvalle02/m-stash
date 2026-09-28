@@ -66,12 +66,12 @@
       <section class="auth-layout" id="auth-shell">
         <div class="intro">
           <p class="eyebrow">Browser reference implementation</p>
-          <h1>Identity in. Useful data out.</h1>
-          <p>A deliberately small client for the m-stash API. It signs a user in, works inside their personal namespace, and reads deployment-owned shared records.</p>
+          <h1>Make identity the data boundary.</h1>
+          <p>A deliberately small client for the m-stash API. Signed-in people receive a private data home; deployment-owned state remains separate. The browser never supplies an owner ID.</p>
           <ol class="value-list">
-            <li><strong>01</strong><span>Claim a permanent username that becomes a stable personal data route.</span></li>
-            <li><strong>02</strong><span>Save typed private resources without sending an owner or namespace ID.</span></li>
-            <li><strong>03</strong><span>Read shared application state as an authenticated user.</span></li>
+            <li><strong>01</strong><span>Create an account with a permanent username and private data home.</span></li>
+            <li><strong>02</strong><span>Save typed resources without sending an owner or namespace ID.</span></li>
+            <li><strong>03</strong><span>Read shared application state managed by the deployment.</span></li>
           </ol>
         </div>
         <div class="auth-station">

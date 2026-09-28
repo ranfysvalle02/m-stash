@@ -1,8 +1,8 @@
 # m-stash
 
-m-stash is a drop-in identity and scoped-data layer for applications that need more than a database connection string. It gives your frontend open email/password registration, a claimed username, browser sessions and bearer tokens, then stores application data in scopes the server can prove the caller owns.
+m-stash is an identity-derived data layer for applications caught between authentication and a database. Authentication knows who a user is; MongoDB does not know which user may own a record. m-stash turns that identity into the authorization boundary: it gives a frontend registration, browser sessions, bearer tokens, and data scopes the server can prove the caller owns.
 
-Use it for profiles and preferences, game saves, leaderboards, high-score snapshots, catalogs, feature configuration, public portfolios, community submissions, or any application that needs identity-aware data without exposing MongoDB to a browser.
+Use it for profiles and preferences, game saves, leaderboards, high-score snapshots, catalogs, feature configuration, public portfolios, community submissions, or any application that needs identity-aware data without exposing MongoDB to a browser. Public routes are an opt-in publishing surface on top of that ownership model.
 
 ## The model
 
