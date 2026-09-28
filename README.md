@@ -25,9 +25,9 @@ Each registered account gets a stable route such as `/alex`. Its typed resources
 - Personal resources are `private` or `public`.
 - A public resource is visible only when the personal namespace is public.
 
-### Shared data
+### Shared app data
 
-Every deployment has one managed shared scope for application-controlled data: leaderboards, game configuration, catalogs, announcements, feature flags, or server-computed results.
+Every deployment has one managed shared scope for application-controlled data. It is the home for facts shared by the whole app: an app name and version, configuration, feature flags, catalogs, leaderboards, announcements, and server-computed results. Deployment administrators and trusted services own this data; users consume the visibility level the deployment publishes.
 
 - Every signed-in user may read `authenticated` and `public` shared resources.
 - Only an administrator or trusted backend service may write shared resources.

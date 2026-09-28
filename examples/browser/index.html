@@ -67,11 +67,11 @@
         <div class="intro">
           <p class="eyebrow">Browser reference implementation</p>
           <h1>Make identity the data boundary.</h1>
-          <p>A deliberately small client for the m-stash API. Signed-in people receive a private data home; deployment-owned state remains separate. The browser never supplies an owner ID.</p>
+          <p>A deliberately small client for the m-stash API. Signed-in people receive a private data home; the deployment owns shared app facts such as its name, version, and configuration. The browser never supplies an owner ID.</p>
           <ol class="value-list">
             <li><strong>01</strong><span>Create an account with a permanent username and private data home.</span></li>
             <li><strong>02</strong><span>Save typed resources without sending an owner or namespace ID.</span></li>
-            <li><strong>03</strong><span>Read shared application state managed by the deployment.</span></li>
+            <li><strong>03</strong><span>Read shared app data, from release configuration to leaderboards, managed by the deployment.</span></li>
           </ol>
         </div>
         <div class="auth-station">
@@ -124,8 +124,8 @@
               </form>
             </section>
             <section class="workspace-panel" hidden id="shared-panel" role="tabpanel">
-              <div class="workspace-head"><div><p class="eyebrow">Deployment scope</p><h2>Shared data</h2></div><p>Read shared state published for signed-in users. Write access remains with deployment administrators and trusted backend services.</p></div>
-              <form class="connection-row" id="shared-form"><label>Resource type <input id="shared-type" required value="leaderboard" /><small>Examples: leaderboard, config, catalog, announcement.</small></label><button class="button" type="submit">Load records</button></form>
+              <div class="workspace-head"><div><p class="eyebrow">Deployment scope</p><h2>Shared app data</h2></div><p>Read the app facts your deployment publishes once for every user: name, version, configuration, feature flags, catalogs, and leaderboards. Administrators and trusted backend services control writes.</p></div>
+              <form class="connection-row" id="shared-form"><label>Resource type <input id="shared-type" required value="config" /><small>Examples: config for app name or version, feature-flag, catalog, leaderboard, announcement.</small></label><button class="button" type="submit">Load records</button></form>
               <p aria-live="polite" class="notice" id="shared-message">Choose a resource type to inspect shared data.</p>
               <div class="empty-result" id="shared-empty">No shared records loaded yet.</div><ul class="shared-list" hidden id="shared-results"></ul>
             </section>

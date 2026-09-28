@@ -1189,19 +1189,43 @@ function NamespaceLookupPage() {
             profiles, preferences, saves, and publishable records without
             asking a browser to name an owner or handle database credentials.
           </p>
-          <div className="discover-actions">
-            <Link className="button primary" to="/signup">
-              <UserRound aria-hidden="true" size={17} /> Create a data home
-            </Link>
-            <Link className="discover-guide-link" to="/guide">
-              See the model <ArrowUpRight aria-hidden="true" size={16} />
-            </Link>
-          </div>
+            <div className="discover-actions">
+              <Link className="button primary" to="/signup">
+                <UserRound aria-hidden="true" size={17} /> Create a data home
+              </Link>
+              <Link className="discover-guide-link" to="/guide">
+                See the model <ArrowUpRight aria-hidden="true" size={16} />
+              </Link>
+            </div>
         </div>
+        <section className="scope-model" aria-labelledby="scope-model-title">
+          <header>
+            <p className="eyebrow">Two scopes, one ownership model</p>
+            <h2 id="scope-model-title">
+              Personal for people. Shared for the app.
+            </h2>
+          </header>
+          <article>
+            <h3>Personal data</h3>
+            <p>
+              Each account owns its profiles, preferences, saves, and
+              user-created records. m-stash resolves that owner from the
+              session, not from a browser-supplied ID.
+            </p>
+          </article>
+          <article>
+            <h3>Shared app data</h3>
+            <p>
+              Deployment administrators and trusted services own the facts
+              every user should see: app name, app version, configuration,
+              feature flags, catalogs, leaderboards, and release notes.
+            </p>
+          </article>
+        </section>
         <section className="public-lookup" aria-labelledby="public-lookup-title">
           <div>
             <p className="eyebrow">Published routes</p>
-            <h2 id="public-lookup-title">View public data</h2>
+            <h2 id="public-lookup-title">View published user data</h2>
             <p>
               Public sharing is opt-in. Enter a username to view the resources
               that account has chosen to publish.
@@ -1243,7 +1267,7 @@ function NamespaceLookupPage() {
               disabled={!username || Boolean(usernameIssue)}
               type="submit"
             >
-              <ArrowUpRight aria-hidden="true" size={17} /> View public data
+              <ArrowUpRight aria-hidden="true" size={17} /> View published data
             </button>
           </form>
         </section>
@@ -1479,14 +1503,15 @@ function GuideContent() {
     <>
       <header className="guide-intro">
         <p className="eyebrow">
-            <ShieldCheck aria-hidden="true" size={15} /> Identity-derived
+          <ShieldCheck aria-hidden="true" size={15} /> Identity-derived
           application data
         </p>
         <h1>Give every account a real data boundary.</h1>
         <p>
           m-stash derives personal writes from the signed-in account and keeps
-          shared data in one deployment-managed scope. Browsers never choose a
-          namespace ID, owner ID, or database credential.
+          app-wide facts in one deployment-managed shared scope. Store app
+          name, version, configuration, feature flags, catalogs, or
+          leaderboards once; signed-in clients read the published result.
         </p>
       </header>
       <section className="guide-section workflow-section">
@@ -1494,7 +1519,7 @@ function GuideContent() {
           <p className="eyebrow">
             <BookOpen aria-hidden="true" size={15} /> The core model
           </p>
-          <h2>Identity-derived personal data, one managed shared scope.</h2>
+          <h2>Personal user data, shared app facts.</h2>
         </div>
         <ol className="workflow-list">
           <li>
@@ -1521,8 +1546,9 @@ function GuideContent() {
             <div>
               <h3>Scope</h3>
               <p>
-                Personal data is owner-scoped; shared configuration and catalogs
-                are deployment-scoped.
+                Personal data is owner-scoped. App name, app version,
+                configuration, catalogs, and leaderboards are
+                deployment-scoped.
               </p>
             </div>
           </li>
@@ -1557,8 +1583,9 @@ function GuideContent() {
           <article>
             <h3>Shared and public data</h3>
             <p>
-              Administrators and trusted backends control shared writes. Public
-              personal records resolve at routes such as{" "}
+              Administrators and trusted backends control app-wide facts such
+              as app name, version, and feature configuration. Public personal
+              records resolve at routes such as{" "}
               <code>/alex-dev/record/profile</code>.
             </p>
           </article>
