@@ -45,7 +45,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       SERVICE_TOKEN: ${SERVICE_TOKEN:-}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
     depends_on:
       mongo-init:
         condition: service_completed_successfully

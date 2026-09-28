@@ -2,6 +2,8 @@
 
 m-stash is a reusable identity and scoped-data API. A frontend can register users, give each one an immutable username, store profile-like records in their personal namespace, and read deployment-controlled shared data. A trusted backend can mutate shared state without receiving a user's password or MongoDB access.
 
+For a no-build browser reference, open [examples/browser/index.html](examples/browser/index.html). It keeps the bearer token only in memory and demonstrates signup, login, personal resources, and authenticated shared reads.
+
 Set the API URL once:
 
 ```sh
@@ -19,6 +21,8 @@ curl --request POST "$API_URL/v1/auth/signup" \
 ```
 
 The response includes a bearer `token`, a `user`, and a personal `namespace`. The same call also establishes an HttpOnly browser session when called from the m-stash origin.
+
+Usernames are normalized to lowercase and must be 3-32 ASCII characters. They start and end with a letter or number, with single hyphens or underscores allowed between name parts. A username is permanent once claimed.
 
 Use normal login to restore a session:
 

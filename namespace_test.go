@@ -16,7 +16,19 @@ func TestValidateNamespaceSlug(t *testing.T) {
 		t.Fatalf("valid username rejected: %v", err)
 	}
 
-	for _, value := range []string{"ab", "Ada", "ada.dev", "api", "with spaces"} {
+	for _, value := range []string{
+		"ab",
+		"Ada",
+		"ada.dev",
+		"api",
+		"with spaces",
+		"ada-",
+		"_ada",
+		"ada--lovelace",
+		"ada__lovelace",
+		"ada-_lovelace",
+		"ada-lovelacé",
+	} {
 		if err := validateNamespaceSlug(value); err == nil {
 			t.Errorf("invalid username %q was accepted", value)
 		}

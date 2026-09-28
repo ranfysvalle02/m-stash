@@ -179,12 +179,25 @@ func validateNamespaceSlug(value string) error {
 	if _, reserved := reservedNamespaceSlugs[value]; reserved {
 		return errors.New("username is reserved")
 	}
-	for _, character := range value {
-		if !unicode.IsLower(character) && !unicode.IsDigit(character) && character != '-' && character != '_' {
+	if !isASCIIAlphaNumeric(value[0]) || !isASCIIAlphaNumeric(value[len(value)-1]) {
+		return errors.New("username must begin and end with a lowercase letter or number")
+	}
+	previousWasSeparator := false
+	for _, character := range []byte(value) {
+		isSeparator := character == '-' || character == '_'
+		if !isASCIIAlphaNumeric(character) && !isSeparator {
 			return errors.New("username must contain 3-32 lowercase letters, numbers, hyphens, or underscores")
 		}
+		if isSeparator && previousWasSeparator {
+			return errors.New("username cannot contain adjacent hyphens or underscores")
+		}
+		previousWasSeparator = isSeparator
 	}
 	return nil
+}
+
+func isASCIIAlphaNumeric(character byte) bool {
+	return character >= 'a' && character <= 'z' || character >= '0' && character <= '9'
 }
 
 func normalizeResourcePathSegment(value string) string {

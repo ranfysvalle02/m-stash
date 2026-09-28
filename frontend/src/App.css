@@ -32,6 +32,8 @@ input::placeholder, textarea::placeholder { color: #92948f; }
 .auth-switch { color: #65727c; font-size: .9rem; margin: 1.5rem 0 0; text-align: center; }
 .auth-switch a { color: #a83d2b; font-weight: 700; }
 .form-error { color: #b3412d; font-size: .88rem; margin: 0; }
+.username-feedback { color: #71808a; font-size: .78rem; font-weight: 500; line-height: 1.4; }
+.username-feedback.valid { color: #45d88a; }.username-feedback.invalid { color: #ff8d7a; }
 
 .workspace { background: #f6f3eb; display: grid; grid-template-columns: 15.5rem minmax(0, 1fr); min-height: 100svh; }
 .sidebar { background: #fffdf8; border-right: 1px solid #d9d1c3; display: flex; flex-direction: column; padding: 1.7rem 1rem 1.1rem; }

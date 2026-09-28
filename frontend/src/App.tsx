@@ -68,6 +68,28 @@ const emptyResource: ResourceInput = {
   visibility: "private",
 };
 
+const usernamePattern = /^[a-z0-9](?:[a-z0-9]|[-_](?=[a-z0-9])){2,31}$/;
+
+function normalizeUsername(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function usernameValidationMessage(value: string) {
+  if (value.length < 3 || value.length > 32) {
+    return "Use 3-32 characters.";
+  }
+  if (!/^[a-z0-9]/.test(value) || !/[a-z0-9]$/.test(value)) {
+    return "Start and end with a lowercase letter or number.";
+  }
+  if (/[-_]{2}|[-_][-_]/.test(value)) {
+    return "Use one hyphen or underscore between name parts.";
+  }
+  if (!usernamePattern.test(value)) {
+    return "Use lowercase letters, numbers, hyphens, or underscores only.";
+  }
+  return "";
+}
+
 function useBrowserSession() {
   const [session, setSession] = useState<SessionState>({ kind: "loading" });
 
@@ -161,13 +183,26 @@ function AuthenticationPage({
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const isSignUp = mode === "signup";
+  const usernameIssue = username ? usernameValidationMessage(username) : "";
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    if (isSignUp) {
+      const issue = usernameValidationMessage(username);
+      if (issue) {
+        setError(`Choose a valid username. ${issue}`);
+        return;
+      }
+    }
     setSubmitting(true);
     try {
-      if (isSignUp) await api.signUpWithNamespace(email, password, username);
+      if (isSignUp)
+        await api.signUpWithNamespace(
+          email,
+          password,
+          normalizeUsername(username),
+        );
       else await api.logIn(email, password);
       await onAuthenticated();
       navigate("/app/resources/record");
@@ -219,15 +254,31 @@ function AuthenticationPage({
                 <input
                   autoCapitalize="none"
                   autoComplete="username"
+                  aria-describedby="username-help"
+                  aria-invalid={Boolean(usernameIssue)}
                   maxLength={32}
                   onChange={(event) =>
-                    setUsername(event.target.value.toLowerCase())
+                    setUsername(normalizeUsername(event.target.value))
                   }
-                  pattern="[a-z0-9_-]{3,32}"
                   required
+                  spellCheck={false}
                   value={username}
                 />
               </span>
+              <small
+                className={
+                  usernameIssue
+                    ? "username-feedback invalid"
+                    : username
+                      ? "username-feedback valid"
+                      : "username-feedback"
+                }
+                id="username-help"
+              >
+                {usernameIssue || username
+                  ? usernameIssue || `Your permanent route: /${username}`
+                  : "3-32 lowercase letters or numbers; single - or _ between parts."}
+              </small>
             </label>
           )}
           {error && (
@@ -237,7 +288,7 @@ function AuthenticationPage({
           )}
           <button
             className="button primary full-width"
-            disabled={submitting}
+            disabled={submitting || Boolean(usernameIssue)}
             type="submit"
           >
             {submitting ? (
@@ -316,9 +367,36 @@ function WorkspaceGate({
       setSession={setSession}
     >
       <Routes>
-        <Route path="resources/:type" element={namespace ? <NamespaceDashboard scope="personal" canWrite /> : <Navigate replace to="/app/shared/config" />} />
-        <Route path="resources/:type/new" element={namespace ? <NamespaceResourceEditor scope="personal" canWrite /> : <Navigate replace to="/app/shared/config" />} />
-        <Route path="resources/:type/:slug" element={namespace ? <NamespaceResourceEditor scope="personal" canWrite /> : <Navigate replace to="/app/shared/config" />} />
+        <Route
+          path="resources/:type"
+          element={
+            namespace ? (
+              <NamespaceDashboard scope="personal" canWrite />
+            ) : (
+              <Navigate replace to="/app/shared/config" />
+            )
+          }
+        />
+        <Route
+          path="resources/:type/new"
+          element={
+            namespace ? (
+              <NamespaceResourceEditor scope="personal" canWrite />
+            ) : (
+              <Navigate replace to="/app/shared/config" />
+            )
+          }
+        />
+        <Route
+          path="resources/:type/:slug"
+          element={
+            namespace ? (
+              <NamespaceResourceEditor scope="personal" canWrite />
+            ) : (
+              <Navigate replace to="/app/shared/config" />
+            )
+          }
+        />
         <Route
           path="shared/:type"
           element={
@@ -346,9 +424,26 @@ function WorkspaceGate({
             />
           }
         />
-        <Route path="namespace" element={namespace ? <NamespaceSettings /> : <Navigate replace to="/app/shared/config" />} />
+        <Route
+          path="namespace"
+          element={
+            namespace ? (
+              <NamespaceSettings />
+            ) : (
+              <Navigate replace to="/app/shared/config" />
+            )
+          }
+        />
         <Route path="guide" element={<GuideContent />} />
-        <Route path="*" element={<Navigate replace to={namespace ? "resources/record" : "shared/config"} />} />
+        <Route
+          path="*"
+          element={
+            <Navigate
+              replace
+              to={namespace ? "resources/record" : "shared/config"}
+            />
+          }
+        />
       </Routes>
     </WorkspaceShell>
   );
@@ -378,25 +473,30 @@ function WorkspaceShell({
   return (
     <div className="workspace">
       <aside className={menuOpen ? "sidebar open" : "sidebar"}>
-        <Link className="wordmark" to={namespace ? "/app/resources/record" : "/app/shared/config"}>
+        <Link
+          className="wordmark"
+          to={namespace ? "/app/resources/record" : "/app/shared/config"}
+        >
           <span>m</span>stash
         </Link>
         <nav aria-label="Workspace">
-          {namespace && <>
-            <NavLink
-              end
-              onClick={() => setMenuOpen(false)}
-              to="/app/resources/record"
-            >
-              <BookOpen aria-hidden="true" size={18} /> My data
-            </NavLink>
-            <NavLink
-              onClick={() => setMenuOpen(false)}
-              to="/app/resources/record/new"
-            >
-              <PenLine aria-hidden="true" size={18} /> New record
-            </NavLink>
-          </>}
+          {namespace && (
+            <>
+              <NavLink
+                end
+                onClick={() => setMenuOpen(false)}
+                to="/app/resources/record"
+              >
+                <BookOpen aria-hidden="true" size={18} /> My data
+              </NavLink>
+              <NavLink
+                onClick={() => setMenuOpen(false)}
+                to="/app/resources/record/new"
+              >
+                <PenLine aria-hidden="true" size={18} /> New record
+              </NavLink>
+            </>
+          )}
           <NavLink onClick={() => setMenuOpen(false)} to="/app/shared/config">
             <Database aria-hidden="true" size={18} /> Shared data
           </NavLink>
@@ -408,9 +508,11 @@ function WorkspaceShell({
               <PenLine aria-hidden="true" size={18} /> New shared record
             </NavLink>
           )}
-          {namespace && <NavLink onClick={() => setMenuOpen(false)} to="/app/namespace">
-            <Settings aria-hidden="true" size={18} /> Namespace
-          </NavLink>}
+          {namespace && (
+            <NavLink onClick={() => setMenuOpen(false)} to="/app/namespace">
+              <Settings aria-hidden="true" size={18} /> Namespace
+            </NavLink>
+          )}
           <NavLink onClick={() => setMenuOpen(false)} to="/app/guide">
             <ShieldCheck aria-hidden="true" size={18} /> Platform guide
           </NavLink>
@@ -451,24 +553,33 @@ function WorkspaceShell({
           >
             <Menu aria-hidden="true" size={21} />
           </button>
-          <Link className="wordmark" to={namespace ? "/app/resources/record" : "/app/shared/config"}>
+          <Link
+            className="wordmark"
+            to={namespace ? "/app/resources/record" : "/app/shared/config"}
+          >
             <span>m</span>stash
           </Link>
-          {namespace ? <Link
+          {namespace ? (
+            <Link
               aria-label="Create record"
               className="icon-button"
               title="Create record"
               to="/app/resources/record/new"
             >
               <Plus aria-hidden="true" size={21} />
-            </Link> : claims.role === "admin" ? <Link
+            </Link>
+          ) : claims.role === "admin" ? (
+            <Link
               aria-label="Create shared record"
               className="icon-button"
               title="Create shared record"
               to="/app/shared/config/new"
             >
               <Plus aria-hidden="true" size={21} />
-            </Link> : <span />}
+            </Link>
+          ) : (
+            <span />
+          )}
         </header>
         {children}
       </div>
@@ -1064,6 +1175,7 @@ function NamespaceSettings() {
 function NamespaceLookupPage() {
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
+  const usernameIssue = username ? usernameValidationMessage(username) : "";
   return (
     <PublicLayout>
       <main className="discovery-page">
@@ -1081,21 +1193,38 @@ function NamespaceLookupPage() {
           className="records-query"
           onSubmit={(event) => {
             event.preventDefault();
-            const value = username.trim().toLowerCase();
-            if (value) navigate(`/${value}`);
+            if (!usernameIssue) navigate(`/${username}`);
           }}
         >
           <label>
             Open a namespace
             <input
               autoCapitalize="none"
-              onChange={(event) => setUsername(event.target.value)}
-              pattern="[a-z0-9_-]{3,32}"
+              aria-describedby="namespace-lookup-help"
+              aria-invalid={Boolean(usernameIssue)}
+              onChange={(event) =>
+                setUsername(normalizeUsername(event.target.value))
+              }
               placeholder="alex-dev"
+              spellCheck={false}
               value={username}
             />
+            <small
+              className={
+                usernameIssue
+                  ? "username-feedback invalid"
+                  : "username-feedback"
+              }
+              id="namespace-lookup-help"
+            >
+              {usernameIssue || "Enter an exact public username."}
+            </small>
           </label>
-          <button className="button primary" type="submit">
+          <button
+            className="button primary"
+            disabled={!username || Boolean(usernameIssue)}
+            type="submit"
+          >
             <ArrowUpRight aria-hidden="true" size={17} /> Open
           </button>
         </form>

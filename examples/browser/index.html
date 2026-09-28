@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>m-stash browser integration</title>
+    <style>
+      :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #071619; color: #edfff8; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-width: 320px; }
+      header, main { margin: 0 auto; max-width: 960px; padding: 24px; }
+      header { border-bottom: 1px solid #27636a; display: flex; gap: 16px; justify-content: space-between; }
+      h1, h2 { font-family: Georgia, serif; letter-spacing: 0; } h1 { margin: 0; } h2 { font-size: 1.2rem; margin-top: 0; }
+      main { display: grid; gap: 16px; }.grid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      section { background: #0c292d; border: 1px solid #27636a; border-radius: 6px; padding: 20px; }.wide { grid-column: 1 / -1; }
+      label { color: #bde5dd; display: grid; font-size: .82rem; font-weight: 700; gap: 6px; margin-bottom: 12px; }
+      input, textarea, button { border: 1px solid #34727a; border-radius: 4px; font: inherit; padding: 10px; } input, textarea { background: #041419; color: #f2fff9; width: 100%; } textarea { min-height: 84px; resize: vertical; }
+      button { background: #68f2ff; color: #071619; cursor: pointer; font-weight: 800; } button:hover { background: #a4f8ff; } button:disabled { cursor: not-allowed; opacity: .5; }
+      .row { display: flex; flex-wrap: wrap; gap: 10px; }.row > * { flex: 1 1 12rem; }.status { color: #68f2ff; font-size: .82rem; }.hint { color: #b9d8d2; font-size: .8rem; line-height: 1.5; }.valid { color: #72f4a8; }.invalid { color: #ff9a8a; }
+      .session-panel { align-items: center; border-color: #3b9f79; display: flex; gap: 16px; justify-content: space-between; }.session-panel[hidden] { display: none; }.session-panel h2 { margin-bottom: 4px; }.session-panel p { color: #c8eee2; font-size: .86rem; line-height: 1.45; margin: 0; }.session-badge { color: #72f4a8; font-size: .78rem; font-weight: 800; text-transform: uppercase; }
+      .protected { transition: opacity .2s ease; }.protected[data-ready="false"] { opacity: .58; }.protected[data-ready="false"] button, .protected[data-ready="false"] input, .protected[data-ready="false"] textarea { cursor: not-allowed; }.action-message { color: #b9d8d2; font-size: .82rem; line-height: 1.4; margin: 12px 0 0; }.action-message.success { color: #72f4a8; }.action-message.error { color: #ff9a8a; }
+      pre { background: #020b10; border: 1px solid #27636a; margin: 0; min-height: 180px; overflow: auto; padding: 14px; white-space: pre-wrap; word-break: break-word; }
+      code { color: #68f2ff; } @media (max-width: 680px) { .grid { grid-template-columns: 1fr; }.wide { grid-column: auto; } header { align-items: flex-start; flex-direction: column; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div><h1>m-stash</h1><span class="hint">No-build browser integration</span></div>
+      <span class="status" id="session-status">No in-memory token</span>
+    </header>
+    <main>
+      <section>
+        <h2>Connection</h2>
+        <label>API base URL <input id="api-base" type="url" /></label>
+        <p class="hint">Use your m-stash origin. A token is kept only in this page's memory and is cleared on reload.</p>
+      </section>
+
+      <section class="session-panel" hidden id="active-session">
+        <div>
+          <span class="session-badge">Authenticated</span>
+          <h2 id="active-session-title">Session ready</h2>
+          <p id="active-session-detail">Your bearer token is ready for personal and shared data requests.</p>
+        </div>
+        <button id="sign-out" type="button">Clear local token</button>
+      </section>
+
+      <div class="grid">
+        <section>
+          <h2>1. Sign up</h2>
+          <form id="signup-form">
+            <label>Email <input id="signup-email" autocomplete="email" required type="email" /></label>
+            <label>Password <input id="signup-password" autocomplete="new-password" minlength="12" required type="password" /></label>
+            <label>Username <input id="signup-username" autocomplete="username" autocapitalize="none" maxlength="32" required spellcheck="false" /></label>
+            <p class="hint" id="username-help">3-32 lowercase letters or numbers; single <code>-</code> or <code>_</code> between parts.</p>
+            <button id="signup-submit" type="submit">Create account</button>
+          </form>
+        </section>
+
+        <section>
+          <h2>2. Log in</h2>
+          <form id="login-form">
+            <label>Email <input id="login-email" autocomplete="email" required type="email" /></label>
+            <label>Password <input id="login-password" autocomplete="current-password" minlength="12" required type="password" /></label>
+            <button type="submit">Log in</button>
+          </form>
+          <div class="row" style="margin-top: 12px">
+            <button id="verify-session" type="button">Verify token</button>
+            <button id="clear-session" type="button">Clear local token</button>
+          </div>
+        </section>
+
+        <section class="wide protected" data-ready="false" id="personal-scope">
+          <h2>3. Personal scope</h2>
+          <div class="row">
+            <button id="load-namespace" type="button">Load my namespace</button>
+          </div>
+          <form id="resource-form" style="margin-top: 14px">
+            <div class="row">
+              <label>Type <input id="resource-type" required value="profile" /></label>
+              <label>Slug <input id="resource-slug" required value="main" /></label>
+            </div>
+            <label>Title <input id="resource-title" required value="Browser-created profile" /></label>
+            <label>Summary <input id="resource-summary" value="Created through the plain HTML client." /></label>
+            <label>Content <textarea id="resource-content"># Hello from a browser client</textarea></label>
+            <button type="submit">Save private personal resource</button>
+          </form>
+          <p class="hint">The first save creates this type and slug. Later saves replace that same resource.</p>
+          <p class="action-message" id="personal-message">Log in to load or save your personal data.</p>
+        </section>
+
+        <section class="wide protected" data-ready="false" id="shared-scope">
+          <h2>4. Shared application data</h2>
+          <form id="shared-form" class="row">
+            <label>Type <input id="shared-type" required value="leaderboard" /></label>
+            <button type="submit">Read signed-in shared records</button>
+          </form>
+          <p class="hint">This client deliberately does not carry <code>SERVICE_TOKEN</code>. Shared writes belong in trusted backend infrastructure.</p>
+          <p class="action-message" id="shared-message">Log in to read shared application data.</p>
+        </section>
+      </div>
+
+      <section>
+        <h2>Response log</h2>
+        <pre id="output" aria-live="polite">Ready.</pre>
+      </section>
+    </main>
+    <script>
+      const state = { token: "", user: null, namespace: null };
+      const usernamePattern = /^[a-z0-9](?:[a-z0-9]|[-_](?=[a-z0-9])){2,31}$/;
+      const $ = (id) => document.getElementById(id);
+      const apiBase = () => $("api-base").value.replace(/\/$/, "");
+
+      const servedByMStash = location.protocol.startsWith("http") && ["4000", "4001"].includes(location.port);
+      $("api-base").value = servedByMStash ? location.origin : "http://localhost:4000";
+
+      function usernameIssue(value) {
+        if (value.length < 3 || value.length > 32) return "Use 3-32 characters.";
+        if (!/^[a-z0-9]/.test(value) || !/[a-z0-9]$/.test(value)) return "Start and end with a lowercase letter or number.";
+        if (/[-_][-_]/.test(value)) return "Use one hyphen or underscore between name parts.";
+        if (!usernamePattern.test(value)) return "Use lowercase letters, numbers, hyphens, or underscores only.";
+        return "";
+      }
+
+      function redact(value) {
+        return JSON.parse(JSON.stringify(value, (key, entry) => key === "token" || key === "password" ? "[redacted]" : entry));
+      }
+
+      function log(label, payload) {
+        $("output").textContent = `${label}\n${JSON.stringify(redact(payload), null, 2)}`;
+      }
+
+      function updateSession() {
+        const authenticated = Boolean(state.token && state.user);
+        $("session-status").textContent = authenticated ? `Signed in as ${state.user.email} (${state.user.role})` : "No in-memory token";
+        $("active-session").hidden = !authenticated;
+        $("personal-scope").dataset.ready = String(authenticated);
+        $("shared-scope").dataset.ready = String(authenticated);
+        $("load-namespace").disabled = !authenticated;
+        $("resource-form").querySelectorAll("input, textarea, button").forEach((element) => { element.disabled = !authenticated; });
+        $("shared-form").querySelectorAll("input, button").forEach((element) => { element.disabled = !authenticated; });
+        if (authenticated) {
+          $("active-session-title").textContent = `Signed in as ${state.user.email}`;
+          $("active-session-detail").textContent = `Role: ${state.user.role}. Your token is held only in this page until you clear it or reload.`;
+          $("personal-message").textContent = "Ready to load your namespace or save a personal resource.";
+          $("shared-message").textContent = "Ready to read shared application data available to signed-in users.";
+        } else {
+          $("personal-message").textContent = "Log in to load or save your personal data.";
+          $("shared-message").textContent = "Log in to read shared application data.";
+        }
+      }
+
+      class APIError extends Error {
+        constructor(status, payload) {
+          super(payload.error || `Request failed with ${status}`);
+          this.status = status;
+        }
+      }
+
+      async function request(path, { method = "GET", body, authenticated = true } = {}) {
+        const headers = new Headers({ Accept: "application/json" });
+        if (body !== undefined) headers.set("Content-Type", "application/json");
+        if (authenticated && state.token) headers.set("Authorization", `Bearer ${state.token}`);
+        const response = await fetch(`${apiBase()}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+        const payload = await response.json().catch(() => ({}));
+        log(`${method} ${path} -> ${response.status}`, payload);
+        if (!response.ok) throw new APIError(response.status, payload);
+        return payload;
+      }
+
+      function adoptSession(payload) {
+        state.token = payload.token;
+        state.user = payload.user;
+        state.namespace = payload.namespace || null;
+        updateSession();
+        $("signup-password").value = "";
+        $("login-password").value = "";
+        log("Session established", { user: state.user, namespace: state.namespace });
+      }
+
+      function requireSession(message) {
+        if (state.token && state.user) return true;
+        log("Authentication required", { error: message });
+        return false;
+      }
+
+      $("signup-username").addEventListener("input", (event) => {
+        const input = event.currentTarget;
+        input.value = input.value.trim().toLowerCase();
+        const issue = input.value ? usernameIssue(input.value) : "";
+        const help = $("username-help");
+        help.textContent = issue || (input.value ? `Permanent public route: /${input.value}` : "3-32 lowercase letters or numbers; single - or _ between parts.");
+        help.className = `hint ${issue ? "invalid" : input.value ? "valid" : ""}`;
+        $("signup-submit").disabled = Boolean(issue);
+      });
+
+      $("signup-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const username = $("signup-username").value;
+        const issue = usernameIssue(username);
+        if (issue) return log("Choose a valid username", { error: issue });
+        try {
+          const payload = await request("/v1/auth/signup", { method: "POST", authenticated: false, body: { email: $("signup-email").value, password: $("signup-password").value, username } });
+          adoptSession(payload);
+        } catch (error) { log("Signup failed", { error: error.message }); }
+      });
+
+      $("login-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          adoptSession(await request("/v1/auth/login", { method: "POST", authenticated: false, body: { email: $("login-email").value, password: $("login-password").value } }));
+        } catch (error) { log("Login failed", { error: error.message }); }
+      });
+
+      $("verify-session").addEventListener("click", async () => {
+        if (!requireSession("Log in before verifying a token.")) return;
+        try { const payload = await request("/v1/auth/verify"); state.user = payload.claims; updateSession(); log("Session verified", { claims: state.user }); } catch (error) { log("Verification failed", { error: error.message }); }
+      });
+      function clearSession() { state.token = ""; state.user = null; state.namespace = null; updateSession(); log("Local token cleared", {}); }
+      $("clear-session").addEventListener("click", clearSession);
+      $("sign-out").addEventListener("click", clearSession);
+      $("load-namespace").addEventListener("click", async () => { if (!requireSession("Log in before loading a namespace.")) return; try { state.namespace = (await request("/v1/me/namespace")).data; $("personal-message").textContent = `Loaded personal namespace /${state.namespace.slug}.`; $("personal-message").className = "action-message success"; } catch (error) { $("personal-message").textContent = error.message; $("personal-message").className = "action-message error"; log("Namespace lookup failed", { error: error.message }); } });
+      $("resource-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!requireSession("Log in before saving a personal resource.")) return;
+        const type = encodeURIComponent($("resource-type").value);
+        const slug = encodeURIComponent($("resource-slug").value);
+        const resource = {
+          title: $("resource-title").value,
+          summary: $("resource-summary").value,
+          content: $("resource-content").value,
+          visibility: "private",
+        };
+        try {
+          await request(`/v1/me/resources/${type}`, { method: "POST", body: { ...resource, slug: $("resource-slug").value } });
+          $("personal-message").textContent = `Created /${state.namespace?.slug || "me"}/${$("resource-type").value}/${$("resource-slug").value}.`;
+          $("personal-message").className = "action-message success";
+          log("Personal resource created", { type: $("resource-type").value, slug: $("resource-slug").value });
+        } catch (error) {
+          if (!(error instanceof APIError) || error.status !== 409) {
+            return log("Personal resource save failed", { error: error.message });
+          }
+          try {
+            await request(`/v1/me/resources/${type}/${slug}`, { method: "PUT", body: resource });
+            $("personal-message").textContent = `Updated /${state.namespace?.slug || "me"}/${$("resource-type").value}/${$("resource-slug").value}.`;
+            $("personal-message").className = "action-message success";
+            log("Personal resource updated", { type: $("resource-type").value, slug: $("resource-slug").value });
+          } catch (updateError) {
+            $("personal-message").textContent = updateError.message;
+            $("personal-message").className = "action-message error";
+            log("Personal resource save failed", { error: updateError.message });
+          }
+        }
+      });
+      $("shared-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!requireSession("Log in before reading shared data.")) return;
+        try { const payload = await request(`/v1/shared/resources/${encodeURIComponent($("shared-type").value)}?limit=20`); $("shared-message").textContent = `Loaded ${payload.data.length} shared ${$("shared-type").value} record(s).`; $("shared-message").className = "action-message success"; } catch (error) { $("shared-message").textContent = error.message; $("shared-message").className = "action-message error"; log("Shared data read failed", { error: error.message }); }
+      });
+
+      updateSession();
+    </script>
+  </body>
+</html>
