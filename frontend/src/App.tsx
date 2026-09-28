@@ -6,16 +6,21 @@ import {
   Check,
   ChevronRight,
   Compass,
+  Copy,
+  Database,
   FilePenLine,
   Globe2,
+  Key,
   Link2,
   LoaderCircle,
+  Lock,
   LogOut,
   Menu,
   PenLine,
   Plus,
   Save,
   Settings,
+  ShieldCheck,
   Trash2,
   UserRound,
   X,
@@ -59,6 +64,35 @@ const emptyStash: StashInput = {
   tags: [],
   isPublic: false,
 }
+
+const composeEnvironment = `MONGO_ROOT_USERNAME=mstash
+MONGO_ROOT_PASSWORD=replace-with-a-unique-database-password
+MONGO_DB=app_db
+JWT_SECRET=replace-with-a-random-secret-at-least-32-characters
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=replace-with-an-admin-password-at-least-12-characters
+SESSION_COOKIE_SECURE=false`
+
+const externalMongoEnvironment = `MONGO_URI=mongodb+srv://user:password@cluster.example.net/?retryWrites=true
+MONGO_DB=app_db
+JWT_SECRET=replace-with-a-random-secret-at-least-32-characters
+ALLOWED_ORIGINS=https://your-domain.example
+SESSION_COOKIE_SECURE=true
+TRUST_PROXY=true`
+
+const environmentVariables = [
+  { name: 'MONGO_URI', requirement: 'Required with external Mongo', description: 'MongoDB replica-set or sharded-cluster connection URI. The included Compose stack creates this internally.' },
+  { name: 'MONGO_DB', requirement: 'Required', description: 'Database name used for profiles, posts, sessions, and the durable outbox.' },
+  { name: 'JWT_SECRET', requirement: 'Required', description: 'At least 32 random characters. Signs API tokens and browser sessions.' },
+  { name: 'MONGO_ROOT_USERNAME + MONGO_ROOT_PASSWORD', requirement: 'Compose only', description: 'Root credentials used by the included local MongoDB container and its generated service URI.' },
+  { name: 'ADMIN_EMAIL + ADMIN_PASSWORD', requirement: 'Optional pair', description: 'Create the initial admin or promote an existing matching account. The password is only used on first creation.' },
+  { name: 'SESSION_COOKIE_SECURE', requirement: 'Required for local HTTP', description: 'Use false only on localhost over HTTP. Keep true for HTTPS deployments.' },
+  { name: 'ACCESS_TOKEN_TTL + REFRESH_SESSION_TTL', requirement: 'Optional', description: 'Control short-lived access tokens and longer browser refresh sessions.' },
+  { name: 'ALLOWED_ORIGINS', requirement: 'Recommended', description: 'Comma-separated browser origins when a separate web client calls the API.' },
+  { name: 'TRUST_PROXY', requirement: 'Conditional', description: 'Set true only behind a proxy you control that terminates TLS and supplies forwarded headers.' },
+  { name: 'METRICS_TOKEN', requirement: 'Recommended in production', description: 'At least 32 characters to enable the protected Prometheus metrics endpoint.' },
+  { name: 'PORT + JWT_ISSUER + JWT_AUDIENCE + M_STASH_CONFIG', requirement: 'Optional', description: 'Use for listener selection, token claims, and selected legacy file-based configuration.' },
+]
 
 function useBrowserSession() {
   const [session, setSession] = useState<SessionState>({ kind: 'loading' })
@@ -113,6 +147,7 @@ function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/discover" replace />} />
         <Route path="/discover" element={<DiscoveryPage />} />
+        <Route path="/guide" element={<SetupGuidePage />} />
         <Route path="/login" element={<AuthenticationPage mode="login" onAuthenticated={browserSession.restore} />} />
         <Route path="/signup" element={<AuthenticationPage mode="signup" onAuthenticated={browserSession.restore} />} />
         <Route path="/p/:id" element={<PublicStashPage />} />
@@ -176,6 +211,7 @@ function AuthenticationPage({ mode, onAuthenticated }: { mode: 'login' | 'signup
           {isSignUp ? 'Already have an account?' : 'Need an account?'}{' '}
           <Link to={isSignUp ? '/login' : '/signup'}>{isSignUp ? 'Log in' : 'Create one'}</Link>
         </p>
+        <Link className="auth-guide-link" to="/guide"><BookOpen aria-hidden="true" size={16} /> How m-stash runs</Link>
       </section>
     </main>
   )
@@ -243,6 +279,7 @@ function WorkspaceGate({ claims, onSessionChange }: { claims: UserClaims; onSess
         <Route path="posts/new" element={<PostEditor />} />
         <Route path="posts/:id" element={<PostEditor />} />
         <Route path="profile" element={<ProfileEditor initial={profile ?? emptyProfile} onSaved={setProfile} />} />
+        <Route path="setup" element={<SetupGuidePage workspace />} />
         <Route path="*" element={<Navigate to="posts" replace />} />
       </Routes>
     </WorkspaceShell>
@@ -270,6 +307,7 @@ function WorkspaceShell({ children, claims, profile, onSessionChange }: { childr
           <NavLink end onClick={() => setMenuOpen(false)} to="/app/posts"><BookOpen aria-hidden="true" size={18} /> Posts</NavLink>
           <NavLink onClick={() => setMenuOpen(false)} to="/app/posts/new"><PenLine aria-hidden="true" size={18} /> New post</NavLink>
           <NavLink onClick={() => setMenuOpen(false)} to="/app/profile"><Settings aria-hidden="true" size={18} /> Profile</NavLink>
+          <NavLink onClick={() => setMenuOpen(false)} to="/app/setup"><ShieldCheck aria-hidden="true" size={18} /> Setup</NavLink>
         </nav>
         <div className="sidebar-foot">
           {profile?.isPublic && <Link className="site-link" to={`/@${profile.handle}`}><Globe2 aria-hidden="true" size={17} /> View site <ArrowUpRight aria-hidden="true" size={15} /></Link>}
@@ -348,6 +386,7 @@ function ProfileEditor({ initial, onboarding = false, onSaved }: { initial: Prof
           {profile.links.length < 8 && <button className="text-button" onClick={() => update('links', [...profile.links, { label: '', url: '' }])} type="button"><Plus aria-hidden="true" size={16} /> Add link</button>}
         </fieldset>
         <label className="switch-row"><input checked={profile.isPublic} onChange={(event) => update('isPublic', event.target.checked)} type="checkbox" /><span><strong>Public profile</strong><small>Let readers find this page and your published posts.</small></span></label>
+        <p className="profile-visibility-note"><Globe2 aria-hidden="true" size={16} /> Published posts are visible in discovery. A public profile also gives readers one stable place to find all of your published work. <Link to="/guide">How hosting works</Link></p>
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="form-actions">
           {saved && <p className="save-state"><Check aria-hidden="true" size={16} /> Saved</p>}
@@ -427,6 +466,10 @@ function Dashboard() {
       <div className="filter-bar" aria-label="Post status">
         {(['all', 'draft', 'published'] as const).map((option) => <button className={status === option ? 'filter active' : 'filter'} key={option} onClick={() => setStatus(option)} type="button">{option === 'all' ? 'All posts' : option === 'draft' ? 'Drafts' : 'Published'}</button>)}
       </div>
+      <section className="workspace-guide-callout" aria-label="Workspace guide">
+        <div><p className="eyebrow"><ShieldCheck aria-hidden="true" size={15} /> Run it your way</p><h2>Writing and hosting are separate jobs.</h2><p>Use this workspace to publish. Use Setup to configure MongoDB, browser sessions, an admin account, and deployment-safe environment variables.</p></div>
+        <Link className="button secondary" to="/app/setup"><Settings aria-hidden="true" size={16} /> Open setup</Link>
+      </section>
       {error && <p className="form-error" role="alert">{error}</p>}
       {loading ? <LoadingRows /> : stashes.length === 0 ? <EmptyPosts status={status} /> : <div className="post-list">
         {stashes.map((stash) => <article className="post-row" key={stash.id}>
@@ -528,6 +571,7 @@ function PostEditor() {
         <div className="tag-editor"><div className="tag-stack">{stash.tags.map((tag) => <span className="tag removable" key={tag}>{tag}<button aria-label={`Remove ${tag} tag`} onClick={() => update('tags', stash.tags.filter((existing) => existing !== tag))} type="button"><X aria-hidden="true" size={13} /></button></span>)}</div><input aria-label="Add tag" onChange={(event) => setTagText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addTag() } }} placeholder="Add a tag" value={tagText} /><button aria-label="Add tag" className="icon-button" onClick={addTag} title="Add tag" type="button"><Plus aria-hidden="true" size={16} /></button></div>
         <div className="editor-mode" role="tablist" aria-label="Editor mode"><button aria-selected={mode === 'write'} className={mode === 'write' ? 'active' : ''} onClick={() => setMode('write')} role="tab" type="button">Write</button><button aria-selected={mode === 'preview'} className={mode === 'preview' ? 'active' : ''} onClick={() => setMode('preview')} role="tab" type="button">Preview</button></div>
         {mode === 'write' ? <textarea aria-label="Post content in Markdown" className="content-editor" onChange={(event) => update('content', event.target.value)} placeholder="Begin writing in Markdown..." value={stash.content} /> : <article className="markdown-body preview-body"><Markdown content={stash.content || '*Nothing to preview yet.*'} /></article>}
+        <p className="publish-note"><Lock aria-hidden="true" size={15} /> {stash.isPublic ? 'This post is public and appears in discovery.' : 'This draft is private until you publish it.'} <Link to="/app/setup">Read the setup guide</Link></p>
         {error && <p className="form-error" role="alert">{error}</p>}
       </div>
     </main>
@@ -637,8 +681,69 @@ function PublicProfilePage() {
   return <PublicLayout>{error ? <StatePage title="This profile is unavailable" detail={error} /> : !profile ? <LoadingPage /> : <main className="profile-page"><header className="profile-hero"><Avatar name={profile.displayName} url={profile.avatarURL} /><div><p className="eyebrow">@{profile.handle}</p><h1>{profile.displayName}</h1>{profile.bio && <p>{profile.bio}</p>}{profile.links && profile.links.length > 0 && <div className="profile-links">{profile.links.map((link) => <a href={link.url} key={link.url} rel="noreferrer" target="_blank"><Link2 aria-hidden="true" size={15} /> {link.label}</a>)}</div>}</div></header><section className="profile-posts"><h2>Published work</h2>{stashes.length === 0 ? <p className="quiet">No published posts yet.</p> : <div className="public-post-list">{stashes.map((stash) => <PublicPostPreview key={stash._id} stash={stash} />)}</div>}</section></main>}</PublicLayout>
 }
 
+function SetupGuidePage({ workspace = false }: { workspace?: boolean }) {
+  const content = <GuideContent />
+  return workspace ? <main className="setup-page">{content}</main> : <PublicLayout><main className="setup-page public-guide">{content}</main></PublicLayout>
+}
+
+function GuideContent() {
+  return <>
+    <header className="guide-intro">
+      <p className="eyebrow"><ShieldCheck aria-hidden="true" size={15} /> Operator guide</p>
+      <h1>Know exactly what runs your publishing desk.</h1>
+      <p>m-stash is one service: its Go API, browser workspace, session security, and public reader travel in the same deployable image. Configure secrets in your host, never in the browser.</p>
+    </header>
+    <section className="guide-section workflow-section">
+      <div className="guide-section-heading"><p className="eyebrow"><BookOpen aria-hidden="true" size={15} /> The publishing loop</p><h2>Give writers a calm path from private thought to public work.</h2></div>
+      <ol className="workflow-list"><li><span>01</span><div><h3>Claim your page</h3><p>Set a public handle and profile. Readers use it to find your published archive.</p></div></li><li><span>02</span><div><h3>Write a private draft</h3><p>Posts remain visible only to their author until the Publish control is used.</p></div></li><li><span>03</span><div><h3>Preview, then publish</h3><p>Review Markdown in place and toggle publication without duplicating the post.</p></div></li><li><span>04</span><div><h3>Let readers discover it</h3><p>Published posts enter discovery; public profiles collect a creator's published writing.</p></div></li></ol>
+    </section>
+    <section className="guide-section">
+      <div className="guide-section-heading"><p className="eyebrow"><Database aria-hidden="true" size={15} /> Choose a data path</p><h2>Start with the stack you actually have.</h2></div>
+      <div className="guide-paths">
+        <article className="guide-path"><span className="guide-number">01</span><h3>Included Compose stack</h3><p>Copy <code>.env.example</code> to <code>.env</code>, set its required secrets, then start MongoDB as a one-node replica set and m-stash together. Open <code>http://localhost:4000</code> when the health check is ready.</p><code>cp .env.example .env && docker compose up --build --wait</code></article>
+        <article className="guide-path"><span className="guide-number">02</span><h3>Your existing MongoDB</h3><p>Use a replica set or sharded cluster. Pass its URI to the service, set your public browser origin, and keep cookies secure behind HTTPS.</p><code>docker run ... m-stash</code></article>
+      </div>
+    </section>
+    <section className="guide-section environment-section">
+      <div className="guide-section-heading"><p className="eyebrow"><Key aria-hidden="true" size={15} /> Environment contract</p><h2>Variables are the control plane.</h2><p>Names and intent are visible here. Actual values remain in your host environment or secret manager.</p></div>
+      <div className="environment-list">
+        {environmentVariables.map((variable) => <article className="environment-row" key={variable.name}><div><code>{variable.name}</code><span className={variable.requirement.startsWith('Required') ? 'requirement required' : 'requirement'}>{variable.requirement}</span></div><p>{variable.description}</p></article>)}
+      </div>
+    </section>
+    <section className="guide-section config-section">
+      <div className="guide-section-heading"><p className="eyebrow"><Settings aria-hidden="true" size={15} /> Start from safe placeholders</p><h2>Two useful configuration shapes.</h2></div>
+      <div className="config-snippets"><ConfigSnippet title="Local Compose" description="The included Compose file turns these Mongo root credentials into the service connection internally." content={composeEnvironment} /><ConfigSnippet title="Hosted MongoDB" description="Set these through your platform's encrypted environment-variable or secret-management controls." content={externalMongoEnvironment} /></div>
+    </section>
+    <section className="guide-section guardrail-section">
+      <div><p className="eyebrow"><Lock aria-hidden="true" size={15} /> Before you ship</p><h2>Keep the browser out of your database.</h2></div>
+      <ul>
+        <li><Check aria-hidden="true" size={17} /> Keep <code>JWT_SECRET</code>, Mongo credentials, and metrics tokens out of browser code.</li>
+        <li><Check aria-hidden="true" size={17} /> Set <code>SESSION_COOKIE_SECURE=true</code> on every HTTPS deployment.</li>
+        <li><Check aria-hidden="true" size={17} /> Set <code>TRUST_PROXY=true</code> only when a proxy you control forwards HTTPS information.</li>
+        <li><Check aria-hidden="true" size={17} /> Set both admin variables together. Existing accounts are promoted without replacing their password.</li>
+      </ul>
+    </section>
+  </>
+}
+
+function ConfigSnippet({ title, description, content }: { title: string; description: string; content: string }) {
+  const [copied, setCopied] = useState(false)
+
+  async function copyConfiguration() {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1800)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return <article className="config-snippet"><div className="snippet-heading"><div><h3>{title}</h3><p>{description}</p></div><button aria-label={`Copy ${title} configuration`} className="icon-button" onClick={() => void copyConfiguration()} title="Copy configuration" type="button">{copied ? <Check aria-hidden="true" size={17} /> : <Copy aria-hidden="true" size={17} />}</button></div><pre><code>{content}</code></pre></article>
+}
+
 function PublicLayout({ children }: { children: React.ReactNode }) {
-  return <div className="public-shell"><header className="public-header"><Link className="wordmark" to="/discover"><span>m</span>stash</Link><nav><Link to="/discover">Discover</Link><Link className="button secondary small-button" to="/login"><UserRound aria-hidden="true" size={16} /> Log in</Link></nav></header>{children}<footer className="public-footer"><Link className="wordmark" to="/discover"><span>m</span>stash</Link><p>Made for work worth returning to.</p></footer></div>
+  return <div className="public-shell"><header className="public-header"><Link className="wordmark" to="/discover"><span>m</span>stash</Link><nav><Link to="/discover">Discover</Link><Link to="/guide">How it works</Link><Link className="button secondary small-button" to="/login"><UserRound aria-hidden="true" size={16} /> Log in</Link></nav></header>{children}<footer className="public-footer"><Link className="wordmark" to="/discover"><span>m</span>stash</Link><Link to="/guide">Run your own workspace</Link><p>Made for work worth returning to.</p></footer></div>
 }
 
 function Markdown({ content }: { content: string }) {
