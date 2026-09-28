@@ -2,7 +2,7 @@
 
 m-stash is a reusable identity and scoped-data API. A frontend can register users, give each one an immutable username, store profile-like records in their personal namespace, and read deployment-controlled shared data. A trusted backend can mutate shared state without receiving a user's password or MongoDB access.
 
-For a no-build browser reference, open [examples/browser/index.html](examples/browser/index.html). It keeps the bearer token only in memory and demonstrates signup, login, personal resources, and authenticated shared reads.
+For a no-build browser reference, serve [examples/browser/index.html](examples/browser/index.html) from the m-stash deployment itself. It deliberately calls `location.origin`, so the API domain is fixed to the domain hosting the page. The client keeps its bearer token only in memory and demonstrates signup, login, personal resources, and authenticated shared reads.
 
 Set the API URL once:
 

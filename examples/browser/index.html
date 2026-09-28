@@ -5,114 +5,146 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>m-stash browser integration</title>
     <style>
-      :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #071619; color: #edfff8; }
+      :root {
+        color-scheme: light;
+        --ink: #142321;
+        --muted: #566965;
+        --canvas: #e8ede7;
+        --paper: #fbfcf8;
+        --line: #bdccc2;
+        --line-strong: #729286;
+        --green: #006b54;
+        --green-bright: #00a477;
+        --yellow: #efba4f;
+        --red: #b94b38;
+        --code: #122824;
+        font-family: Avenir Next, Avenir, Century Gothic, sans-serif;
+      }
       * { box-sizing: border-box; }
-      body { margin: 0; min-width: 320px; }
-      header, main { margin: 0 auto; max-width: 960px; padding: 24px; }
-      header { border-bottom: 1px solid #27636a; display: flex; gap: 16px; justify-content: space-between; }
-      h1, h2 { font-family: Georgia, serif; letter-spacing: 0; } h1 { margin: 0; } h2 { font-size: 1.2rem; margin-top: 0; }
-      main { display: grid; gap: 16px; }.grid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      section { background: #0c292d; border: 1px solid #27636a; border-radius: 6px; padding: 20px; }.wide { grid-column: 1 / -1; }
-      label { color: #bde5dd; display: grid; font-size: .82rem; font-weight: 700; gap: 6px; margin-bottom: 12px; }
-      input, textarea, button { border: 1px solid #34727a; border-radius: 4px; font: inherit; padding: 10px; } input, textarea { background: #041419; color: #f2fff9; width: 100%; } textarea { min-height: 84px; resize: vertical; }
-      button { background: #68f2ff; color: #071619; cursor: pointer; font-weight: 800; } button:hover { background: #a4f8ff; } button:disabled { cursor: not-allowed; opacity: .5; }
-      .row { display: flex; flex-wrap: wrap; gap: 10px; }.row > * { flex: 1 1 12rem; }.status { color: #68f2ff; font-size: .82rem; }.hint { color: #b9d8d2; font-size: .8rem; line-height: 1.5; }.valid { color: #72f4a8; }.invalid { color: #ff9a8a; }
-      .session-panel { align-items: center; border-color: #3b9f79; display: flex; gap: 16px; justify-content: space-between; }.session-panel[hidden] { display: none; }.session-panel h2 { margin-bottom: 4px; }.session-panel p { color: #c8eee2; font-size: .86rem; line-height: 1.45; margin: 0; }.session-badge { color: #72f4a8; font-size: .78rem; font-weight: 800; text-transform: uppercase; }
-      .protected { transition: opacity .2s ease; }.protected[data-ready="false"] { opacity: .58; }.protected[data-ready="false"] button, .protected[data-ready="false"] input, .protected[data-ready="false"] textarea { cursor: not-allowed; }.action-message { color: #b9d8d2; font-size: .82rem; line-height: 1.4; margin: 12px 0 0; }.action-message.success { color: #72f4a8; }.action-message.error { color: #ff9a8a; }
-      pre { background: #020b10; border: 1px solid #27636a; margin: 0; min-height: 180px; overflow: auto; padding: 14px; white-space: pre-wrap; word-break: break-word; }
-      code { color: #68f2ff; } @media (max-width: 680px) { .grid { grid-template-columns: 1fr; }.wide { grid-column: auto; } header { align-items: flex-start; flex-direction: column; } }
+      body { background: var(--canvas); color: var(--ink); margin: 0; min-width: 320px; }
+      [hidden] { display: none !important; }
+      button, input, textarea { font: inherit; }
+      button { cursor: pointer; }
+      button:disabled { cursor: not-allowed; opacity: .5; }
+      code, pre { font-family: SFMono-Regular, Consolas, monospace; }
+      h1, h2, h3, p { margin-top: 0; }
+      h1, h2, h3 { font-family: Iowan Old Style, Georgia, serif; font-weight: 500; letter-spacing: 0; }
+
+      .topbar { align-items: center; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; min-height: 68px; padding: 0 clamp(20px, 5vw, 72px); }
+      .brand { color: var(--ink); font-family: Iowan Old Style, Georgia, serif; font-size: 1.5rem; font-weight: 700; text-decoration: none; }
+      .brand b { color: var(--green); font-style: italic; }
+      .top-status { align-items: center; color: var(--muted); display: flex; font-size: .78rem; gap: 8px; }
+      .top-status::before { background: var(--line-strong); border-radius: 50%; content: ""; height: 8px; width: 8px; }
+      .top-status.live { color: var(--green); font-weight: 700; }.top-status.live::before { background: var(--green-bright); }
+      main { margin: 0 auto; max-width: 1180px; padding: clamp(28px, 6vw, 76px) clamp(20px, 5vw, 48px); }
+      .eyebrow { color: var(--green); font-size: .7rem; font-weight: 800; letter-spacing: .1em; margin: 0 0 8px; text-transform: uppercase; }
+      .button { align-items: center; background: var(--green); border: 1px solid var(--green); border-radius: 4px; color: #fff; display: inline-flex; font-size: .84rem; font-weight: 800; justify-content: center; min-height: 42px; padding: 10px 15px; transition: background .16s ease, transform .16s ease; }
+      .button:hover:not(:disabled) { background: #005541; transform: translateY(-1px); }.button.secondary { background: transparent; border-color: var(--line-strong); color: var(--ink); }.button.secondary:hover:not(:disabled) { background: #dbe8e0; }.button.danger { border-color: #d9a29a; color: var(--red); }.button.full { width: 100%; }
+      label { color: #304743; display: grid; font-size: .78rem; font-weight: 800; gap: 7px; margin-bottom: 15px; } input, textarea { background: var(--paper); border: 1px solid var(--line-strong); border-radius: 3px; color: var(--ink); min-height: 43px; padding: 10px 11px; width: 100%; } textarea { line-height: 1.5; min-height: 125px; resize: vertical; } input:focus, textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(0, 107, 84, .13); outline: 0; }
+      .notice, .field-note { color: var(--muted); font-size: .78rem; line-height: 1.45; margin: 0; }.notice.success, .field-note.valid { color: var(--green); }.notice.error, .field-note.invalid { color: var(--red); }
+
+      .auth-layout { display: grid; gap: clamp(30px, 7vw, 96px); grid-template-columns: minmax(0, .9fr) minmax(360px, .8fr); }.intro { border-top: 4px solid var(--green); padding-top: 18px; }.intro h1 { font-size: clamp(3rem, 7vw, 6rem); line-height: .89; margin-bottom: 20px; max-width: 10ch; }.intro > p:last-of-type { color: var(--muted); font-family: Iowan Old Style, Georgia, serif; font-size: 1.18rem; line-height: 1.5; max-width: 33rem; }
+      .value-list { border-top: 1px solid var(--line); list-style: none; margin: 34px 0 0; padding: 0; }.value-list li { border-bottom: 1px solid var(--line); color: var(--muted); display: grid; font-size: .88rem; gap: 10px; grid-template-columns: 28px 1fr; line-height: 1.45; padding: 14px 0; }.value-list strong { color: var(--green); font-family: Iowan Old Style, Georgia, serif; font-size: 1.2rem; }
+      .auth-station { border-top: 1px solid var(--line-strong); padding-top: 16px; }.connection-row { align-items: end; border-bottom: 1px solid var(--line); display: grid; gap: 12px; grid-template-columns: 1fr auto; padding-bottom: 18px; }.connection-row label { margin: 0; }.connection-row small { color: var(--muted); display: block; font-size: .74rem; font-weight: 500; line-height: 1.4; margin-top: 5px; }.mode-switch { display: flex; gap: 22px; margin: 26px 0 22px; }.mode-switch button, .workspace-tabs button { background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font-size: .82rem; font-weight: 800; padding: 10px 0; }.mode-switch button[aria-selected="true"], .workspace-tabs button[aria-selected="true"] { border-color: var(--green); color: var(--ink); }.auth-form { animation: reveal .3s ease both; }.auth-foot { color: var(--muted); font-size: .76rem; line-height: 1.5; margin: 18px 0 0; }
+
+      .workspace-shell { display: grid; gap: clamp(26px, 5vw, 60px); grid-template-columns: 220px minmax(0, 1fr); }.workspace-sidebar { border-top: 4px solid var(--green); padding-top: 16px; }.identity { border-bottom: 1px solid var(--line); padding-bottom: 20px; }.identity-email { font-family: Iowan Old Style, Georgia, serif; font-size: 1.12rem; line-height: 1.2; overflow-wrap: anywhere; }.identity-role { color: var(--green); font-size: .7rem; font-weight: 800; letter-spacing: .08em; margin: 7px 0 0; text-transform: uppercase; }.workspace-tabs { display: grid; margin: 22px 0; }.workspace-tabs button { border-bottom: 0; border-left: 2px solid transparent; display: block; padding: 11px 10px; text-align: left; }.workspace-tabs button[aria-selected="true"] { background: rgba(0, 107, 84, .08); border-left-color: var(--green); }.local-note { border-top: 1px solid var(--line); color: var(--muted); font-size: .74rem; line-height: 1.5; padding-top: 15px; }
+      .workspace-main { min-width: 0; }.workspace-panel { animation: reveal .3s ease both; }.workspace-head { align-items: end; border-bottom: 1px solid var(--line); display: flex; gap: 20px; justify-content: space-between; margin-bottom: 28px; padding-bottom: 20px; }.workspace-head h2 { font-size: clamp(2rem, 4vw, 3.3rem); line-height: .95; margin: 0; }.workspace-head p { color: var(--muted); font-size: .86rem; line-height: 1.45; margin: 8px 0 0; max-width: 42rem; }
+      .namespace-strip { align-items: center; border-bottom: 1px solid var(--line); border-top: 1px solid var(--line); display: flex; gap: 16px; justify-content: space-between; margin-bottom: 28px; padding: 15px 0; }.namespace-strip strong { font-family: Iowan Old Style, Georgia, serif; font-size: 1.2rem; }.namespace-strip p { color: var(--muted); font-size: .78rem; margin: 4px 0 0; }.namespace-strip .button { min-height: 36px; padding: 8px 11px; }
+      .resource-grid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }.resource-grid .wide { grid-column: 1 / -1; }.save-row { align-items: center; display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; margin-top: 4px; }.empty-result { border: 1px dashed var(--line-strong); color: var(--muted); font-family: Iowan Old Style, Georgia, serif; font-size: 1.08rem; line-height: 1.4; padding: 24px; }.shared-list { border-top: 1px solid var(--line); list-style: none; margin: 24px 0 0; padding: 0; }.shared-list li { align-items: start; border-bottom: 1px solid var(--line); display: flex; gap: 16px; justify-content: space-between; padding: 15px 0; }.shared-list strong { font-family: Iowan Old Style, Georgia, serif; font-size: 1.08rem; }.shared-list p { color: var(--muted); font-size: .8rem; line-height: 1.4; margin: 5px 0 0; }.resource-visibility { color: var(--green); font-size: .67rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+      .inspector-tools { align-items: center; border-bottom: 1px solid var(--line); display: flex; gap: 10px; justify-content: flex-end; padding-bottom: 20px; }.inspector-tools .button { min-height: 43px; white-space: nowrap; }.response-log { background: var(--code); color: #d9efe5; font-size: .77rem; line-height: 1.55; margin: 22px 0 0; max-height: 420px; min-height: 220px; overflow: auto; padding: 18px; white-space: pre-wrap; word-break: break-word; }
+      @keyframes reveal { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+      @media (max-width: 760px) { .topbar { align-items: flex-start; flex-direction: column; gap: 6px; justify-content: center; padding-bottom: 13px; padding-top: 13px; }.auth-layout, .workspace-shell, .connection-row, .inspector-tools, .resource-grid { grid-template-columns: 1fr; }.resource-grid .wide { grid-column: auto; }.workspace-sidebar { border-top: 0; display: contents; }.identity { border-top: 4px solid var(--green); order: -2; padding-top: 16px; }.workspace-tabs { display: flex; gap: 8px; order: -1; overflow-x: auto; }.workspace-tabs button { flex: 0 0 auto; }.workspace-head, .namespace-strip { align-items: flex-start; flex-direction: column; }.save-row .button { width: 100%; } }
+      @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
     </style>
   </head>
   <body>
-    <header>
-      <div><h1>m-stash</h1><span class="hint">No-build browser integration</span></div>
-      <span class="status" id="session-status">No in-memory token</span>
+    <header class="topbar">
+      <a class="brand" href="#top">m<b>.</b>stash</a>
+      <span class="top-status" id="session-status">Not connected</span>
     </header>
-    <main>
-      <section>
-        <h2>Connection</h2>
-        <label>API base URL <input id="api-base" type="url" /></label>
-        <p class="hint">Use your m-stash origin. A token is kept only in this page's memory and is cleared on reload.</p>
-      </section>
-
-      <section class="session-panel" hidden id="active-session">
-        <div>
-          <span class="session-badge">Authenticated</span>
-          <h2 id="active-session-title">Session ready</h2>
-          <p id="active-session-detail">Your bearer token is ready for personal and shared data requests.</p>
+    <main id="top">
+      <section class="auth-layout" id="auth-shell">
+        <div class="intro">
+          <p class="eyebrow">Browser reference implementation</p>
+          <h1>Identity in. Useful data out.</h1>
+          <p>A deliberately small client for the m-stash API. It signs a user in, works inside their personal namespace, and reads deployment-owned shared records.</p>
+          <ol class="value-list">
+            <li><strong>01</strong><span>Claim a permanent username that becomes a stable personal data route.</span></li>
+            <li><strong>02</strong><span>Save typed private resources without sending an owner or namespace ID.</span></li>
+            <li><strong>03</strong><span>Read shared application state as an authenticated user.</span></li>
+          </ol>
         </div>
-        <button id="sign-out" type="button">Clear local token</button>
-      </section>
-
-      <div class="grid">
-        <section>
-          <h2>1. Sign up</h2>
-          <form id="signup-form">
+        <div class="auth-station">
+          <div class="mode-switch" role="tablist" aria-label="Authentication mode">
+            <button aria-controls="signup-form" aria-selected="true" id="show-signup" role="tab" type="button">Create account</button>
+            <button aria-controls="login-form" aria-selected="false" id="show-login" role="tab" type="button">Log in</button>
+          </div>
+          <form class="auth-form" id="signup-form" role="tabpanel">
             <label>Email <input id="signup-email" autocomplete="email" required type="email" /></label>
             <label>Password <input id="signup-password" autocomplete="new-password" minlength="12" required type="password" /></label>
             <label>Username <input id="signup-username" autocomplete="username" autocapitalize="none" maxlength="32" required spellcheck="false" /></label>
-            <p class="hint" id="username-help">3-32 lowercase letters or numbers; single <code>-</code> or <code>_</code> between parts.</p>
-            <button id="signup-submit" type="submit">Create account</button>
+            <p class="field-note" id="username-help">3-32 lowercase letters or numbers, with single <code>-</code> or <code>_</code> separators.</p>
+            <button class="button full" id="signup-submit" type="submit">Claim username and create account</button>
           </form>
-        </section>
-
-        <section>
-          <h2>2. Log in</h2>
-          <form id="login-form">
+          <form class="auth-form" hidden id="login-form" role="tabpanel">
             <label>Email <input id="login-email" autocomplete="email" required type="email" /></label>
             <label>Password <input id="login-password" autocomplete="current-password" minlength="12" required type="password" /></label>
-            <button type="submit">Log in</button>
+            <button class="button full" type="submit">Continue to workspace</button>
           </form>
-          <div class="row" style="margin-top: 12px">
-            <button id="verify-session" type="button">Verify token</button>
-            <button id="clear-session" type="button">Clear local token</button>
+          <p aria-live="polite" class="notice" id="auth-message"></p>
+          <p class="auth-foot">The server derives ownership from your authenticated identity. This client never sends an owner ID.</p>
+        </div>
+      </section>
+
+      <section hidden id="workspace">
+        <div class="workspace-shell">
+          <aside class="workspace-sidebar">
+            <div class="identity"><p class="eyebrow">Active session</p><div class="identity-email" id="identity-email"></div><p class="identity-role" id="identity-role"></p></div>
+            <nav class="workspace-tabs" aria-label="Workspace">
+              <button aria-controls="personal-panel" aria-selected="true" data-tab="personal" type="button">Personal data</button>
+              <button aria-controls="shared-panel" aria-selected="false" data-tab="shared" type="button">Shared data</button>
+              <button aria-controls="inspector-panel" aria-selected="false" data-tab="inspector" type="button">Inspector</button>
+            </nav>
+            <button class="button secondary danger" id="sign-out" type="button">Clear local token</button>
+            <p class="local-note">This reference keeps its bearer token in memory only. Refreshing the page resets this workspace.</p>
+          </aside>
+          <div class="workspace-main">
+            <section class="workspace-panel" id="personal-panel" role="tabpanel">
+              <div class="workspace-head"><div><p class="eyebrow">Your namespace</p><h2>Personal data</h2></div><p>Save one resource at a time. The first save creates it; later saves replace the same type and slug.</p></div>
+              <div class="namespace-strip"><div><strong id="namespace-name">Loading your namespace...</strong><p id="namespace-detail">Your namespace is resolved from the token, not from this form.</p></div><button class="button secondary" id="load-namespace" type="button">Refresh</button></div>
+              <form id="resource-form">
+                <div class="resource-grid">
+                  <label>Type <input id="resource-type" required value="profile" /></label>
+                  <label>Slug <input id="resource-slug" required value="main" /></label>
+                  <label class="wide">Title <input id="resource-title" required value="Browser-created profile" /></label>
+                  <label class="wide">Summary <input id="resource-summary" value="Created through the plain HTML client." /></label>
+                  <label class="wide">Content <textarea id="resource-content"># Hello from a browser client</textarea></label>
+                </div>
+                <div class="save-row"><p aria-live="polite" class="notice" id="personal-message">Ready to save a private resource.</p><button class="button" type="submit">Save resource</button></div>
+              </form>
+            </section>
+            <section class="workspace-panel" hidden id="shared-panel" role="tabpanel">
+              <div class="workspace-head"><div><p class="eyebrow">Deployment scope</p><h2>Shared data</h2></div><p>Read shared state published for signed-in users. Write access remains with deployment administrators and trusted backend services.</p></div>
+              <form class="connection-row" id="shared-form"><label>Resource type <input id="shared-type" required value="leaderboard" /><small>Examples: leaderboard, config, catalog, announcement.</small></label><button class="button" type="submit">Load records</button></form>
+              <p aria-live="polite" class="notice" id="shared-message">Choose a resource type to inspect shared data.</p>
+              <div class="empty-result" id="shared-empty">No shared records loaded yet.</div><ul class="shared-list" hidden id="shared-results"></ul>
+            </section>
+            <section class="workspace-panel" hidden id="inspector-panel" role="tabpanel">
+              <div class="workspace-head"><div><p class="eyebrow">Request trace</p><h2>Inspector</h2></div><p>Inspect the latest API response without exposing your bearer token in the page.</p></div>
+              <div class="inspector-tools"><button class="button secondary" id="verify-session" type="button">Verify session</button><button class="button secondary" id="clear-log" type="button">Clear log</button></div>
+              <pre class="response-log" id="output" aria-live="polite">Ready.</pre>
+            </section>
           </div>
-        </section>
-
-        <section class="wide protected" data-ready="false" id="personal-scope">
-          <h2>3. Personal scope</h2>
-          <div class="row">
-            <button id="load-namespace" type="button">Load my namespace</button>
-          </div>
-          <form id="resource-form" style="margin-top: 14px">
-            <div class="row">
-              <label>Type <input id="resource-type" required value="profile" /></label>
-              <label>Slug <input id="resource-slug" required value="main" /></label>
-            </div>
-            <label>Title <input id="resource-title" required value="Browser-created profile" /></label>
-            <label>Summary <input id="resource-summary" value="Created through the plain HTML client." /></label>
-            <label>Content <textarea id="resource-content"># Hello from a browser client</textarea></label>
-            <button type="submit">Save private personal resource</button>
-          </form>
-          <p class="hint">The first save creates this type and slug. Later saves replace that same resource.</p>
-          <p class="action-message" id="personal-message">Log in to load or save your personal data.</p>
-        </section>
-
-        <section class="wide protected" data-ready="false" id="shared-scope">
-          <h2>4. Shared application data</h2>
-          <form id="shared-form" class="row">
-            <label>Type <input id="shared-type" required value="leaderboard" /></label>
-            <button type="submit">Read signed-in shared records</button>
-          </form>
-          <p class="hint">This client deliberately does not carry <code>SERVICE_TOKEN</code>. Shared writes belong in trusted backend infrastructure.</p>
-          <p class="action-message" id="shared-message">Log in to read shared application data.</p>
-        </section>
-      </div>
-
-      <section>
-        <h2>Response log</h2>
-        <pre id="output" aria-live="polite">Ready.</pre>
+        </div>
       </section>
     </main>
     <script>
-      const state = { token: "", user: null, namespace: null };
+      const state = { token: "", user: null, namespace: null, tab: "personal" };
       const usernamePattern = /^[a-z0-9](?:[a-z0-9]|[-_](?=[a-z0-9])){2,31}$/;
       const $ = (id) => document.getElementById(id);
-      const apiBase = () => $("api-base").value.replace(/\/$/, "");
+      const apiBase = () => location.origin;
 
-      const servedByMStash = location.protocol.startsWith("http") && ["4000", "4001"].includes(location.port);
-      $("api-base").value = servedByMStash ? location.origin : "http://localhost:4000";
-
+      class APIError extends Error { constructor(status, payload) { super(payload.error || `Request failed with ${status}`); this.status = status; } }
       function usernameIssue(value) {
         if (value.length < 3 || value.length > 32) return "Use 3-32 characters.";
         if (!/^[a-z0-9]/.test(value) || !/[a-z0-9]$/.test(value)) return "Start and end with a lowercase letter or number.";
@@ -120,42 +152,42 @@
         if (!usernamePattern.test(value)) return "Use lowercase letters, numbers, hyphens, or underscores only.";
         return "";
       }
-
-      function redact(value) {
-        return JSON.parse(JSON.stringify(value, (key, entry) => key === "token" || key === "password" ? "[redacted]" : entry));
+      function redact(value) { return JSON.parse(JSON.stringify(value, (key, entry) => key === "token" || key === "password" ? "[redacted]" : entry)); }
+      function log(label, payload) { $("output").textContent = `${label}\n${JSON.stringify(redact(payload), null, 2)}`; }
+      function setNotice(id, message, kind = "") { const element = $(id); element.textContent = message; element.className = `notice ${kind}`; }
+      function messageFromError(error) {
+        if (error instanceof TypeError && error.message === "Failed to fetch") {
+          return `Cannot reach the m-stash API at ${apiBase()}. Confirm this page is served from the m-stash deployment.`;
+        }
+        return error.message || "The request could not be completed.";
       }
-
-      function log(label, payload) {
-        $("output").textContent = `${label}\n${JSON.stringify(redact(payload), null, 2)}`;
+      function setAuthMode(mode) {
+        const signup = mode === "signup";
+        $("signup-form").hidden = !signup; $("login-form").hidden = signup;
+        $("show-signup").setAttribute("aria-selected", String(signup)); $("show-login").setAttribute("aria-selected", String(!signup));
+        setNotice("auth-message", "");
       }
-
+      function setTab(tab) {
+        state.tab = tab;
+        ["personal", "shared", "inspector"].forEach((name) => {
+          $(`${name}-panel`).hidden = name !== tab;
+          document.querySelector(`[data-tab="${name}"]`).setAttribute("aria-selected", String(name === tab));
+        });
+      }
+      function renderNamespace() {
+        if (!state.namespace) { $("namespace-name").textContent = "Personal namespace unavailable"; $("namespace-detail").textContent = "This account has no personal namespace. Deployment admins can still work with shared data."; return; }
+        $("namespace-name").textContent = `/${state.namespace.slug}`;
+        $("namespace-detail").textContent = `${state.namespace.displayName || state.namespace.slug} - ${state.namespace.isPublic ? "public namespace" : "private namespace"}`;
+      }
       function updateSession() {
         const authenticated = Boolean(state.token && state.user);
-        $("session-status").textContent = authenticated ? `Signed in as ${state.user.email} (${state.user.role})` : "No in-memory token";
-        $("active-session").hidden = !authenticated;
-        $("personal-scope").dataset.ready = String(authenticated);
-        $("shared-scope").dataset.ready = String(authenticated);
-        $("load-namespace").disabled = !authenticated;
-        $("resource-form").querySelectorAll("input, textarea, button").forEach((element) => { element.disabled = !authenticated; });
-        $("shared-form").querySelectorAll("input, button").forEach((element) => { element.disabled = !authenticated; });
-        if (authenticated) {
-          $("active-session-title").textContent = `Signed in as ${state.user.email}`;
-          $("active-session-detail").textContent = `Role: ${state.user.role}. Your token is held only in this page until you clear it or reload.`;
-          $("personal-message").textContent = "Ready to load your namespace or save a personal resource.";
-          $("shared-message").textContent = "Ready to read shared application data available to signed-in users.";
-        } else {
-          $("personal-message").textContent = "Log in to load or save your personal data.";
-          $("shared-message").textContent = "Log in to read shared application data.";
-        }
+        $("session-status").className = authenticated ? "top-status live" : "top-status";
+        $("session-status").textContent = authenticated ? `Connected: ${state.user.email}` : "Not connected";
+        $("auth-shell").hidden = authenticated; $("workspace").hidden = !authenticated;
+        if (!authenticated) return;
+        $("identity-email").textContent = state.user.email; $("identity-role").textContent = state.user.role;
+        renderNamespace(); setTab(state.tab);
       }
-
-      class APIError extends Error {
-        constructor(status, payload) {
-          super(payload.error || `Request failed with ${status}`);
-          this.status = status;
-        }
-      }
-
       async function request(path, { method = "GET", body, authenticated = true } = {}) {
         const headers = new Headers({ Accept: "application/json" });
         if (body !== undefined) headers.set("Content-Type", "application/json");
@@ -166,97 +198,67 @@
         if (!response.ok) throw new APIError(response.status, payload);
         return payload;
       }
-
+      async function loadNamespace({ quiet = false } = {}) {
+        try { state.namespace = (await request("/v1/me/namespace")).data; renderNamespace(); if (!quiet) setNotice("personal-message", `Loaded /${state.namespace.slug}.`, "success"); return state.namespace; }
+        catch (error) { state.namespace = null; renderNamespace(); if (!quiet) setNotice("personal-message", messageFromError(error), "error"); return null; }
+      }
       function adoptSession(payload) {
-        state.token = payload.token;
-        state.user = payload.user;
-        state.namespace = payload.namespace || null;
-        updateSession();
-        $("signup-password").value = "";
-        $("login-password").value = "";
-        log("Session established", { user: state.user, namespace: state.namespace });
+        state.token = payload.token; state.user = payload.user; state.namespace = payload.namespace || null;
+        $("signup-password").value = ""; $("login-password").value = "";
+        updateSession(); log("Session established", { user: state.user, namespace: state.namespace });
+        if (!state.namespace) void loadNamespace({ quiet: true });
       }
-
-      function requireSession(message) {
-        if (state.token && state.user) return true;
-        log("Authentication required", { error: message });
-        return false;
+      function clearSession() {
+        state.token = ""; state.user = null; state.namespace = null;
+        $("shared-results").replaceChildren(); $("shared-results").hidden = true; $("shared-empty").hidden = false;
+        updateSession(); setAuthMode("login"); log("Local token cleared", {});
       }
-
+      function renderSharedResources(resources) {
+        const list = $("shared-results"); list.replaceChildren(); $("shared-empty").hidden = resources.length > 0; list.hidden = resources.length === 0;
+        for (const resource of resources) {
+          const item = document.createElement("li"); const text = document.createElement("div"); const title = document.createElement("strong"); const summary = document.createElement("p"); const visibility = document.createElement("span");
+          title.textContent = resource.title; summary.textContent = resource.summary || `/${resource.type}/${resource.slug}`; visibility.className = "resource-visibility"; visibility.textContent = resource.visibility;
+          text.append(title, summary); item.append(text, visibility); list.append(item);
+        }
+      }
+      $("show-signup").addEventListener("click", () => setAuthMode("signup"));
+      $("show-login").addEventListener("click", () => setAuthMode("login"));
+      document.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => setTab(button.dataset.tab)));
       $("signup-username").addEventListener("input", (event) => {
-        const input = event.currentTarget;
-        input.value = input.value.trim().toLowerCase();
-        const issue = input.value ? usernameIssue(input.value) : "";
-        const help = $("username-help");
-        help.textContent = issue || (input.value ? `Permanent public route: /${input.value}` : "3-32 lowercase letters or numbers; single - or _ between parts.");
-        help.className = `hint ${issue ? "invalid" : input.value ? "valid" : ""}`;
-        $("signup-submit").disabled = Boolean(issue);
+        const input = event.currentTarget; input.value = input.value.trim().toLowerCase(); const issue = input.value ? usernameIssue(input.value) : "";
+        $("username-help").textContent = issue || (input.value ? `Permanent route: /${input.value}` : "3-32 lowercase letters or numbers, with single - or _ separators.");
+        $("username-help").className = `field-note ${issue ? "invalid" : input.value ? "valid" : ""}`; $("signup-submit").disabled = Boolean(issue);
       });
-
       $("signup-form").addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const username = $("signup-username").value;
-        const issue = usernameIssue(username);
-        if (issue) return log("Choose a valid username", { error: issue });
-        try {
-          const payload = await request("/v1/auth/signup", { method: "POST", authenticated: false, body: { email: $("signup-email").value, password: $("signup-password").value, username } });
-          adoptSession(payload);
-        } catch (error) { log("Signup failed", { error: error.message }); }
+        event.preventDefault(); const username = $("signup-username").value; const issue = usernameIssue(username);
+        if (issue) return setNotice("auth-message", issue, "error");
+        try { adoptSession(await request("/v1/auth/signup", { method: "POST", authenticated: false, body: { email: $("signup-email").value, password: $("signup-password").value, username } })); }
+        catch (error) { setNotice("auth-message", messageFromError(error), "error"); }
       });
-
       $("login-form").addEventListener("submit", async (event) => {
         event.preventDefault();
-        try {
-          adoptSession(await request("/v1/auth/login", { method: "POST", authenticated: false, body: { email: $("login-email").value, password: $("login-password").value } }));
-        } catch (error) { log("Login failed", { error: error.message }); }
+        try { adoptSession(await request("/v1/auth/login", { method: "POST", authenticated: false, body: { email: $("login-email").value, password: $("login-password").value } })); }
+        catch (error) { setNotice("auth-message", messageFromError(error), "error"); }
       });
-
-      $("verify-session").addEventListener("click", async () => {
-        if (!requireSession("Log in before verifying a token.")) return;
-        try { const payload = await request("/v1/auth/verify"); state.user = payload.claims; updateSession(); log("Session verified", { claims: state.user }); } catch (error) { log("Verification failed", { error: error.message }); }
-      });
-      function clearSession() { state.token = ""; state.user = null; state.namespace = null; updateSession(); log("Local token cleared", {}); }
-      $("clear-session").addEventListener("click", clearSession);
       $("sign-out").addEventListener("click", clearSession);
-      $("load-namespace").addEventListener("click", async () => { if (!requireSession("Log in before loading a namespace.")) return; try { state.namespace = (await request("/v1/me/namespace")).data; $("personal-message").textContent = `Loaded personal namespace /${state.namespace.slug}.`; $("personal-message").className = "action-message success"; } catch (error) { $("personal-message").textContent = error.message; $("personal-message").className = "action-message error"; log("Namespace lookup failed", { error: error.message }); } });
+      $("load-namespace").addEventListener("click", () => void loadNamespace());
       $("resource-form").addEventListener("submit", async (event) => {
-        event.preventDefault();
-        if (!requireSession("Log in before saving a personal resource.")) return;
-        const type = encodeURIComponent($("resource-type").value);
-        const slug = encodeURIComponent($("resource-slug").value);
-        const resource = {
-          title: $("resource-title").value,
-          summary: $("resource-summary").value,
-          content: $("resource-content").value,
-          visibility: "private",
-        };
-        try {
-          await request(`/v1/me/resources/${type}`, { method: "POST", body: { ...resource, slug: $("resource-slug").value } });
-          $("personal-message").textContent = `Created /${state.namespace?.slug || "me"}/${$("resource-type").value}/${$("resource-slug").value}.`;
-          $("personal-message").className = "action-message success";
-          log("Personal resource created", { type: $("resource-type").value, slug: $("resource-slug").value });
-        } catch (error) {
-          if (!(error instanceof APIError) || error.status !== 409) {
-            return log("Personal resource save failed", { error: error.message });
-          }
-          try {
-            await request(`/v1/me/resources/${type}/${slug}`, { method: "PUT", body: resource });
-            $("personal-message").textContent = `Updated /${state.namespace?.slug || "me"}/${$("resource-type").value}/${$("resource-slug").value}.`;
-            $("personal-message").className = "action-message success";
-            log("Personal resource updated", { type: $("resource-type").value, slug: $("resource-slug").value });
-          } catch (updateError) {
-            $("personal-message").textContent = updateError.message;
-            $("personal-message").className = "action-message error";
-            log("Personal resource save failed", { error: updateError.message });
-          }
+        event.preventDefault(); const type = encodeURIComponent($("resource-type").value); const slug = encodeURIComponent($("resource-slug").value);
+        const resource = { title: $("resource-title").value, summary: $("resource-summary").value, content: $("resource-content").value, visibility: "private" };
+        try { await request(`/v1/me/resources/${type}`, { method: "POST", body: { ...resource, slug: $("resource-slug").value } }); setNotice("personal-message", `Created /${state.namespace?.slug || "me"}/${$("resource-type").value}/${$("resource-slug").value}.`, "success"); }
+        catch (error) {
+          if (!(error instanceof APIError) || error.status !== 409) return setNotice("personal-message", messageFromError(error), "error");
+          try { await request(`/v1/me/resources/${type}/${slug}`, { method: "PUT", body: resource }); setNotice("personal-message", `Updated /${state.namespace?.slug || "me"}/${$("resource-type").value}/${$("resource-slug").value}.`, "success"); }
+          catch (updateError) { setNotice("personal-message", messageFromError(updateError), "error"); }
         }
       });
       $("shared-form").addEventListener("submit", async (event) => {
-        event.preventDefault();
-        if (!requireSession("Log in before reading shared data.")) return;
-        try { const payload = await request(`/v1/shared/resources/${encodeURIComponent($("shared-type").value)}?limit=20`); $("shared-message").textContent = `Loaded ${payload.data.length} shared ${$("shared-type").value} record(s).`; $("shared-message").className = "action-message success"; } catch (error) { $("shared-message").textContent = error.message; $("shared-message").className = "action-message error"; log("Shared data read failed", { error: error.message }); }
+        event.preventDefault(); const type = encodeURIComponent($("shared-type").value);
+        try { const payload = await request(`/v1/shared/resources/${type}?limit=20`); renderSharedResources(payload.data); setNotice("shared-message", payload.data.length ? `Loaded ${payload.data.length} ${$("shared-type").value} record(s).` : `No ${$("shared-type").value} records are available to this account.`, "success"); }
+        catch (error) { setNotice("shared-message", messageFromError(error), "error"); }
       });
-
+      $("verify-session").addEventListener("click", async () => { try { const payload = await request("/v1/auth/verify"); state.user = payload.claims; updateSession(); log("Session verified", { claims: state.user }); } catch (error) { log("Verification failed", { error: messageFromError(error) }); } });
+      $("clear-log").addEventListener("click", () => { $("output").textContent = "Ready."; });
       updateSession();
     </script>
   </body>
