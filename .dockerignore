@@ -1,7 +1,11 @@
 .git
 .env
 *.md
+*.ipynb
 *.test
 *.out
 bin
 tmp
+m-stash
+examples/**/node_modules
+examples/**/dist

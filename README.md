@@ -63,6 +63,22 @@ Each stash has a required `title`, plus optional `summary`, `content`, and `tags
 
 For Atlas, configure network access for the deployment provider. Use a provider-supported static outbound address when available; do not assume there is one universal egress range for every plan.
 
+### Docker Hub
+
+Published releases are available for `linux/amd64` and `linux/arm64`:
+
+```sh
+docker pull YOUR_DOCKERHUB_USERNAME/m-stash:latest
+docker run --rm -p 4000:4000 \
+  -e MONGO_URI='mongodb://user:password@mongo:27017/?authSource=admin' \
+  -e MONGO_DB='app_db' \
+  -e JWT_SECRET='replace-with-a-long-random-secret' \
+  -e ALLOWED_ORIGINS='https://app.example.com' \
+  YOUR_DOCKERHUB_USERNAME/m-stash:latest
+```
+
+Pin production deployments to a release tag such as `:1.0.0`; `:latest` follows the newest stable release. The image runs as an unprivileged user, exposes port `4000`, and reports liveness at `/healthz` plus Mongo-backed readiness at `/readyz`.
+
 ### Local container
 
 ```sh
@@ -76,6 +92,45 @@ docker run --rm -p 4000:4000 \
 ```
 
 Check readiness with `curl http://localhost:4000/healthz`.
+
+### Docker Compose
+
+The included [compose.yaml](compose.yaml) starts MongoDB and the gateway together. Copy the example environment file, replace all placeholders, then start the stack:
+
+```sh
+cp .env.example .env
+docker compose up --build --wait
+curl http://localhost:4000/readyz
+```
+
+To use a published image instead of building locally, replace `build: .` and `image: m-stash:local` in [compose.yaml](compose.yaml) with `image: YOUR_DOCKERHUB_USERNAME/m-stash:1.0.0`.
+
+For custom collection rules, mount a policy file at `/etc/m-stash/gateway.json`. The image sets `M_STASH_CONFIG` to that location. Keep `JWT_SECRET` and database credentials in environment variables or your secret manager rather than the policy file.
+
+### Kubernetes
+
+[k8s/m-stash.yaml](k8s/m-stash.yaml) contains a two-replica Deployment, ClusterIP Service, health probes, resource settings, a read-only ConfigMap-mounted policy, and restricted pod security settings. Before applying it:
+
+1. Replace `YOUR_DOCKERHUB_USERNAME/m-stash:latest` with a pinned published tag.
+2. Set the allowed origin and collection rules in the ConfigMap.
+3. Create `m-stash-secrets` from your secret manager or use [k8s/m-stash-secrets.example.yaml](k8s/m-stash-secrets.example.yaml) as a local template. Do not commit real values.
+
+```sh
+kubectl apply -f k8s/m-stash.yaml
+```
+
+`/readyz` checks MongoDB and is used for readiness; `/healthz` is the liveness endpoint. The built-in brute-force limiter is local to each replica, so use an ingress, API gateway, or shared rate limiter when you need cluster-wide enforcement.
+
+### Publish a release
+
+The [publish-image workflow](.github/workflows/publish-image.yml) publishes multi-architecture Docker Hub images when a `v*` Git tag is pushed. Create a GitHub Environment named `m-stash`, then add environment secrets named `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access token with read/write permission). The job targets this environment and can use its protection rules before publishing. Create a release tag once the secrets are configured:
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This publishes `:1.0.0`, `:1.0`, `:1`, and `:latest` for stable semantic-version releases. Prereleases such as `v1.0.0-rc.1` do not update `:latest`.
 
 ### Railway
 

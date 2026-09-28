@@ -1,0 +1,20 @@
+{
+  "name": "m-stash-typescript-quickstart",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "TypeScript example client walking through the m-stash quickstart flow.",
+  "scripts": {
+    "start": "tsx quickstart.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

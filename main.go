@@ -11,9 +11,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"reflect"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -45,8 +47,9 @@ type Config struct {
 }
 
 var (
-	config Config
-	db     *mongo.Database
+	config      Config
+	db          *mongo.Database
+	mongoClient *mongo.Client
 )
 
 const maxPayloadBytes = 1024 * 1024 // 1MB Request Payload Limit
@@ -70,12 +73,12 @@ type User struct {
 // CONFIGURATION LOADER
 // ============================================================================
 
-func loadConfig() {
+func loadConfig() error {
 	config = Config{
 		Port:           getEnv("PORT", "4000"),
 		MongoURI:       getEnv("MONGO_URI", "mongodb://localhost:27017"),
 		Database:       getEnv("MONGO_DB", "app_db"),
-		JWTSecret:      getEnv("JWT_SECRET", "super-secret-gateway-key-change-me"),
+		JWTSecret:      getEnv("JWT_SECRET", ""),
 		AllowedOrigins: getAllowedOrigins(),
 		Rules: map[string]CollectionRule{
 			"stashes": {
@@ -96,31 +99,40 @@ func loadConfig() {
 	configFile := "gateway.json"
 	if _, err := os.Stat(configFile); err == nil {
 		data, err := os.ReadFile(configFile)
-		if err == nil {
-			var fileConfig Config
-			if err := json.Unmarshal(data, &fileConfig); err == nil {
-				if fileConfig.Port != "" {
-					config.Port = fileConfig.Port
-				}
-				if fileConfig.MongoURI != "" {
-					config.MongoURI = fileConfig.MongoURI
-				}
-				if fileConfig.Database != "" {
-					config.Database = fileConfig.Database
-				}
-				if fileConfig.JWTSecret != "" {
-					config.JWTSecret = fileConfig.JWTSecret
-				}
-				if len(fileConfig.AllowedOrigins) > 0 {
-					config.AllowedOrigins = fileConfig.AllowedOrigins
-				}
-				if len(fileConfig.Rules) > 0 {
-					config.Rules = fileConfig.Rules
-				}
-				log.Println("Loaded configuration from gateway.json")
-			}
+		if err != nil {
+			return fmt.Errorf("read configuration file %q: %w", configFile, err)
 		}
+		var fileConfig Config
+		if err := json.Unmarshal(data, &fileConfig); err != nil {
+			return fmt.Errorf("parse configuration file %q: %w", configFile, err)
+		}
+		if fileConfig.Port != "" {
+			config.Port = fileConfig.Port
+		}
+		if fileConfig.MongoURI != "" {
+			config.MongoURI = fileConfig.MongoURI
+		}
+		if fileConfig.Database != "" {
+			config.Database = fileConfig.Database
+		}
+		if fileConfig.JWTSecret != "" {
+			config.JWTSecret = fileConfig.JWTSecret
+		}
+		if len(fileConfig.AllowedOrigins) > 0 {
+			config.AllowedOrigins = fileConfig.AllowedOrigins
+		}
+		if len(fileConfig.Rules) > 0 {
+			config.Rules = fileConfig.Rules
+		}
+		log.Printf("Loaded configuration from %s", configFile)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("check configuration file %q: %w", configFile, err)
 	}
+
+	if config.JWTSecret == "" {
+		return errors.New("JWT_SECRET must be configured")
+	}
+	return nil
 }
 
 func getEnv(key, fallback string) string {
@@ -1069,7 +1081,9 @@ func handleDatabaseWebSocket(w http.ResponseWriter, r *http.Request, claims *Cla
 // ============================================================================
 
 func main() {
-	loadConfig()
+	if err := loadConfig(); err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
 
 	log.Println("🔌 Connecting to MongoDB...")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1082,6 +1096,7 @@ func main() {
 	if err := client.Ping(ctx, nil); err != nil {
 		log.Fatalf("❌ Failed to reach Mongo: %v", err)
 	}
+	mongoClient = client
 	db = client.Database(config.Database)
 	_, err = db.Collection("profiles").Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys:    bson.D{{Key: "handle", Value: 1}},
@@ -1093,17 +1108,41 @@ func main() {
 	log.Printf("✅ Connected to Mongo database: '%s'", config.Database)
 
 	authRateLimiter := newRateLimiter(10, 5*time.Minute)
-	http.HandleFunc("/v1/auth/signup", corsMiddleware(rateLimitMiddleware(authRateLimiter, handleSignUp)))
-	http.HandleFunc("/v1/auth/login", corsMiddleware(rateLimitMiddleware(authRateLimiter, handleLogin)))
-	http.HandleFunc("/v1/public/profiles/", corsMiddleware(handlePublicProfile))
-	http.HandleFunc("/v1/db/", corsMiddleware(authenticate(handleDatabaseProxy)))
-	http.HandleFunc("/v1/ws/", authenticate(handleDatabaseWebSocket))
-	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/auth/signup", corsMiddleware(rateLimitMiddleware(authRateLimiter, handleSignUp)))
+	mux.HandleFunc("/v1/auth/login", corsMiddleware(rateLimitMiddleware(authRateLimiter, handleLogin)))
+	mux.HandleFunc("/v1/public/profiles/", corsMiddleware(handlePublicProfile))
+	mux.HandleFunc("/v1/db/", corsMiddleware(authenticate(handleDatabaseProxy)))
+	mux.HandleFunc("/v1/ws/", authenticate(handleDatabaseWebSocket))
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "time": time.Now().String()})
 	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if err := mongoClient.Ping(ctx, nil); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "Database is unavailable")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+	})
 
+	server := &http.Server{Addr: ":" + config.Port, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 	log.Printf("🚀 Mongo Auth Gateway listening on http://localhost:%s", config.Port)
-	if err := http.ListenAndServe(":"+config.Port, nil); err != nil {
+	go func() {
+		<-shutdown
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("Graceful shutdown failed: %v", err)
+		}
+		if err := mongoClient.Disconnect(ctx); err != nil {
+			log.Printf("MongoDB disconnect failed: %v", err)
+		}
+	}()
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("❌ Server crashed: %v", err)
 	}
 }

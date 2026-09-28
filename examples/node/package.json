@@ -1,0 +1,13 @@
+{
+  "name": "m-stash-node-quickstart",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Node.js example client walking through the m-stash quickstart flow.",
+  "scripts": {
+    "start": "node quickstart.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

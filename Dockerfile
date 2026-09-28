@@ -11,8 +11,13 @@ FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
 COPY --from=build /out/m-stash /usr/local/bin/m-stash
 
+WORKDIR /app
 ENV PORT=4000
+ENV M_STASH_CONFIG=/etc/m-stash/gateway.json
 EXPOSE 4000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+	CMD wget -q -T 3 -O /dev/null http://127.0.0.1:${PORT}/readyz || exit 1
 
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/m-stash"]
