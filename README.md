@@ -200,7 +200,9 @@ Use internal port `4000` when prompted.
 
 ### Render
 
-The included [render.yaml](render.yaml) is a Render Blueprint. Push the repository to a Git provider, select **New** then **Blueprint**, and connect the repository. Before creating the service, set `MONGO_URI` and `ALLOWED_ORIGINS`; Render generates `JWT_SECRET`, builds the Docker image, and verifies `/healthz`.
+The included [render.yaml](render.yaml) is a Render Blueprint. Push the repository to a Git provider, select **New** then **Blueprint**, and connect the repository. Before creating the service, set `MONGO_URI`, `ALLOWED_ORIGINS`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD`; Render generates `JWT_SECRET` and `METRICS_TOKEN`, builds the Docker image, and verifies `/healthz`. The Blueprint enables trusted-proxy handling and secure browser cookies for Render's HTTPS edge.
+
+For an existing Render service, add those variables under **Environment** and redeploy manually. Blueprint changes do not automatically backfill environment variables into an already-created service. Set `ALLOWED_ORIGINS` to the exact public origin, for example `https://m-stash.onrender.com`. Use the configured `ADMIN_EMAIL` and `ADMIN_PASSWORD` to log in after the redeploy; both values must be present together.
 
 ### Vercel
 

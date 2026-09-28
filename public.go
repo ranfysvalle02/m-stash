@@ -172,7 +172,7 @@ func (app *application) handlePublicStashes(w http.ResponseWriter, r *http.Reque
 	}
 	defer cursor.Close(ctx)
 
-	var stashes []publicStashPreview
+	stashes := make([]publicStashPreview, 0)
 	if err := cursor.All(ctx, &stashes); err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not decode public stashes")
 		return
@@ -239,7 +239,7 @@ func (app *application) handlePublicDiscovery(w http.ResponseWriter, r *http.Req
 	}
 	defer cursor.Close(ctx)
 
-	var stashes []publicStashPreview
+	stashes := make([]publicStashPreview, 0)
 	if err := cursor.All(ctx, &stashes); err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not decode public discovery feed")
 		return
@@ -358,7 +358,7 @@ func (app *application) loadPublicAuthors(ctx context.Context, ownerIDs []bson.O
 		return nil, err
 	}
 	defer cursor.Close(ctx)
-	var records []publicAuthorRecord
+	records := make([]publicAuthorRecord, 0)
 	if err := cursor.All(ctx, &records); err != nil {
 		return nil, err
 	}

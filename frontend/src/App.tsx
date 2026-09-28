@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState, type FormEvent } from 'react'
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -47,6 +47,15 @@ type SessionState =
   | { kind: 'anonymous' }
   | { kind: 'authenticated'; claims: UserClaims }
 
+type StashStarter = {
+  key: string
+  label: string
+  detail: string
+  input: StashInput
+}
+
+const SessionContext = createContext<SessionState>({ kind: 'loading' })
+
 const emptyProfile: ProfileInput = {
   handle: '',
   displayName: '',
@@ -62,6 +71,53 @@ const emptyStash: StashInput = {
   content: '',
   tags: [],
   isPublic: false,
+}
+
+const stashStarters: StashStarter[] = [
+  {
+    key: 'context',
+    label: 'Project context',
+    detail: 'A shared source of truth for the work in motion.',
+    input: {
+      title: 'Project context',
+      summary: 'What this work is, where it stands, and what happens next.',
+      content: '## Goal\n\nDescribe the outcome this work should create.\n\n## Current state\n\nWhat is true right now?\n\n## Next move\n\nName the next decision, owner, or milestone.',
+      tags: ['project', 'context'],
+      isPublic: false,
+    },
+  },
+  {
+    key: 'runbook',
+    label: 'Operational runbook',
+    detail: 'A repeatable response for a system, process, or handoff.',
+    input: {
+      title: 'Operational runbook',
+      summary: 'A practical guide for handling a repeatable moment.',
+      content: '## When to use this\n\nDescribe the signal or situation that starts this workflow.\n\n## Steps\n\n1. Confirm the current state.\n2. Take the smallest safe action.\n3. Record the outcome.\n\n## Escalate when\n\nList the conditions that need another person or system.',
+      tags: ['operations', 'runbook'],
+      isPublic: false,
+    },
+  },
+  {
+    key: 'state',
+    label: 'State reference',
+    detail: 'Define the data and rules behind an app, game, or workflow.',
+    input: {
+      title: 'State reference',
+      summary: 'The fields, transitions, and guardrails that make this state useful.',
+      content: '## Purpose\n\nWhat does this state represent?\n\n## Fields\n\n- `status`: Current phase or condition\n- `ownerId`: Account or system responsible\n- `updatedAt`: Most recent trusted change\n\n## Rules\n\nDocument which actions are trusted and which ones need server-side enforcement.',
+      tags: ['state', 'reference'],
+      isPublic: false,
+    },
+  },
+]
+
+function findStashStarter(key: string | null) {
+  return stashStarters.find((starter) => starter.key === key)
+}
+
+function stashInputFromStarter(starter: StashStarter): StashInput {
+  return { ...starter.input, tags: [...starter.input.tags] }
 }
 
 const composeEnvironment = `MONGO_DB=app_db
@@ -154,17 +210,19 @@ function App() {
 
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Navigate to="/discover" replace />} />
-        <Route path="/discover" element={<DiscoveryPage />} />
-        <Route path="/guide" element={<SetupGuidePage />} />
-        <Route path="/login" element={<AuthenticationPage mode="login" onAuthenticated={browserSession.restore} />} />
-        <Route path="/signup" element={<AuthenticationPage mode="signup" onAuthenticated={browserSession.restore} />} />
-        <Route path="/p/:id" element={<PublicStashPage />} />
-        <Route path="/@:handle" element={<PublicProfilePage />} />
-        <Route path="/app/*" element={<Workspace session={browserSession.session} onSessionChange={browserSession.setSession} />} />
-        <Route path="*" element={<NotFoundPage />} />
-      </Routes>
+      <SessionContext.Provider value={browserSession.session}>
+        <Routes>
+          <Route path="/" element={<Navigate to="/discover" replace />} />
+          <Route path="/discover" element={<DiscoveryPage />} />
+          <Route path="/guide" element={<SetupGuidePage />} />
+          <Route path="/login" element={<AuthenticationPage mode="login" onAuthenticated={browserSession.restore} />} />
+          <Route path="/signup" element={<AuthenticationPage mode="signup" onAuthenticated={browserSession.restore} />} />
+          <Route path="/p/:id" element={<PublicStashPage />} />
+          <Route path="/@:handle" element={<PublicProfilePage />} />
+          <Route path="/app/*" element={<Workspace session={browserSession.session} onSessionChange={browserSession.setSession} />} />
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </SessionContext.Provider>
     </BrowserRouter>
   )
 }
@@ -491,11 +549,13 @@ function Dashboard() {
 function StashEditor() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const [stash, setStash] = useState<StashInput>(emptyStash)
+  const [searchParams] = useSearchParams()
+  const starter = findStashStarter(searchParams.get('starter'))
+  const [stash, setStash] = useState<StashInput>(() => starter ? stashInputFromStarter(starter) : emptyStash)
   const [mode, setMode] = useState<'write' | 'preview'>('write')
   const [loading, setLoading] = useState(Boolean(id))
   const [saving, setSaving] = useState(false)
-  const [saveState, setSaveState] = useState<'saved' | 'unsaved' | 'error'>('saved')
+  const [saveState, setSaveState] = useState<'saved' | 'unsaved' | 'error'>(id ? 'saved' : 'unsaved')
   const [error, setError] = useState('')
   const [tagText, setTagText] = useState('')
 
@@ -572,6 +632,7 @@ function StashEditor() {
         <div className="editor-controls"><p aria-live="polite" className={saveState === 'error' ? 'save-state error' : 'save-state'}>{saveState === 'saved' ? <><Check aria-hidden="true" size={15} /> Saved</> : saveState === 'error' ? 'Save failed' : 'Saving changes'}</p><button className="button secondary" disabled={saving} onClick={() => void saveStash()} type="button"><Save aria-hidden="true" size={16} /> Save</button><button className="button primary" disabled={saving} onClick={() => void saveStash(!stash.isPublic)} type="button">{stash.isPublic ? 'Make private' : 'Share publicly'}</button></div>
       </header>
       <div className="editor-canvas">
+        {starter && !id && <aside className="starter-notice"><p className="eyebrow">Starter loaded</p><p><strong>{starter.label}</strong> is a private draft until you save it or choose to share it.</p></aside>}
         <input aria-label="Stash name" className="title-input" maxLength={200} onChange={(event) => update('title', event.target.value)} placeholder="Untitled stash" value={stash.title} />
         <textarea aria-label="Stash description" className="summary-input" maxLength={500} onChange={(event) => update('summary', event.target.value)} placeholder="A short description for people or systems using this item." rows={2} value={stash.summary} />
         <div className="tag-editor"><div className="tag-stack">{stash.tags.map((tag) => <span className="tag removable" key={tag}>{tag}<button aria-label={`Remove ${tag} tag`} onClick={() => update('tags', stash.tags.filter((existing) => existing !== tag))} type="button"><X aria-hidden="true" size={13} /></button></span>)}</div><input aria-label="Add tag" onChange={(event) => setTagText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addTag() } }} placeholder="Add a tag" value={tagText} /><button aria-label="Add tag" className="icon-button" onClick={addTag} title="Add tag" type="button"><Plus aria-hidden="true" size={16} /></button></div>
@@ -652,6 +713,7 @@ function RecordsPage() {
 }
 
 function DiscoveryPage() {
+  const session = useContext(SessionContext)
   const [searchParams, setSearchParams] = useSearchParams()
   const tag = searchParams.get('tag') ?? ''
   const [stashes, setStashes] = useState<PublicStash[]>([])
@@ -696,7 +758,7 @@ function DiscoveryPage() {
       <div className="discover-intro"><p className="eyebrow"><Compass aria-hidden="true" size={15} /> Browse</p><h1>Shared stashes from every build.</h1><p>Reference items, release artifacts, game resources, experiments, and useful context.</p></div>
       <div className="tag-filter"><label htmlFor="tag-filter">Filter by tag</label><input id="tag-filter" onChange={(event) => { const nextTag = event.target.value.trim(); setSearchParams(nextTag ? { tag: nextTag } : {}) }} placeholder="Try game, release, research" value={tag} />{tag && <button className="text-button" onClick={() => setSearchParams({})} type="button"><X aria-hidden="true" size={15} /> Clear</button>}</div>
       {error && <p className="form-error" role="alert">{error}</p>}
-      {loading ? <LoadingRows /> : stashes.length === 0 ? <StatePage title="Nothing shared yet" detail="Public stashes will appear here when their owners are ready to share them." /> : <div className="public-post-list">{stashes.map((stash) => <PublicPostPreview key={stash._id} stash={stash} />)}</div>}
+      {loading ? <LoadingRows /> : stashes.length === 0 ? <EmptyDiscovery session={session} tag={tag} onClearTag={() => setSearchParams({})} /> : <div className="public-post-list">{stashes.map((stash) => <PublicPostPreview key={stash._id} stash={stash} />)}</div>}
       {nextCursor && <div className="load-more"><button className="button secondary" onClick={() => void loadMore()} type="button">Load more</button></div>}
     </main>
   </PublicLayout>
@@ -824,7 +886,9 @@ function ConfigSnippet({ title, description, content }: { title: string; descrip
 }
 
 function PublicLayout({ children }: { children: React.ReactNode }) {
-  return <div className="public-shell"><header className="public-header"><Link className="wordmark" to="/discover"><span>m</span>stash</Link><nav><Link to="/discover">Discover</Link><Link to="/guide">How it works</Link><Link className="button secondary small-button" to="/login"><UserRound aria-hidden="true" size={16} /> Log in</Link></nav></header>{children}<footer className="public-footer"><Link className="wordmark" to="/discover"><span>m</span>stash</Link><Link to="/guide">Run your own workspace</Link><p>Made for work worth returning to.</p></footer></div>
+  const session = useContext(SessionContext)
+  const authenticated = session.kind === 'authenticated'
+  return <div className="public-shell"><header className="public-header"><Link className="wordmark" to="/discover"><span>m</span>stash</Link><nav><Link to="/discover">Discover</Link><Link to="/guide">How it works</Link><Link className="button secondary small-button" to={authenticated ? '/app/stashes' : '/login'}>{authenticated ? <><BookOpen aria-hidden="true" size={16} /> Workspace</> : <><UserRound aria-hidden="true" size={16} /> Log in</>}</Link></nav></header>{children}<footer className="public-footer"><Link className="wordmark" to="/discover"><span>m</span>stash</Link><Link to="/guide">Run your own workspace</Link><p>Made for work worth returning to.</p></footer></div>
 }
 
 function Markdown({ content }: { content: string }) {
@@ -837,7 +901,30 @@ function Avatar({ name, url }: { name: string; url?: string }) {
 
 function LoadingPage() { return <main className="loading-page"><LoaderCircle aria-label="Loading" className="spin" size={26} /></main> }
 function LoadingRows() { return <div className="loading-rows" aria-label="Loading stashes"><span /><span /><span /></div> }
-function EmptyStashes({ status }: { status: 'all' | 'draft' | 'published' }) { return <section className="empty-state"><FilePenLine aria-hidden="true" size={28} /><h2>{status === 'all' ? 'Your stash is empty.' : `No ${status === 'draft' ? 'private' : 'public'} stashes.`}</h2><p>Store a reference item, release artifact, shared resource, or any context your app needs.</p><Link className="button primary" to="/app/stashes/new"><Plus aria-hidden="true" size={17} /> New stash</Link></section> }
+function EmptyStashes({ status }: { status: 'all' | 'draft' | 'published' }) {
+  if (status !== 'all') {
+    return <section className="empty-state"><FilePenLine aria-hidden="true" size={28} /><h2>No {status === 'draft' ? 'private' : 'public'} stashes.</h2><p>Try another view or create a stash for this collection.</p><Link className="button primary" to="/app/stashes/new"><Plus aria-hidden="true" size={17} /> New stash</Link></section>
+  }
+
+  return <section className="empty-state first-stash"><FilePenLine aria-hidden="true" size={28} /><p className="eyebrow">First useful thing</p><h2>Give your workspace a memory.</h2><p>Start with a shape you recognize. Nothing is created until you decide to save it.</p><div className="starter-grid" aria-label="Choose a stash starter">{stashStarters.map((starter) => <Link className="starter-choice" key={starter.key} to={`/app/stashes/new?starter=${starter.key}`}><strong>{starter.label}</strong><span>{starter.detail}</span><ChevronRight aria-hidden="true" size={17} /></Link>)}</div><Link className="text-button" to="/app/stashes/new"><Plus aria-hidden="true" size={16} /> Start from a blank stash</Link></section>
+}
+
+function EmptyDiscovery({ session, tag, onClearTag }: { session: SessionState; tag: string; onClearTag: () => void }) {
+  if (tag) {
+    return <section className="empty-state discovery-empty"><Compass aria-hidden="true" size={28} /><h2>No shared stashes match “{tag}”.</h2><p>Try a different tag or browse everything people have chosen to share.</p><button className="button secondary" onClick={onClearTag} type="button"><X aria-hidden="true" size={17} /> Clear filter</button></section>
+  }
+
+  const isAuthenticated = session.kind === 'authenticated'
+  const isAdmin = isAuthenticated && session.claims.role === 'admin'
+  const title = isAdmin ? 'Open this workspace with something useful.' : isAuthenticated ? 'Start the shared collection.' : 'Be the first useful thing here.'
+  const detail = isAdmin
+    ? 'No one has shared a stash yet. Start with a useful draft, then publish it when this workspace is ready for visitors.'
+    : isAuthenticated
+      ? 'Start with a useful draft, then choose what is worth sharing with the people who discover this workspace.'
+      : 'This is a new workspace. Create an account, add one useful stash, and make the first visit worth returning to.'
+
+  return <section className="empty-state discovery-empty"><Compass aria-hidden="true" size={28} /><p className="eyebrow">{isAdmin ? 'Admin moment' : 'A fresh start'}</p><h2>{title}</h2><p>{detail}</p>{isAuthenticated ? <Link className="button primary" to="/app/stashes/new?starter=context"><Plus aria-hidden="true" size={17} /> Create the first shared stash</Link> : <div className="empty-actions"><Link className="button primary" to="/signup"><Plus aria-hidden="true" size={17} /> Create an account</Link><Link className="button secondary" to="/login">Log in</Link></div>}</section>
+}
 function StatePage({ title, detail }: { title: string; detail: string }) { return <main className="state-page"><h1>{title}</h1><p>{detail}</p><Link className="button secondary" to="/discover">Browse shared stashes</Link></main> }
 function NotFoundPage() { return <PublicLayout><StatePage title="That page has moved on." detail="The address does not point to anything here." /></PublicLayout> }
 

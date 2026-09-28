@@ -224,7 +224,7 @@ func (app *application) handleStashCollection(w http.ResponseWriter, r *http.Req
 			return
 		}
 		defer mongoCursor.Close(ctx)
-		var stashes []creatorStashPreview
+		stashes := make([]creatorStashPreview, 0)
 		if err := mongoCursor.All(ctx, &stashes); err != nil {
 			writeError(w, http.StatusInternalServerError, "Could not decode stashes")
 			return

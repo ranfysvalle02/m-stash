@@ -74,7 +74,7 @@ func (app *application) handleDatabaseProxy(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		var results []bson.M
+		results := make([]bson.M, 0)
 		if err := cursor.All(ctx, &results); err != nil {
 			writeError(w, http.StatusInternalServerError, "Error decoding cursor results: "+err.Error())
 			return

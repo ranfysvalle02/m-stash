@@ -39,6 +39,24 @@ func TestParsePublicStashPageRejectsInvalidLimit(t *testing.T) {
 	}
 }
 
+func TestWritePublicStashPageEncodesEmptyDataAsArray(t *testing.T) {
+	response := httptest.NewRecorder()
+	writePublicStashPage(response, make([]publicStashPreview, 0), defaultPublicPageSize, nil)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	var payload struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if string(payload.Data) != "[]" {
+		t.Fatalf("empty data = %s, want []", payload.Data)
+	}
+}
+
 func TestPublicStashCursorFilterUsesObjectID(t *testing.T) {
 	createdAt := time.Date(2026, time.September, 28, 12, 0, 0, 0, time.UTC)
 	id := bson.NewObjectID()
