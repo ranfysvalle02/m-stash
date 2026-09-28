@@ -228,10 +228,17 @@ function AuthenticationPage({
         <span>m</span>stash
       </Link>
       <section className="auth-panel" aria-labelledby="auth-title">
-        <p className="eyebrow">Identity-scoped application data</p>
+        <p className="eyebrow">
+          {isSignUp ? "Create your workspace" : "Your workspace"}
+        </p>
         <h1 id="auth-title">
-          {isSignUp ? "Create your personal scope." : "Welcome back."}
+          {isSignUp ? "Start storing app data." : "Welcome back."}
         </h1>
+        <p className="auth-intro">
+          {isSignUp
+            ? "Choose a username for your public data URL. Private records stay visible only to you."
+            : "Sign in to manage your personal records and shared application data."}
+        </p>
         <form onSubmit={submit}>
           <label>
             Email
@@ -258,22 +265,19 @@ function AuthenticationPage({
           {isSignUp && (
             <label>
               Username
-              <span className="handle-input">
-                <span>m.stash/</span>
-                <input
-                  autoCapitalize="none"
-                  autoComplete="username"
-                  aria-describedby="username-help"
-                  aria-invalid={Boolean(usernameIssue)}
-                  maxLength={32}
-                  onChange={(event) =>
-                    setUsername(normalizeUsername(event.target.value))
-                  }
-                  required
-                  spellCheck={false}
-                  value={username}
-                />
-              </span>
+              <input
+                autoCapitalize="none"
+                autoComplete="username"
+                aria-describedby="username-help"
+                aria-invalid={Boolean(usernameIssue)}
+                maxLength={32}
+                onChange={(event) =>
+                  setUsername(normalizeUsername(event.target.value))
+                }
+                required
+                spellCheck={false}
+                value={username}
+              />
               <small
                 className={
                   usernameIssue
@@ -285,8 +289,8 @@ function AuthenticationPage({
                 id="username-help"
               >
                 {usernameIssue || username
-                  ? usernameIssue || `Your permanent route: /${username}`
-                  : "3-32 lowercase letters or numbers; single - or _ between parts."}
+                  ? usernameIssue || `Public profile: ${window.location.origin}/${username}`
+                  : "Use 3-32 lowercase letters or numbers, with single - or _ separators."}
               </small>
             </label>
           )}
