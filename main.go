@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -24,22 +25,27 @@ import (
 // ============================================================================
 
 type CollectionRule struct {
-	Read  any `json:"read"`  // map[string]any rule AST or boolean
-	Write any `json:"write"` // map[string]any rule AST or boolean
+	Read                  any      `json:"read"`                    // Rule AST or boolean
+	Write                 any      `json:"write"`                   // Rule AST or boolean
+	AllowedWriteFields    []string `json:"allowed_write_fields"`    // Optional whitelist mask
+	RestrictedWriteFields []string `json:"restricted_write_fields"` // Blacklisted schema fields (e.g. "role")
 }
 
 type Config struct {
-	Port      string                    `json:"port"`
-	MongoURI  string                    `json:"mongo_uri"`
-	Database  string                    `json:"database"`
-	JWTSecret string                    `json:"jwt_secret"`
-	Rules     map[string]CollectionRule `json:"rules"`
+	Port           string                    `json:"port"`
+	MongoURI       string                    `json:"mongo_uri"`
+	Database       string                    `json:"database"`
+	JWTSecret      string                    `json:"jwt_secret"`
+	AllowedOrigins []string                  `json:"allowed_origins"`
+	Rules          map[string]CollectionRule `json:"rules"`
 }
 
 var (
 	config Config
 	db     *mongo.Database
 )
+
+const maxPayloadBytes = 1024 * 1024 // 1MB Request Payload Limit
 
 type Claims struct {
 	UID   string `json:"uid"`
@@ -62,18 +68,21 @@ type User struct {
 
 func loadConfig() {
 	config = Config{
-		Port:      getEnv("PORT", "4000"),
-		MongoURI:  getEnv("MONGO_URI", "mongodb://localhost:27017"),
-		Database:  getEnv("MONGO_DB", "app_db"),
-		JWTSecret: getEnv("JWT_SECRET", "super-secret-gateway-key-change-me"),
+		Port:           getEnv("PORT", "4000"),
+		MongoURI:       getEnv("MONGO_URI", "mongodb://localhost:27017"),
+		Database:       getEnv("MONGO_DB", "app_db"),
+		JWTSecret:      getEnv("JWT_SECRET", "super-secret-gateway-key-change-me"),
+		AllowedOrigins: []string{"*"},
 		Rules: map[string]CollectionRule{
 			"portfolios": {
-				Read:  map[string]any{"$or": []any{map[string]any{"ownerId": "$auth.uid"}, map[string]any{"isPublic": true}}},
-				Write: map[string]any{"ownerId": "$auth.uid"},
+				Read:                  map[string]any{"$or": []any{map[string]any{"ownerId": "$auth.uid"}, map[string]any{"isPublic": true}}},
+				Write:                 map[string]any{"ownerId": "$auth.uid"},
+				RestrictedWriteFields: []string{"role", "isVerified"},
 			},
 			"profiles": {
-				Read:  true,
-				Write: map[string]any{"_id": "$auth.uid"},
+				Read:                  true,
+				Write:                 map[string]any{"_id": "$auth.uid"},
+				RestrictedWriteFields: []string{"role", "permissions"},
 			},
 		},
 	}
@@ -88,8 +97,9 @@ func loadConfig() {
 				if fileConfig.MongoURI != "" { config.MongoURI = fileConfig.MongoURI }
 				if fileConfig.Database != "" { config.Database = fileConfig.Database }
 				if fileConfig.JWTSecret != "" { config.JWTSecret = fileConfig.JWTSecret }
+				if len(fileConfig.AllowedOrigins) > 0 { config.AllowedOrigins = fileConfig.AllowedOrigins }
 				if len(fileConfig.Rules) > 0 { config.Rules = fileConfig.Rules }
-				log.Println(" Loaded configuration from gateway.json")
+				log.Println("Loaded configuration from gateway.json")
 			}
 		}
 	}
@@ -106,12 +116,17 @@ func getEnv(key, fallback string) string {
 // TYPE NORMALIZATION & ACCESS CONTROL ENGINE
 // ============================================================================
 
+// Returns true strictly if the field key denotes an identifier
 func isIDField(key string) bool {
+	if key == "" || strings.HasPrefix(key, "$") {
+		return false
+	}
 	return key == "_id" || strings.HasSuffix(key, "Id") || strings.HasSuffix(key, "_id") || strings.HasSuffix(key, "ID")
 }
 
+// Parses string to ObjectID ONLY when context is an explicit ID field
 func parseObjectID(v string, keyContext string) any {
-	if (isIDField(keyContext) || bson.HasHexObjectID(v)) && len(v) == 24 {
+	if isIDField(keyContext) && len(v) == 24 && bson.HasHexObjectID(v) {
 		if objID, err := bson.ObjectIDFromHex(v); err == nil {
 			return objID
 		}
@@ -119,6 +134,7 @@ func parseObjectID(v string, keyContext string) any {
 	return v
 }
 
+// Interpolates claims & preserves keyContext across Mongo query operators ($in, $ne,$or, etc.)
 func interpolateAndNormalize(node any, claims *Claims, keyContext string) any {
 	switch v := node.(type) {
 	case string:
@@ -140,7 +156,12 @@ func interpolateAndNormalize(node any, claims *Claims, keyContext string) any {
 	case map[string]any:
 		res := make(map[string]any)
 		for k, val := range v {
-			res[k] = interpolateAndNormalize(val, claims, k)
+			nextContext := k
+			if strings.HasPrefix(k, "$") {
+				// Preserve parent field context for query operators (e.g. {"_id": {"$in": [...]}})
+				nextContext = keyContext
+			}
+			res[k] = interpolateAndNormalize(val, claims, nextContext)
 		}
 		return res
 
@@ -156,6 +177,7 @@ func interpolateAndNormalize(node any, claims *Claims, keyContext string) any {
 	}
 }
 
+// Normalizes client query values while maintaining operator keyContext
 func normalizeClientQuery(node any, keyContext string) any {
 	switch v := node.(type) {
 	case string:
@@ -163,7 +185,11 @@ func normalizeClientQuery(node any, keyContext string) any {
 	case map[string]any:
 		res := make(map[string]any)
 		for k, val := range v {
-			res[k] = normalizeClientQuery(val, k)
+			nextContext := k
+			if strings.HasPrefix(k, "$") {
+				nextContext = keyContext
+			}
+			res[k] = normalizeClientQuery(val, nextContext)
 		}
 		return res
 	case []any:
@@ -199,6 +225,35 @@ func valuesEqual(v1, v2 any) bool {
 	return false
 }
 
+// Validates schema field write permissions against whitelists and blacklists
+func validateFieldWriteMask(payload map[string]any, rule CollectionRule) error {
+	if payload == nil {
+		return nil
+	}
+
+	// 1. Check blacklisted fields
+	for _, restricted := range rule.RestrictedWriteFields {
+		if _, exists := payload[restricted]; exists {
+			return fmt.Errorf("field '%s' is restricted and cannot be written by clients", restricted)
+		}
+	}
+
+	// 2. Check whitelisted fields (if whitelist is configured)
+	if len(rule.AllowedWriteFields) > 0 {
+		allowedMap := make(map[string]bool)
+		for _, field := range rule.AllowedWriteFields {
+			allowedMap[field] = true
+		}
+		for field := range payload {
+			if !allowedMap[field] {
+				return fmt.Errorf("field '%s' is not in the allowed write schema", field)
+			}
+		}
+	}
+
+	return nil
+}
+
 func applySecurityFilter(clientQuery map[string]any, rawRule any, claims *Claims) (bson.M, error) {
 	if rawRule == nil {
 		return nil, fmt.Errorf("permission denied: no read policy configured")
@@ -231,28 +286,33 @@ func applySecurityFilter(clientQuery map[string]any, rawRule any, claims *Claims
 	}, nil
 }
 
-func authorizeAndHydrateInsert(payload map[string]any, writeRule any, claims *Claims) (map[string]any, error) {
-	if writeRule == nil {
+func authorizeAndHydrateInsert(payload map[string]any, rule CollectionRule, claims *Claims) (map[string]any, error) {
+	if rule.Write == nil {
 		return nil, fmt.Errorf("write access denied: no write policy configured")
 	}
 
-	if allowed, ok := writeRule.(bool); ok {
+	if payload == nil {
+		payload = make(map[string]any)
+	}
+
+	// Field-level schema mask check
+	if err := validateFieldWriteMask(payload, rule); err != nil {
+		return nil, err
+	}
+
+	if allowed, ok := rule.Write.(bool); ok {
 		if !allowed {
 			return nil, fmt.Errorf("write access denied by policy")
 		}
 		return payload, nil
 	}
 
-	ruleMap, ok := writeRule.(map[string]any)
+	ruleMap, ok := rule.Write.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("invalid write rule configuration")
 	}
 
 	interpolatedRule, _ := interpolateAndNormalize(ruleMap, claims, "").(map[string]any)
-
-	if payload == nil {
-		payload = make(map[string]any)
-	}
 
 	for k, expectedVal := range interpolatedRule {
 		if strings.HasPrefix(k, "$") {
@@ -272,25 +332,30 @@ func authorizeAndHydrateInsert(payload map[string]any, writeRule any, claims *Cl
 	return payload, nil
 }
 
-func sanitizeUpdatePayload(payload map[string]any, writeRule any, claims *Claims) (map[string]any, error) {
+func sanitizeUpdatePayload(payload map[string]any, rule CollectionRule, claims *Claims) (map[string]any, error) {
 	if payload == nil {
 		return nil, fmt.Errorf("update payload cannot be empty")
 	}
 
 	delete(payload, "_id")
 
-	if writeRule == nil {
+	// Field-level schema mask check
+	if err := validateFieldWriteMask(payload, rule); err != nil {
+		return nil, err
+	}
+
+	if rule.Write == nil {
 		return nil, fmt.Errorf("write access denied: no write policy configured")
 	}
 
-	if allowed, ok := writeRule.(bool); ok {
+	if allowed, ok := rule.Write.(bool); ok {
 		if !allowed {
 			return nil, fmt.Errorf("write access denied by policy")
 		}
 		return payload, nil
 	}
 
-	ruleMap, ok := writeRule.(map[string]any)
+	ruleMap, ok := rule.Write.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("invalid write rule configuration")
 	}
@@ -318,11 +383,32 @@ func sanitizeUpdatePayload(payload map[string]any, writeRule any, claims *Claims
 
 func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		allowed := false
+
+		if origin != "" {
+			for _, o := range config.AllowedOrigins {
+				if o == "*" || o == origin {
+					allowed = true
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					if o != "*" {
+						w.Header().Set("Access-Control-Allow-Credentials", "true")
+					}
+					break
+				}
+			}
+		} else {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
+
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 		if r.Method == http.MethodOptions {
+			if !allowed && origin != "" && len(config.AllowedOrigins) > 0 && config.AllowedOrigins[0] != "*" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -367,11 +453,18 @@ func handleSignUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxPayloadBytes)
+
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Email == "" || req.Password == "" {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "Request body exceeds maximum limit (1MB)"})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Email and password required"})
 		return
 	}
@@ -425,11 +518,18 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxPayloadBytes)
+
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "Request body exceeds maximum limit (1MB)"})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
 		return
 	}
@@ -478,6 +578,8 @@ func handleDatabaseProxy(w http.ResponseWriter, r *http.Request, claims *Claims)
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxPayloadBytes)
+
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(parts) < 4 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid endpoint path. Use /v1/db/{collection}/{action}"})
@@ -498,6 +600,11 @@ func handleDatabaseProxy(w http.ResponseWriter, r *http.Request, claims *Claims)
 
 	if r.Body != nil {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "Request payload exceeds maximum allowed size (1MB)"})
+				return
+			}
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Malformed JSON request body: " + err.Error()})
 			return
 		}
@@ -541,7 +648,7 @@ func handleDatabaseProxy(w http.ResponseWriter, r *http.Request, claims *Claims)
 		writeJSON(w, http.StatusOK, map[string]any{"data": result})
 
 	case "insertOne":
-		validatedPayload, err := authorizeAndHydrateInsert(body.Payload, rule.Write, claims)
+		validatedPayload, err := authorizeAndHydrateInsert(body.Payload, rule, claims)
 		if err != nil {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 			return
@@ -561,7 +668,7 @@ func handleDatabaseProxy(w http.ResponseWriter, r *http.Request, claims *Claims)
 			return
 		}
 
-		sanitizedPayload, err := sanitizeUpdatePayload(body.Payload, rule.Write, claims)
+		sanitizedPayload, err := sanitizeUpdatePayload(body.Payload, rule, claims)
 		if err != nil {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 			return
