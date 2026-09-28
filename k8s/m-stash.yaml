@@ -5,6 +5,9 @@ metadata:
   labels:
     app.kubernetes.io/name: m-stash
 data:
+  jwt_issuer: m-stash
+  jwt_audience: m-stash
+  trust_proxy: "false"
   gateway.json: |
     {
       "allowed_origins": ["https://app.example.com"],
@@ -66,6 +69,26 @@ spec:
                 secretKeyRef:
                   name: m-stash-secrets
                   key: JWT_SECRET
+            - name: METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: m-stash-secrets
+                  key: METRICS_TOKEN
+            - name: JWT_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: m-stash-config
+                  key: jwt_issuer
+            - name: JWT_AUDIENCE
+              valueFrom:
+                configMapKeyRef:
+                  name: m-stash-config
+                  key: jwt_audience
+            - name: TRUST_PROXY
+              valueFrom:
+                configMapKeyRef:
+                  name: m-stash-config
+                  key: trust_proxy
             - name: M_STASH_CONFIG
               value: /etc/m-stash/gateway.json
           volumeMounts:

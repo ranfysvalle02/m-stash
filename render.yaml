@@ -13,5 +13,7 @@ services:
         value: app_db
       - key: JWT_SECRET
         generateValue: true
+      - key: METRICS_TOKEN
+        generateValue: true
       - key: ALLOWED_ORIGINS
         sync: false

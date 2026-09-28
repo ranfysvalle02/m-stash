@@ -6,7 +6,7 @@ This path takes a fresh MongoDB database to a deployed API with private and publ
 
 1. Push this repository to GitHub, GitLab, or Bitbucket.
 2. In Render, choose **New** then **Blueprint** and select the repository. Render reads [render.yaml](render.yaml), builds the Docker image, waits for `/healthz`, and creates an HTTPS service.
-3. Before creating the Blueprint, enter `MONGO_URI` as your Atlas or self-hosted MongoDB connection URI. Set `ALLOWED_ORIGINS` to the URL of your browser app, such as `https://app.example.com`. `MONGO_DB` defaults to `app_db` and Render generates `JWT_SECRET`.
+3. Before creating the Blueprint, enter `MONGO_URI` as your Atlas or self-hosted **replica set or sharded** MongoDB connection URI. Set `ALLOWED_ORIGINS` to the URL of your browser app, such as `https://app.example.com`. `MONGO_DB` defaults to `app_db`; Render generates `JWT_SECRET` and `METRICS_TOKEN`.
 4. Copy the public service URL from Render and use it below as `API_URL`.
 
 For MongoDB Atlas, configure network access for the Render service. Use a Render static outbound address when your plan provides one; otherwise follow Render and Atlas guidance for your plan rather than assuming a fixed shared range. Use a Render Web Service rather than a Static Site so HTTPS and WebSockets remain available.
@@ -86,13 +86,35 @@ curl --request POST "$API_URL/v1/db/stashes/find" \
 
 An authenticated `find` with an empty query returns the caller's stashes plus other users' public stashes. Use the public route below for an anonymous profile page.
 
-Anyone can list only the user's public stashes, with no token:
+Anyone can list only the user's public stashes, with no token. Results are cursor-paginated (20 items by default, up to 100) and can be filtered by one exact tag:
 
 ```sh
-curl "$API_URL/v1/public/profiles/ada-lovelace/stashes"
+curl "$API_URL/v1/public/profiles/ada-lovelace/stashes?limit=20&tag=intro"
+```
+
+The response includes `page.nextCursor`. Pass it as `cursor` with the same filters to retrieve the next page:
+
+```sh
+curl "$API_URL/v1/public/profiles/ada-lovelace/stashes?limit=20&tag=intro&cursor=PASTE_NEXT_CURSOR"
 ```
 
 Visitors receive only public fields. They cannot call the authenticated write routes, and the owner policy means they cannot edit another person's stash.
+
+## Global discovery
+
+Published stashes can also appear in the global discovery feed. It supports the same cursor pagination and exact tag filter, but returns compact previews rather than full content:
+
+```sh
+curl "$API_URL/v1/public/stashes?limit=20&tag=intro"
+```
+
+Open a preview by `_id` to load its full public content:
+
+```sh
+curl "$API_URL/v1/public/stashes/PUBLIC_STASH_ID"
+```
+
+The global feed accepts only `limit`, `cursor`, and `tag`; it deliberately does not expose arbitrary database filters.
 
 ## 5. Optional WebSocket connection
 

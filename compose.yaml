@@ -1,18 +1,56 @@
 services:
+  mongo-keyfile:
+    image: mongo:8
+    restart: "no"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ ! -f /etc/mongo-keyfile/keyfile ]; then
+          umask 077
+          head -c 756 /dev/urandom | base64 > /etc/mongo-keyfile/keyfile
+        fi
+        chown 999:999 /etc/mongo-keyfile/keyfile
+        chmod 400 /etc/mongo-keyfile/keyfile
+    volumes:
+      - mongo-keyfile:/etc/mongo-keyfile
+
   mongo:
     image: mongo:8
     restart: unless-stopped
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/keyfile"]
+    depends_on:
+      mongo-keyfile:
+        condition: service_completed_successfully
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
     volumes:
       - mongo-data:/data/db
+      - mongo-keyfile:/etc/mongo-keyfile:ro
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 10s
+
+  mongo-init:
+    image: mongo:8
+    restart: "no"
+    environment:
+      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@mongo:27017/?authSource=admin
+    depends_on:
+      mongo:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        mongosh "$${MONGO_URI}" --quiet --eval '
+          try { rs.status() } catch (error) { rs.initiate({_id: "rs0", members: [{_id: 0, host: "mongo:27017"}]}) }
+          while (!db.hello().isWritablePrimary) { sleep(1) }
+        '
 
   m-stash:
     build: .
@@ -21,13 +59,17 @@ services:
     ports:
       - "${PORT:-4000}:4000"
     environment:
-      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@mongo:27017/?authSource=admin
+      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD}@mongo:27017/?authSource=admin&replicaSet=rs0
       MONGO_DB: ${MONGO_DB:-app_db}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_ISSUER: ${JWT_ISSUER:-m-stash}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-m-stash}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
     depends_on:
-      mongo:
-        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:4000/readyz"]
       interval: 30s
@@ -37,3 +79,4 @@ services:
 
 volumes:
   mongo-data:
+  mongo-keyfile:

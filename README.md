@@ -12,11 +12,39 @@ The default configuration separates identity, private data, and public data:
 | `profiles` | Owner through authenticated API | A user's editable profile document. Its `_id` is the authenticated user's ID. |
 | `GET /v1/public/profiles/{handle}` | Anyone | A stable public profile page. Only `handle`, `displayName`, `bio`, `avatarURL`, and `links` are returned. |
 | `stashes` | Owner-managed; signed-in readers can also see public stashes | A user's posts, notes, or saved work. Each stash is private by default or publishable with `isPublic: true`. |
-| `GET /v1/public/profiles/{handle}/stashes` | Anyone | All public stashes for one published profile, returned with a safe public projection. |
+| `GET /v1/public/profiles/{handle}/stashes` | Anyone | Cursor-paginated public stashes for one published profile, returned with a safe public projection. |
+| `GET /v1/public/stashes` | Anyone | Global cursor-paginated discovery feed of compact public-stash previews. |
+| `GET /v1/public/stashes/{id}` | Anyone | Full public content for one published stash. |
 
 Public profile reads bypass the general database proxy intentionally. The endpoint requires a lowercase handle and queries only `isPublic: true` documents with an allowlisted MongoDB projection. Adding private fields to `profiles` later cannot expose them by accident.
 
-The same pattern applies to stashes. Owners create, edit, and delete only their own stashes through the authenticated API. Signed-in callers can also discover any published stash through the generic API; visitors use the profile-scoped public endpoint and cannot create, edit, or delete any stash.
+The same pattern applies to stashes. Owners create, edit, and delete only their own stashes through the authenticated API. Setting `isPublic: true` makes a stash eligible for global discovery; the profile-scoped feed additionally requires the owner's profile to be public. Visitors cannot call authenticated write routes.
+
+Public stash feeds are cursor-paginated and sorted by `createdAt` then `_id`, both descending. `limit` defaults to `20` and accepts values from `1` through `100`; `tag` optionally filters to one exact tag. Responses include an opaque `page.nextCursor`, which clients pass back as `cursor` to fetch the next page. The gateway creates compound indexes for both tagged and unfiltered profile feeds at startup.
+
+```text
+GET /v1/public/profiles/ada-lovelace/stashes?limit=20&tag=release
+GET /v1/public/profiles/ada-lovelace/stashes?limit=20&cursor=<page.nextCursor>
+```
+
+```json
+{
+  "data": [{ "title": "Shipping notes", "tags": ["release"] }],
+  "page": { "limit": 20, "nextCursor": "eyJjcmVhdGVkQXQiOiIuLi4ifQ" }
+}
+```
+
+## Global discovery
+
+`GET /v1/public/stashes` is a separate, intentionally small discovery API. It accepts the same `limit`, `cursor`, and exact `tag` filter as profile feeds, but it never accepts arbitrary MongoDB queries. It returns compact previews (`_id`, `title`, `summary`, `tags`, and timestamps), keeping feed payloads bounded; request the detail route when a visitor opens an item.
+
+```text
+GET /v1/public/stashes?limit=20&tag=release
+GET /v1/public/stashes?limit=20&cursor=<page.nextCursor>
+GET /v1/public/stashes/507f1f77bcf86cd799439011
+```
+
+The detail route returns the same allowlisted fields plus `content`. Global and profile feeds are backed by dedicated compound indexes, so clients can page by recency without a growing `skip` cost.
 
 ## Profile fields
 
@@ -57,7 +85,11 @@ Each stash has a required `title`, plus optional `summary`, `content`, and `tags
 | --- | --- | --- |
 | `MONGO_URI` | Yes | MongoDB or Atlas connection URI. |
 | `MONGO_DB` | Yes | Database name. |
-| `JWT_SECRET` | Yes | Long random secret used to sign user sessions. |
+| `JWT_SECRET` | Yes | At least 32 characters; used to sign user sessions. |
+| `JWT_ISSUER` | No | JWT issuer. Defaults to `m-stash`. |
+| `JWT_AUDIENCE` | No | JWT audience. Defaults to `m-stash`. |
+| `TRUST_PROXY` | No | Accept `X-Forwarded-For` for rate limiting only when set to `true` behind a trusted proxy. Defaults to `false`. |
+| `METRICS_TOKEN` | Production | At least 32 characters. Enables the protected Prometheus metrics endpoint; metrics stay disabled when omitted. |
 | `ALLOWED_ORIGINS` | Production | Comma-separated browser origins, such as `https://app.example.com`. Defaults to `*`. |
 | `PORT` | No | Listener port. Cloud providers set this automatically. |
 
@@ -95,7 +127,7 @@ Check readiness with `curl http://localhost:4000/healthz`.
 
 ### Docker Compose
 
-The included [compose.yaml](compose.yaml) starts MongoDB and the gateway together. Copy the example environment file, replace all placeholders, then start the stack:
+The included [compose.yaml](compose.yaml) starts a single-node MongoDB replica set and the gateway together. Copy the example environment file, replace all placeholders, then start the stack:
 
 ```sh
 cp .env.example .env
@@ -109,7 +141,7 @@ For custom collection rules, mount a policy file at `/etc/m-stash/gateway.json`.
 
 ### Kubernetes
 
-[k8s/m-stash.yaml](k8s/m-stash.yaml) contains a two-replica Deployment, ClusterIP Service, health probes, resource settings, a read-only ConfigMap-mounted policy, and restricted pod security settings. Before applying it:
+[k8s/m-stash.yaml](k8s/m-stash.yaml) contains a two-replica Deployment, ClusterIP Service, health probes, resource settings, a read-only ConfigMap-mounted policy, and restricted pod security settings. Its `MONGO_URI` must target a MongoDB replica set or sharded cluster because m-stash writes mutations and outbox events atomically. Before applying it:
 
 1. Replace `YOUR_DOCKERHUB_USERNAME/m-stash:latest` with a pinned published tag.
 2. Set the allowed origin and collection rules in the ConfigMap.
@@ -119,7 +151,7 @@ For custom collection rules, mount a policy file at `/etc/m-stash/gateway.json`.
 kubectl apply -f k8s/m-stash.yaml
 ```
 
-`/readyz` checks MongoDB and is used for readiness; `/healthz` is the liveness endpoint. The built-in brute-force limiter is local to each replica, so use an ingress, API gateway, or shared rate limiter when you need cluster-wide enforcement.
+`/readyz` checks MongoDB and is used for readiness; `/healthz` is the liveness endpoint. Signup and login use a MongoDB-backed, fixed-window limiter shared by all replicas: 10 attempts per five minutes for each endpoint/client-IP pair. Identifiers are SHA-256 hashes and expire through a TTL index. Keep an ingress or API gateway in front for volumetric DDoS protection and broader edge controls.
 
 ### Publish a release
 
@@ -162,14 +194,39 @@ Vercel Functions cannot host persistent WebSocket connections or this long-lived
 
 ## API
 
-All database operations use `POST /v1/db/{collection}/{action}` and a JWT bearer token. Supported actions are `find`, `findOne`, `insertOne`, `updateOne`, and `deleteOne`.
+All database operations use `POST /v1/db/{collection}/{action}` and a JWT bearer token. Supported actions are `find`, `findOne`, `insertOne`, `updateOne`, and `deleteOne`. Generic client filters permit only `$and`, `$or`, `$eq`, `$ne`, `$in`, `$nin`, `$gt`, `$gte`, `$lt`, `$lte`, `$exists`, and `$all`; executable or expression operators such as `$where` and `$expr` are rejected.
 
 ```json
 {
   "query": { "status": "active" },
+  "limit": 50,
   "payload": { "title": "Example" }
 }
 ```
+
+`find` defaults to 50 documents and is capped at 100. Use purpose-built public feeds for cursor pagination rather than treating the proxy as a collection export API.
+
+## Integration Contracts
+
+Services can validate an incoming user token without sharing `JWT_SECRET` by forwarding it as a bearer token to `GET /v1/auth/verify`. A successful response contains `active: true` plus the standard `sub`, `iss`, `aud`, `jti`, issue/expiry metadata, and m-stash `uid`, `email`, and `role` claims. Tokens are signed with HS256 and require the configured issuer and audience.
+
+`GET /.well-known/m-stash.json` exposes a versioned service manifest with the verification endpoint, available API surfaces, transactional-outbox schema version, and metrics availability. Every HTTP response includes `X-Request-ID` for cross-service correlation.
+
+Extensions and workflows should run as separate services. The durable boundary for future workflow delivery is a transactional outbox and signed webhooks, not in-process plugins or best-effort goroutines; that keeps tenant code out of the gateway and lets workers scale, retry, and evolve independently.
+
+## Transactional Outbox
+
+Every successful authenticated `insertOne`, `updateOne`, or `deleteOne` creates an immutable event in `_m_stash_outbox` within the same MongoDB transaction as the document change. If the event cannot be recorded, the write is aborted. The service verifies transaction support at startup, so it requires a replica set or sharded MongoDB deployment.
+
+Events use versioned names such as `m-stash.stashes.updateOne.v1` and contain an event `_id`, `occurredAt`, `requestId`, actor ID/role, collection/resource ID, changed field names or result counts, and delivery metadata. They begin as `pending`, with no payload values copied into the event. A separately deployed worker should claim events atomically, use the event `_id` as its idempotency key, lease/retry delivery, and move exhausted events to a dead-letter state. The generic gateway API permanently reserves `_m_stash_*` collections, so worker credentials should be scoped directly in MongoDB rather than exposed through this service.
+
+The gateway intentionally does not dispatch webhooks itself. A worker can add signed delivery, tenant-aware destinations, retries, dead-letter handling, and SSRF controls without coupling third-party code or network access to request handling.
+
+## Observability
+
+Every request emits one JSON log entry with a sanitized request ID, normalized route, status, and duration. m-stash accepts a valid upstream `X-Request-ID` or generates one, then returns it in the response and persists it in outbox events.
+
+Set `METRICS_TOKEN` to enable `GET /metrics`; call it with `Authorization: Bearer <METRICS_TOKEN>`. The endpoint exposes Prometheus-compatible HTTP request, in-flight request, process-start, committed outbox-event, and shared rate-limit rejection metrics. It returns `404` when metrics are not configured, preventing accidental exposure through a public ingress.
 
 Persistent clients can use `wss://your-gateway.example/v1/ws/{collection}` with the same bearer token during the upgrade. Send the same JSON plus an `action` field.
 
