@@ -1,14 +1,24 @@
 # m-stash
 
-`m-stash` is a Go gateway for MongoDB applications. It owns signup and login, verifies JWTs, applies document-level MongoDB JSON policies, and exposes deliberate public data surfaces without exposing database credentials to browsers. It fits profiles, inventories, leaderboards, operational state, and the included flexible `stashes` starter collection.
+`m-stash` is the secure access layer for MongoDB applications. Your application gets an authenticated API; m-stash checks each request against collection policy before MongoDB sees it. Browsers never receive database credentials.
+
+It is intentionally narrow:
+
+| Need | m-stash provides |
+| --- | --- |
+| **Secure by default** | Signup, login, rotating browser sessions, JWT verification, CSRF protection, and no MongoDB credentials in clients. |
+| **Scoped access** | Per-collection document rules plus field allowlists keep each caller inside the data it is allowed to read or change. |
+| **Built to operate** | Replica-set transactions, a durable mutation outbox, cursor pagination, rate limiting, health checks, and metrics support production workloads. |
+
+Use it for profiles, inventories, application state, leaderboards, operational data, or any MongoDB collection that should have a controlled API boundary.
 
 ## Embedded workspace
 
-The gateway serves an embedded, same-origin application workspace at `/`. It includes signup and login, optional profiles, a flexible stash editor with private/public sharing, policy-backed record inspection, public profiles, and global discovery. It is compiled into the same Go binary and Docker image as the API, so no second frontend deployment is required.
+The gateway serves an embedded, same-origin operator workspace at `/`. It lets you verify identity, policy boundaries, the included sample collection, and explicitly shared public items. It is compiled into the same Go binary and Docker image as the API, so no second frontend deployment is required.
 
 For local UI development, start the API on port `4000` and run `npm --prefix frontend run dev`; Vite proxies `/v1` requests to the API. Run `make build` to compile the production UI and Go binary together, or `make test` to build the UI before running Go tests.
 
-## Core model
+## Default surfaces
 
 The default configuration separates identity, private data, and public data:
 
@@ -17,16 +27,16 @@ The default configuration separates identity, private data, and public data:
 | `_users` | Gateway only | Email, password hash, role, and account metadata. Never available through the database proxy. |
 | `profiles` | Owner through authenticated API | A user's editable profile document. Its `_id` is the authenticated user's ID. |
 | `GET /v1/public/profiles/{handle}` | Anyone | A stable public profile page. Only `handle`, `displayName`, `bio`, `avatarURL`, and `links` are returned. |
-| `stashes` | Owner-managed; signed-in readers can also see public stashes | Flexible owned items: saved context, release artifacts, shared resources, or any lightweight app record. Each stash is private by default and can be shared with `isPublic: true`. |
-| `GET /v1/public/profiles/{handle}/stashes` | Anyone | Cursor-paginated public stashes for one published profile, returned with a safe public projection. |
-| `GET /v1/public/stashes` | Anyone | Global cursor-paginated discovery feed of compact public-stash previews. |
-| `GET /v1/public/stashes/{id}` | Anyone | Full public content for one published stash. |
+| `stashes` | Owner-managed; signed-in readers can also see public items | Included sample collection for verifying the policy-backed data path. Each item is private by default and can be shared with `isPublic: true`. |
+| `GET /v1/public/profiles/{handle}/stashes` | Anyone | Cursor-paginated public items for one public profile, returned with a safe projection. |
+| `GET /v1/public/stashes` | Anyone | Global cursor-paginated feed of compact public-item previews. |
+| `GET /v1/public/stashes/{id}` | Anyone | Full public content for one explicitly shared item. |
 
 Public profile reads bypass the general database proxy intentionally. The endpoint requires a lowercase handle and queries only `isPublic: true` documents with an allowlisted MongoDB projection. Adding private fields to `profiles` later cannot expose them by accident.
 
-The same pattern applies to stashes. Owners create, edit, and delete only their own stashes through the authenticated API. Setting `isPublic: true` makes a stash eligible for global discovery; the profile-scoped feed additionally requires the owner's profile to be public. Visitors cannot call authenticated write routes.
+The same pattern applies to the included `stashes` collection. Owners create, edit, and delete only their own records through the authenticated API. Setting `isPublic: true` makes an item eligible for the global public feed; the profile-scoped feed additionally requires the owner's profile to be public. Visitors cannot call authenticated write routes.
 
-Public stash feeds are cursor-paginated and sorted by `createdAt` then `_id`, both descending. `limit` defaults to `20` and accepts values from `1` through `100`; `tag` optionally filters to one exact tag. Responses include an opaque `page.nextCursor`, which clients pass back as `cursor` to fetch the next page. The gateway creates compound indexes for both tagged and unfiltered profile feeds at startup.
+Public item feeds are cursor-paginated and sorted by `createdAt` then `_id`, both descending. `limit` defaults to `20` and accepts values from `1` through `100`; `tag` optionally filters to one exact tag. Responses include an opaque `page.nextCursor`, which clients pass back as `cursor` to fetch the next page. The gateway creates compound indexes for both tagged and unfiltered profile feeds at startup.
 
 ```text
 GET /v1/public/profiles/ada-lovelace/stashes?limit=20&tag=release
@@ -40,9 +50,9 @@ GET /v1/public/profiles/ada-lovelace/stashes?limit=20&cursor=<page.nextCursor>
 }
 ```
 
-## Global discovery
+## Optional public discovery
 
-`GET /v1/public/stashes` is a separate, intentionally small discovery API. It accepts the same `limit`, `cursor`, and exact `tag` filter as profile feeds, but it never accepts arbitrary MongoDB queries. It returns compact previews (`_id`, `title`, `summary`, `tags`, and timestamps), keeping feed payloads bounded; request the detail route when a visitor opens an item.
+`GET /v1/public/stashes` is a separate, intentionally small public-item API. It accepts the same `limit`, `cursor`, and exact `tag` filter as profile feeds, but it never accepts arbitrary MongoDB queries. It returns compact previews (`_id`, `title`, `summary`, `tags`, and timestamps), keeping feed payloads bounded; request the detail route when a visitor opens an item.
 
 ```text
 GET /v1/public/stashes?limit=20&tag=release
@@ -69,9 +79,9 @@ Clients may write only these fields to `profiles`:
 
 `_id` is hydrated from the JWT on insert and cannot be changed. `email`, `role`, and `permissions` are never writable through this API. A public handle contains 3-32 lowercase letters, numbers, hyphens, or underscores.
 
-## Stash fields
+## Sample collection fields
 
-Each stash has a required `title`, plus optional `summary`, `content`, and `tags`. Set `isPublic` to `true` to include it in that user's public listing. The gateway assigns `ownerId`, `createdAt`, and `updatedAt`; a supplied `ownerId` must exactly match the signed-in user, and timestamps cannot be supplied by clients.
+The default `stashes` collection is a simple sample surface with a required `title` plus optional `summary`, `content`, and `tags`. Set `isPublic` to `true` to include an item in public listings. The gateway assigns `ownerId`, `createdAt`, and `updatedAt`; a supplied `ownerId` must exactly match the signed-in user, and timestamps cannot be supplied by clients. Add rules for the collections that represent your actual application model.
 
 ```json
 {
@@ -89,8 +99,8 @@ Each stash has a required `title`, plus optional `summary`, `content`, and `tags
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `MONGO_URI` | Yes | MongoDB or Atlas connection URI. |
-| `MONGO_DB` | Yes | Database name. |
+| `MONGO_URI` | Hosted deployments | MongoDB or Atlas connection URI. Defaults to `mongodb://localhost:27017` for local development. |
+| `MONGO_DB` | No | Database name. Defaults to `app_db`. |
 | `JWT_SECRET` | Yes | At least 32 characters; used to sign user sessions. |
 | `JWT_ISSUER` | No | JWT issuer. Defaults to `m-stash`. |
 | `JWT_AUDIENCE` | No | JWT audience. Defaults to `m-stash`. |
@@ -98,9 +108,9 @@ Each stash has a required `title`, plus optional `summary`, `content`, and `tags
 | `ACCESS_TOKEN_TTL` | No | Lifetime for the UI's `HttpOnly` access cookie. Defaults to `15m`. |
 | `REFRESH_SESSION_TTL` | No | Lifetime for rotating browser refresh sessions. Defaults to `720h`. |
 | `SESSION_COOKIE_SECURE` | No | Require HTTPS for browser session cookies. Defaults to `true`; use `false` only for local HTTP development. |
-| `TRUST_PROXY` | No | Accept `X-Forwarded-For` for rate limiting only when set to `true` behind a trusted proxy. Defaults to `false`. |
-| `METRICS_TOKEN` | Production | At least 32 characters. Enables the protected Prometheus metrics endpoint; metrics stay disabled when omitted. |
-| `ALLOWED_ORIGINS` | Production | Comma-separated browser origins, such as `https://app.example.com`. Defaults to `*`. |
+| `TRUST_PROXY` | No | Trust forwarded HTTPS and client-IP information only when set to `true` behind a proxy you control. Defaults to `false`. |
+| `METRICS_TOKEN` | Optional | At least 32 characters. Enables the protected Prometheus metrics endpoint; metrics stay disabled when omitted. |
+| `ALLOWED_ORIGINS` | Recommended in production | Comma-separated browser origins, such as `https://app.example.com`. Defaults to `*`. |
 | `PORT` | No | Listener port. Cloud providers set this automatically. |
 
 For Atlas, configure network access for the deployment provider. Use a provider-supported static outbound address when available; do not assume there is one universal egress range for every plan.
@@ -246,4 +256,4 @@ Set `METRICS_TOKEN` to enable `GET /metrics`; call it with `Authorization: Beare
 
 Persistent clients can use `wss://your-gateway.example/v1/ws/{collection}` with the same bearer token during the upgrade. Send the same JSON plus an `action` field.
 
-Public clients use `GET /v1/public/profiles/{handle}` and `GET /v1/public/profiles/{handle}/stashes` without a token. The complete deploy-to-profile-and-stash walkthrough is in [quickstart.md](quickstart.md).
+Public clients use `GET /v1/public/profiles/{handle}` and `GET /v1/public/profiles/{handle}/stashes` without a token. The complete secure-MongoDB setup walkthrough is in [quickstart.md](quickstart.md).

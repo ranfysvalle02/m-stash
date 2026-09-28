@@ -1,32 +1,26 @@
-# React + TypeScript + Vite
+# m-stash Operator UI
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+This is the embedded React interface for m-stash. It helps an operator verify the secure MongoDB data path: authenticate, create a private record in the included sample collection, inspect the policy-limited query result, and configure the service.
 
-Currently, two official plugins are available:
+The UI is not a separate product or deployment. Production builds are written to `frontend/dist` and embedded in the Go binary by [ui.go](../ui.go). The Go service serves the UI, API, and browser-session cookies from one origin.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Development
 
-## React Compiler
+Start the Go API from the repository root on port `4000`, then run Vite:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Vite proxies `/v1` requests to `http://127.0.0.1:4000`. Useful commands:
+
+```sh
+npm run lint
+npm run build
+```
+
+Run `make test` from the repository root to build this UI and run the Go tests together.
+
+## Product boundary
+
+The UI can inspect only data allowed by the server's collection rules. It does not receive MongoDB credentials and it does not configure authorization policy from the browser. Configure policies through `M_STASH_CONFIG` and keep credentials in the deployment environment or secret manager.

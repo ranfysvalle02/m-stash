@@ -47,13 +47,6 @@ type SessionState =
   | { kind: 'anonymous' }
   | { kind: 'authenticated'; claims: UserClaims }
 
-type StashStarter = {
-  key: string
-  label: string
-  detail: string
-  input: StashInput
-}
-
 const SessionContext = createContext<SessionState>({ kind: 'loading' })
 
 const emptyProfile: ProfileInput = {
@@ -71,53 +64,6 @@ const emptyStash: StashInput = {
   content: '',
   tags: [],
   isPublic: false,
-}
-
-const stashStarters: StashStarter[] = [
-  {
-    key: 'context',
-    label: 'Project context',
-    detail: 'A shared source of truth for the work in motion.',
-    input: {
-      title: 'Project context',
-      summary: 'What this work is, where it stands, and what happens next.',
-      content: '## Goal\n\nDescribe the outcome this work should create.\n\n## Current state\n\nWhat is true right now?\n\n## Next move\n\nName the next decision, owner, or milestone.',
-      tags: ['project', 'context'],
-      isPublic: false,
-    },
-  },
-  {
-    key: 'runbook',
-    label: 'Operational runbook',
-    detail: 'A repeatable response for a system, process, or handoff.',
-    input: {
-      title: 'Operational runbook',
-      summary: 'A practical guide for handling a repeatable moment.',
-      content: '## When to use this\n\nDescribe the signal or situation that starts this workflow.\n\n## Steps\n\n1. Confirm the current state.\n2. Take the smallest safe action.\n3. Record the outcome.\n\n## Escalate when\n\nList the conditions that need another person or system.',
-      tags: ['operations', 'runbook'],
-      isPublic: false,
-    },
-  },
-  {
-    key: 'state',
-    label: 'State reference',
-    detail: 'Define the data and rules behind an app, game, or workflow.',
-    input: {
-      title: 'State reference',
-      summary: 'The fields, transitions, and guardrails that make this state useful.',
-      content: '## Purpose\n\nWhat does this state represent?\n\n## Fields\n\n- `status`: Current phase or condition\n- `ownerId`: Account or system responsible\n- `updatedAt`: Most recent trusted change\n\n## Rules\n\nDocument which actions are trusted and which ones need server-side enforcement.',
-      tags: ['state', 'reference'],
-      isPublic: false,
-    },
-  },
-]
-
-function findStashStarter(key: string | null) {
-  return stashStarters.find((starter) => starter.key === key)
-}
-
-function stashInputFromStarter(starter: StashStarter): StashInput {
-  return { ...starter.input, tags: [...starter.input.tags] }
 }
 
 const composeEnvironment = `MONGO_DB=app_db
@@ -258,8 +204,8 @@ function AuthenticationPage({ mode, onAuthenticated }: { mode: 'login' | 'signup
     <main className="auth-page">
       <Link className="wordmark" to="/discover"><span>m</span>stash</Link>
       <section className="auth-panel" aria-labelledby="auth-title">
-        <p className="eyebrow">Your application data plane</p>
-        <h1 id="auth-title">{isSignUp ? 'Start with a clean slate.' : 'Welcome back.'}</h1>
+        <p className="eyebrow">Secure, scoped MongoDB</p>
+        <h1 id="auth-title">{isSignUp ? 'Give your app a safer data API.' : 'Welcome back.'}</h1>
         <form onSubmit={submit}>
           <label>
             Email
@@ -279,7 +225,7 @@ function AuthenticationPage({ mode, onAuthenticated }: { mode: 'login' | 'signup
           {isSignUp ? 'Already have an account?' : 'Need an account?'}{' '}
           <Link to={isSignUp ? '/login' : '/signup'}>{isSignUp ? 'Log in' : 'Create one'}</Link>
         </p>
-        <Link className="auth-guide-link" to="/guide"><BookOpen aria-hidden="true" size={16} /> How m-stash runs</Link>
+        <Link className="auth-guide-link" to="/guide"><ShieldCheck aria-hidden="true" size={16} /> See the security model</Link>
       </section>
     </main>
   )
@@ -367,11 +313,11 @@ function WorkspaceShell({ children, claims, profile, onSessionChange }: { childr
       <aside className={menuOpen ? 'sidebar open' : 'sidebar'}>
         <Link className="wordmark" to="/app/stashes"><span>m</span>stash</Link>
         <nav aria-label="Workspace">
-          <NavLink end onClick={() => setMenuOpen(false)} to="/app/stashes"><BookOpen aria-hidden="true" size={18} /> Stashes</NavLink>
-          <NavLink onClick={() => setMenuOpen(false)} to="/app/stashes/new"><PenLine aria-hidden="true" size={18} /> New stash</NavLink>
-          <NavLink onClick={() => setMenuOpen(false)} to="/app/records"><Database aria-hidden="true" size={18} /> Records</NavLink>
+          <NavLink end onClick={() => setMenuOpen(false)} to="/app/stashes"><BookOpen aria-hidden="true" size={18} /> Starter data</NavLink>
+          <NavLink onClick={() => setMenuOpen(false)} to="/app/stashes/new"><PenLine aria-hidden="true" size={18} /> New record</NavLink>
+          <NavLink onClick={() => setMenuOpen(false)} to="/app/records"><Database aria-hidden="true" size={18} /> Policy explorer</NavLink>
           <NavLink onClick={() => setMenuOpen(false)} to="/app/profile"><Settings aria-hidden="true" size={18} /> Profile</NavLink>
-          <NavLink onClick={() => setMenuOpen(false)} to="/app/setup"><ShieldCheck aria-hidden="true" size={18} /> Setup</NavLink>
+          <NavLink onClick={() => setMenuOpen(false)} to="/app/setup"><ShieldCheck aria-hidden="true" size={18} /> Security & setup</NavLink>
         </nav>
         <div className="sidebar-foot">
           {profile?.isPublic && <Link className="site-link" to={`/@${profile.handle}`}><Globe2 aria-hidden="true" size={17} /> View site <ArrowUpRight aria-hidden="true" size={15} /></Link>}
@@ -383,7 +329,7 @@ function WorkspaceShell({ children, claims, profile, onSessionChange }: { childr
         <header className="mobile-header">
           <button aria-expanded={menuOpen} aria-label="Toggle workspace navigation" className="icon-button" onClick={() => setMenuOpen(!menuOpen)} title="Toggle navigation" type="button"><Menu aria-hidden="true" size={21} /></button>
           <Link className="wordmark" to="/app/stashes"><span>m</span>stash</Link>
-          <Link aria-label="Create stash" className="icon-button" title="Create stash" to="/app/stashes/new"><Plus aria-hidden="true" size={21} /></Link>
+          <Link aria-label="Create record" className="icon-button" title="Create record" to="/app/stashes/new"><Plus aria-hidden="true" size={21} /></Link>
         </header>
         {children}
       </div>
@@ -449,8 +395,8 @@ function ProfileEditor({ initial, onboarding = false, onSaved }: { initial: Prof
           </div>)}
           {profile.links.length < 8 && <button className="text-button" onClick={() => update('links', [...profile.links, { label: '', url: '' }])} type="button"><Plus aria-hidden="true" size={16} /> Add link</button>}
         </fieldset>
-        <label className="switch-row"><input checked={profile.isPublic} onChange={(event) => update('isPublic', event.target.checked)} type="checkbox" /><span><strong>Public profile</strong><small>Give this account a public home for shared stashes.</small></span></label>
-        <p className="profile-visibility-note"><Globe2 aria-hidden="true" size={16} /> A profile is optional. Shared stashes appear in discovery; a public profile gives them a stable account home. <Link to="/guide">See starter patterns</Link></p>
+        <label className="switch-row"><input checked={profile.isPublic} onChange={(event) => update('isPublic', event.target.checked)} type="checkbox" /><span><strong>Public profile</strong><small>Give this account a public home for any records you choose to share.</small></span></label>
+        <p className="profile-visibility-note"><Globe2 aria-hidden="true" size={16} /> A profile is optional. Public items are explicitly shared; private application data stays behind its policy. <Link to="/guide">See the security model</Link></p>
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="form-actions">
           {saved && <p className="save-state"><Check aria-hidden="true" size={16} /> Saved</p>}
@@ -524,21 +470,21 @@ function Dashboard() {
   return (
     <main className="dashboard-page">
       <div className="page-heading with-action">
-        <div><p className="eyebrow">Starter collection</p><h1>Stashes</h1></div>
-        <Link className="button primary" to="/app/stashes/new"><Plus aria-hidden="true" size={17} /> New stash</Link>
+        <div><p className="eyebrow">Scoped MongoDB</p><h1>Starter data</h1></div>
+        <Link className="button primary" to="/app/stashes/new"><Plus aria-hidden="true" size={17} /> New record</Link>
       </div>
-      <div className="filter-bar" aria-label="Stash visibility">
-        {(['all', 'draft', 'published'] as const).map((option) => <button className={status === option ? 'filter active' : 'filter'} key={option} onClick={() => setStatus(option)} type="button">{option === 'all' ? 'All stashes' : option === 'draft' ? 'Private' : 'Public'}</button>)}
+      <div className="filter-bar" aria-label="Record visibility">
+        {(['all', 'draft', 'published'] as const).map((option) => <button className={status === option ? 'filter active' : 'filter'} key={option} onClick={() => setStatus(option)} type="button">{option === 'all' ? 'All records' : option === 'draft' ? 'Private' : 'Shared'}</button>)}
       </div>
       <section className="workspace-guide-callout" aria-label="Workspace guide">
-        <div><p className="eyebrow"><ShieldCheck aria-hidden="true" size={15} /> Starter, not ceiling</p><h2>Stashes are one collection pattern.</h2><p>Use them for flexible shared items. Add policy-backed collections for game state, inventories, profiles, and any records your application needs.</p></div>
-        <Link className="button secondary" to="/app/records"><Database aria-hidden="true" size={16} /> Explore records</Link>
+        <div><p className="eyebrow"><ShieldCheck aria-hidden="true" size={15} /> Every request is scoped</p><h2>Your app gets an API, not a database password.</h2><p>m-stash authenticates the caller and checks its policy before MongoDB sees a request. Use this collection to verify the flow, then add only the collections and fields your app needs.</p></div>
+        <Link className="button secondary" to="/app/records"><Database aria-hidden="true" size={16} /> Inspect policy</Link>
       </section>
       {error && <p className="form-error" role="alert">{error}</p>}
       {loading ? <LoadingRows /> : stashes.length === 0 ? <EmptyStashes status={status} /> : <div className="post-list">
         {stashes.map((stash) => <article className="post-row" key={stash.id}>
-          <div className="post-row-main"><div className="post-row-title"><Link to={`/app/stashes/${stash.id}`}>{stash.title}</Link><span className={stash.isPublic ? 'status published' : 'status'}>{stash.isPublic ? 'Public' : 'Private'}</span></div><p>{stash.summary || 'No description yet.'}</p><div className="post-meta"><time dateTime={stash.updatedAt}>Updated {displayDate(stash.updatedAt)}</time>{stash.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div></div>
-          <div className="post-row-actions"><Link aria-label={`Edit ${stash.title}`} className="icon-button" title="Edit stash" to={`/app/stashes/${stash.id}`}><FilePenLine aria-hidden="true" size={18} /></Link><button aria-label={`Delete ${stash.title}`} className="icon-button danger" disabled={deleting === stash.id} onClick={() => { if (window.confirm(`Delete “${stash.title}”? This cannot be undone.`)) void removeStash(stash.id) }} title="Delete stash" type="button"><Trash2 aria-hidden="true" size={18} /></button></div>
+          <div className="post-row-main"><div className="post-row-title"><Link to={`/app/stashes/${stash.id}`}>{stash.title}</Link><span className={stash.isPublic ? 'status published' : 'status'}>{stash.isPublic ? 'Shared' : 'Private'}</span></div><p>{stash.summary || 'No description provided.'}</p><div className="post-meta"><time dateTime={stash.updatedAt}>Updated {displayDate(stash.updatedAt)}</time>{stash.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div></div>
+          <div className="post-row-actions"><Link aria-label={`Edit ${stash.title}`} className="icon-button" title="Edit record" to={`/app/stashes/${stash.id}`}><FilePenLine aria-hidden="true" size={18} /></Link><button aria-label={`Delete ${stash.title}`} className="icon-button danger" disabled={deleting === stash.id} onClick={() => { if (window.confirm(`Delete “${stash.title}”? This cannot be undone.`)) void removeStash(stash.id) }} title="Delete record" type="button"><Trash2 aria-hidden="true" size={18} /></button></div>
         </article>)}
       </div>}
       {nextCursor && <div className="load-more"><button className="button secondary" disabled={loadingMore} onClick={() => void loadMore()} type="button">{loadingMore && <LoaderCircle aria-hidden="true" className="spin" size={17} />} Load more</button></div>}
@@ -549,9 +495,7 @@ function Dashboard() {
 function StashEditor() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const starter = findStashStarter(searchParams.get('starter'))
-  const [stash, setStash] = useState<StashInput>(() => starter ? stashInputFromStarter(starter) : emptyStash)
+  const [stash, setStash] = useState<StashInput>(emptyStash)
   const [mode, setMode] = useState<'write' | 'preview'>('write')
   const [loading, setLoading] = useState(Boolean(id))
   const [saving, setSaving] = useState(false)
@@ -628,17 +572,16 @@ function StashEditor() {
   return (
     <main className="editor-page">
       <header className="editor-header">
-        <Link className="back-link" to="/app/stashes"><ArrowLeft aria-hidden="true" size={17} /> Stashes</Link>
-        <div className="editor-controls"><p aria-live="polite" className={saveState === 'error' ? 'save-state error' : 'save-state'}>{saveState === 'saved' ? <><Check aria-hidden="true" size={15} /> Saved</> : saveState === 'error' ? 'Save failed' : 'Saving changes'}</p><button className="button secondary" disabled={saving} onClick={() => void saveStash()} type="button"><Save aria-hidden="true" size={16} /> Save</button><button className="button primary" disabled={saving} onClick={() => void saveStash(!stash.isPublic)} type="button">{stash.isPublic ? 'Make private' : 'Share publicly'}</button></div>
+        <Link className="back-link" to="/app/stashes"><ArrowLeft aria-hidden="true" size={17} /> Starter data</Link>
+        <div className="editor-controls"><p aria-live="polite" className={saveState === 'error' ? 'save-state error' : 'save-state'}>{saveState === 'saved' ? <><Check aria-hidden="true" size={15} /> Saved</> : saveState === 'error' ? 'Save failed' : 'Saving changes'}</p><button className="button secondary" disabled={saving} onClick={() => void saveStash()} type="button"><Save aria-hidden="true" size={16} /> Save</button><button className="button primary" disabled={saving} onClick={() => void saveStash(!stash.isPublic)} type="button">{stash.isPublic ? 'Keep private' : 'Share publicly'}</button></div>
       </header>
       <div className="editor-canvas">
-        {starter && !id && <aside className="starter-notice"><p className="eyebrow">Starter loaded</p><p><strong>{starter.label}</strong> is a private draft until you save it or choose to share it.</p></aside>}
-        <input aria-label="Stash name" className="title-input" maxLength={200} onChange={(event) => update('title', event.target.value)} placeholder="Untitled stash" value={stash.title} />
-        <textarea aria-label="Stash description" className="summary-input" maxLength={500} onChange={(event) => update('summary', event.target.value)} placeholder="A short description for people or systems using this item." rows={2} value={stash.summary} />
+        <input aria-label="Record name" className="title-input" maxLength={200} onChange={(event) => update('title', event.target.value)} placeholder="Untitled record" value={stash.title} />
+        <textarea aria-label="Record description" className="summary-input" maxLength={500} onChange={(event) => update('summary', event.target.value)} placeholder="What this record is for and who should use it." rows={2} value={stash.summary} />
         <div className="tag-editor"><div className="tag-stack">{stash.tags.map((tag) => <span className="tag removable" key={tag}>{tag}<button aria-label={`Remove ${tag} tag`} onClick={() => update('tags', stash.tags.filter((existing) => existing !== tag))} type="button"><X aria-hidden="true" size={13} /></button></span>)}</div><input aria-label="Add tag" onChange={(event) => setTagText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addTag() } }} placeholder="Add a tag" value={tagText} /><button aria-label="Add tag" className="icon-button" onClick={addTag} title="Add tag" type="button"><Plus aria-hidden="true" size={16} /></button></div>
-        <div className="editor-mode" role="tablist" aria-label="Stash mode"><button aria-selected={mode === 'write'} className={mode === 'write' ? 'active' : ''} onClick={() => setMode('write')} role="tab" type="button">Edit</button><button aria-selected={mode === 'preview'} className={mode === 'preview' ? 'active' : ''} onClick={() => setMode('preview')} role="tab" type="button">Preview</button></div>
-        {mode === 'write' ? <textarea aria-label="Stash details in Markdown" className="content-editor" onChange={(event) => update('content', event.target.value)} placeholder="Add details, instructions, structured context, or Markdown..." value={stash.content} /> : <article className="markdown-body preview-body"><Markdown content={stash.content || '*Nothing to preview yet.*'} /></article>}
-        <p className="publish-note"><Lock aria-hidden="true" size={15} /> {stash.isPublic ? 'This stash is public and appears in discovery.' : 'This stash is private until you share it.'} <Link to="/app/setup">See data patterns</Link></p>
+        <div className="editor-mode" role="tablist" aria-label="Record mode"><button aria-selected={mode === 'write'} className={mode === 'write' ? 'active' : ''} onClick={() => setMode('write')} role="tab" type="button">Edit</button><button aria-selected={mode === 'preview'} className={mode === 'preview' ? 'active' : ''} onClick={() => setMode('preview')} role="tab" type="button">Preview</button></div>
+        {mode === 'write' ? <textarea aria-label="Record details in Markdown" className="content-editor" onChange={(event) => update('content', event.target.value)} placeholder="Add the data and context this record needs..." value={stash.content} /> : <article className="markdown-body preview-body"><Markdown content={stash.content || '*Nothing to preview yet.*'} /></article>}
+        <p className="publish-note"><Lock aria-hidden="true" size={15} /> {stash.isPublic ? 'This item is shared on the public feed.' : 'This item is private to your account.'} <Link to="/app/setup">Review the policy model</Link></p>
         {error && <p className="form-error" role="alert">{error}</p>}
       </div>
     </main>
@@ -690,20 +633,20 @@ function RecordsPage() {
 
   return <main className="records-page">
     <header className="records-intro">
-      <p className="eyebrow"><Database aria-hidden="true" size={15} /> Policy-backed data</p>
-      <h1>Records</h1>
-      <p>Inspect the collections your server explicitly allows. This is not raw database access: every request is evaluated against the authenticated collection rule before MongoDB sees it.</p>
+      <p className="eyebrow"><ShieldCheck aria-hidden="true" size={15} /> Scoped access</p>
+      <h1>Policy explorer</h1>
+      <p>Run a safe query against the data your policy permits. m-stash authenticates the caller and checks the collection rule before MongoDB sees the request.</p>
     </header>
     <section className="record-patterns" aria-label="Collection patterns">
-      <article><code>profiles</code><p>Account identity, preferences, and app-facing user metadata.</p></article>
-      <article><code>stashes</code><p>Flexible private or shared items, from documentation to release artifacts.</p></article>
-      <article><code>gameState</code><p>Configure server-owned rules for health, currency, ranks, and trusted outcomes.</p></article>
+      <article><code>profiles</code><p>Account-owned identity and preferences.</p></article>
+      <article><code>stashes</code><p>The included collection for verifying your scoped data flow.</p></article>
+      <article><code>gameState</code><p>Server-owned state for outcomes a browser must not decide.</p></article>
     </section>
     <form className="records-query" onSubmit={(event) => void queryRecords(event)}>
       <label>Collection<input autoCapitalize="none" onChange={(event) => setCollection(event.target.value)} spellCheck={false} value={collection} /></label>
       <label>Match filter<textarea aria-describedby="query-help" onChange={(event) => setQueryText(event.target.value)} rows={4} spellCheck={false} value={queryText} /></label>
-      <p id="query-help">Use a JSON object. An empty object returns records permitted by the collection's read rule.</p>
-      <button className="button primary" disabled={loading} type="submit">{loading ? <LoaderCircle aria-hidden="true" className="spin" size={17} /> : <Database aria-hidden="true" size={17} />} Query records</button>
+      <p id="query-help">Use a JSON object. An empty object returns only records permitted by this collection's read rule.</p>
+      <button className="button primary" disabled={loading} type="submit">{loading ? <LoaderCircle aria-hidden="true" className="spin" size={17} /> : <Database aria-hidden="true" size={17} />} Run scoped query</button>
     </form>
     <section className="records-results" aria-live="polite">
       <div className="records-results-heading"><div><p className="eyebrow">Query result</p><h2>{loading ? 'Querying...' : `${documents.length} record${documents.length === 1 ? '' : 's'}`}</h2></div>{limit > 0 && <span>Policy limit: {limit}</span>}</div>
@@ -755,8 +698,8 @@ function DiscoveryPage() {
 
   return <PublicLayout>
     <main className="discovery-page">
-      <div className="discover-intro"><p className="eyebrow"><Compass aria-hidden="true" size={15} /> Browse</p><h1>Shared stashes from every build.</h1><p>Reference items, release artifacts, game resources, experiments, and useful context.</p></div>
-      <div className="tag-filter"><label htmlFor="tag-filter">Filter by tag</label><input id="tag-filter" onChange={(event) => { const nextTag = event.target.value.trim(); setSearchParams(nextTag ? { tag: nextTag } : {}) }} placeholder="Try game, release, research" value={tag} />{tag && <button className="text-button" onClick={() => setSearchParams({})} type="button"><X aria-hidden="true" size={15} /> Clear</button>}</div>
+      <div className="discover-intro"><p className="eyebrow"><ShieldCheck aria-hidden="true" size={15} /> MongoDB application gateway</p><h1>Secure MongoDB access, scoped for every request.</h1><p>m-stash gives your app an authenticated API and policy-enforced data boundaries, without ever sending database credentials to a browser.</p></div>
+      <div className="tag-filter"><label htmlFor="tag-filter">Filter public items</label><input id="tag-filter" onChange={(event) => { const nextTag = event.target.value.trim(); setSearchParams(nextTag ? { tag: nextTag } : {}) }} placeholder="Try release, game, product" value={tag} />{tag && <button className="text-button" onClick={() => setSearchParams({})} type="button"><X aria-hidden="true" size={15} /> Clear</button>}</div>
       {error && <p className="form-error" role="alert">{error}</p>}
       {loading ? <LoadingRows /> : stashes.length === 0 ? <EmptyDiscovery session={session} tag={tag} onClearTag={() => setSearchParams({})} /> : <div className="public-post-list">{stashes.map((stash) => <PublicPostPreview key={stash._id} stash={stash} />)}</div>}
       {nextCursor && <div className="load-more"><button className="button secondary" onClick={() => void loadMore()} type="button">Load more</button></div>}
@@ -765,7 +708,7 @@ function DiscoveryPage() {
 }
 
 function PublicPostPreview({ stash }: { stash: PublicStash }) {
-  return <article className="public-post-preview"><div><div className="post-meta"><time dateTime={stash.createdAt}>{displayDate(stash.createdAt)}</time>{stash.author && <Link className="author-byline" to={`/@${stash.author.handle}`}><Avatar name={stash.author.displayName} url={stash.author.avatarURL} /> {stash.author.displayName}</Link>}</div><h2><Link to={`/p/${stash._id}`}>{stash.title}</Link></h2><p>{stash.summary || 'Open this stash to inspect the details.'}</p><div className="tag-stack">{stash.tags?.map((tag) => <Link className="tag" key={tag} to={`/discover?tag=${encodeURIComponent(tag)}`}>{tag}</Link>)}</div></div><Link aria-label={`Open ${stash.title}`} className="read-link" to={`/p/${stash._id}`}><ArrowUpRight aria-hidden="true" size={19} /></Link></article>
+  return <article className="public-post-preview"><div><div className="post-meta"><time dateTime={stash.createdAt}>{displayDate(stash.createdAt)}</time>{stash.author && <Link className="author-byline" to={`/@${stash.author.handle}`}><Avatar name={stash.author.displayName} url={stash.author.avatarURL} /> {stash.author.displayName}</Link>}</div><h2><Link to={`/p/${stash._id}`}>{stash.title}</Link></h2><p>{stash.summary || 'Open this public item to inspect the details.'}</p><div className="tag-stack">{stash.tags?.map((tag) => <Link className="tag" key={tag} to={`/discover?tag=${encodeURIComponent(tag)}`}>{tag}</Link>)}</div></div><Link aria-label={`Open ${stash.title}`} className="read-link" to={`/p/${stash._id}`}><ArrowUpRight aria-hidden="true" size={19} /></Link></article>
 }
 
 function PublicStashPage() {
@@ -787,7 +730,7 @@ function PublicStashPage() {
     return () => { active = false }
   }, [id])
 
-  return <PublicLayout>{error ? <StatePage title="This stash is unavailable" detail={error} /> : !stash ? <LoadingPage /> : <main className="reader-page"><Link className="back-link" to="/discover"><ArrowLeft aria-hidden="true" size={17} /> Discover</Link><header className="article-header"><div className="post-meta"><time dateTime={stash.createdAt}>{displayDate(stash.createdAt)}</time>{stash.author && <Link className="author-byline" to={`/@${stash.author.handle}`}><Avatar name={stash.author.displayName} url={stash.author.avatarURL} /> {stash.author.displayName}</Link>}{stash.tags?.map((tag) => <Link className="tag" key={tag} to={`/discover?tag=${encodeURIComponent(tag)}`}>{tag}</Link>)}</div><h1>{stash.title}</h1>{stash.summary && <p>{stash.summary}</p>}</header><article className="markdown-body"><Markdown content={stash.content ?? ''} /></article></main>}</PublicLayout>
+  return <PublicLayout>{error ? <StatePage title="This public item is unavailable" detail={error} /> : !stash ? <LoadingPage /> : <main className="reader-page"><Link className="back-link" to="/discover"><ArrowLeft aria-hidden="true" size={17} /> Public items</Link><header className="article-header"><div className="post-meta"><time dateTime={stash.createdAt}>{displayDate(stash.createdAt)}</time>{stash.author && <Link className="author-byline" to={`/@${stash.author.handle}`}><Avatar name={stash.author.displayName} url={stash.author.avatarURL} /> {stash.author.displayName}</Link>}{stash.tags?.map((tag) => <Link className="tag" key={tag} to={`/discover?tag=${encodeURIComponent(tag)}`}>{tag}</Link>)}</div><h1>{stash.title}</h1>{stash.summary && <p>{stash.summary}</p>}</header><article className="markdown-body"><Markdown content={stash.content ?? ''} /></article></main>}</PublicLayout>
 }
 
 function PublicProfilePage() {
@@ -813,7 +756,7 @@ function PublicProfilePage() {
     return () => { active = false }
   }, [handle])
 
-  return <PublicLayout>{error ? <StatePage title="This profile is unavailable" detail={error} /> : !profile ? <LoadingPage /> : <main className="profile-page"><header className="profile-hero"><Avatar name={profile.displayName} url={profile.avatarURL} /><div><p className="eyebrow">@{profile.handle}</p><h1>{profile.displayName}</h1>{profile.bio && <p>{profile.bio}</p>}{profile.links && profile.links.length > 0 && <div className="profile-links">{profile.links.map((link) => <a href={link.url} key={link.url} rel="noreferrer" target="_blank"><Link2 aria-hidden="true" size={15} /> {link.label}</a>)}</div>}</div></header><section className="profile-posts"><h2>Shared stashes</h2>{stashes.length === 0 ? <p className="quiet">No public stashes yet.</p> : <div className="public-post-list">{stashes.map((stash) => <PublicPostPreview key={stash._id} stash={stash} />)}</div>}</section></main>}</PublicLayout>
+  return <PublicLayout>{error ? <StatePage title="This profile is unavailable" detail={error} /> : !profile ? <LoadingPage /> : <main className="profile-page"><header className="profile-hero"><Avatar name={profile.displayName} url={profile.avatarURL} /><div><p className="eyebrow">@{profile.handle}</p><h1>{profile.displayName}</h1>{profile.bio && <p>{profile.bio}</p>}{profile.links && profile.links.length > 0 && <div className="profile-links">{profile.links.map((link) => <a href={link.url} key={link.url} rel="noreferrer" target="_blank"><Link2 aria-hidden="true" size={15} /> {link.label}</a>)}</div>}</div></header><section className="profile-posts"><h2>Public items</h2>{stashes.length === 0 ? <p className="quiet">No public items yet.</p> : <div className="public-post-list">{stashes.map((stash) => <PublicPostPreview key={stash._id} stash={stash} />)}</div>}</section></main>}</PublicLayout>
 }
 
 function SetupGuidePage({ workspace = false }: { workspace?: boolean }) {
@@ -824,24 +767,24 @@ function SetupGuidePage({ workspace = false }: { workspace?: boolean }) {
 function GuideContent() {
   return <>
     <header className="guide-intro">
-      <p className="eyebrow"><ShieldCheck aria-hidden="true" size={15} /> Operator guide</p>
-      <h1>Know exactly what runs your application data.</h1>
-      <p>m-stash combines identity, policy-backed MongoDB access, a browser workspace, and a transactional event outbox in one deployable service. Configure secrets in your host, never in the browser.</p>
+      <p className="eyebrow"><ShieldCheck aria-hidden="true" size={15} /> Secure MongoDB for applications</p>
+      <h1>Give your app MongoDB access it can trust.</h1>
+      <p>m-stash authenticates users, scopes each request with your policy, and keeps database credentials out of browsers. It runs as one service alongside your MongoDB deployment.</p>
     </header>
     <section className="guide-section workflow-section">
-      <div className="guide-section-heading"><p className="eyebrow"><BookOpen aria-hidden="true" size={15} /> Starter patterns</p><h2>Use stashes when they fit. Define your own collections when they do not.</h2></div>
-      <ol className="workflow-list"><li><span>01</span><div><h3>Profiles</h3><p>Optional account identity, preferences, and public-facing metadata.</p></div></li><li><span>02</span><div><h3>Stashes</h3><p>Flexible owned items with tags, rich context, and an optional public surface.</p></div></li><li><span>03</span><div><h3>Application data</h3><p>Add inventory, match, leaderboard, or workflow collections in your policy configuration.</p></div></li><li><span>04</span><div><h3>Trusted outcomes</h3><p>Keep health, currency, ranks, and scoring authoritative in a service you control.</p></div></li></ol>
+      <div className="guide-section-heading"><p className="eyebrow"><BookOpen aria-hidden="true" size={15} /> The core model</p><h2>One controlled path between your app and MongoDB.</h2></div>
+      <ol className="workflow-list"><li><span>01</span><div><h3>Authenticate</h3><p>Signup, login, sessions, and JWT verification are already handled.</p></div></li><li><span>02</span><div><h3>Scope</h3><p>Collection rules limit which documents and fields a caller may use.</p></div></li><li><span>03</span><div><h3>Connect</h3><p>Your application calls a simple API, never MongoDB directly from the browser.</p></div></li><li><span>04</span><div><h3>Operate</h3><p>Use replica-set MongoDB for transactional writes, events, and horizontal scale.</p></div></li></ol>
     </section>
     <section className="guide-section data-ownership-section">
-      <div className="guide-section-heading"><p className="eyebrow"><ShieldCheck aria-hidden="true" size={15} /> Data ownership</p><h2>Policies decide who may change a field. Your game or application decides what is true.</h2></div>
-      <div className="ownership-grid"><article><h3>Good client-owned data</h3><p>Display names, avatars, player-selected loadouts, drafts, and user-authored stashes. Scope these to the authenticated account and allow only the specific fields a client should control.</p></article><article><h3>Keep it authoritative</h3><p>Hit points, currency, anti-cheat scores, rank changes, and match outcomes should be written by trusted application logic after it validates the action. A client can request an action; it must not declare the outcome.</p></article></div>
+      <div className="guide-section-heading"><p className="eyebrow"><ShieldCheck aria-hidden="true" size={15} /> Scope the browser</p><h2>Let users own their data. Keep trusted outcomes on your server.</h2></div>
+      <div className="ownership-grid"><article><h3>Safe client-owned data</h3><p>Profiles, preferences, drafts, and selected loadouts can be scoped to the authenticated account with an allowlist of writable fields.</p></article><article><h3>Server-owned outcomes</h3><p>Health, currency, scores, rank changes, and match outcomes stay in trusted application logic. A browser can request an action; it cannot declare the result.</p></article></div>
     </section>
     <section className="guide-section config-section">
-      <div className="guide-section-heading"><p className="eyebrow"><Settings aria-hidden="true" size={15} /> Policy blueprint</p><h2>Give clients ownership, not the keys to every outcome.</h2><p>Load rules with <code>M_STASH_CONFIG</code>. This example lets a signed-in player manage only their profile fields, lets anyone read the leaderboard, and blocks browser writes to scores. A configured <code>rules</code> map replaces the starter rules, so include every collection you intend to keep.</p></div>
+      <div className="guide-section-heading"><p className="eyebrow"><Settings aria-hidden="true" size={15} /> Policy blueprint</p><h2>Write the boundary once. Enforce it on every request.</h2><p>Load rules with <code>M_STASH_CONFIG</code>. This example lets a signed-in player manage their own profile fields, lets anyone read a leaderboard, and blocks browser writes to scores. A configured <code>rules</code> map replaces the default rules, so include every collection your app needs.</p></div>
       <div className="config-snippets"><ConfigSnippet title="Player profiles and leaderboard" description="Trusted game or application logic writes health, currency, scores, and rank changes after validating the requested action." content={applicationPolicyBlueprint} /></div>
     </section>
     <section className="guide-section">
-      <div className="guide-section-heading"><p className="eyebrow"><Database aria-hidden="true" size={15} /> Choose a data path</p><h2>Start with the stack you actually have.</h2></div>
+      <div className="guide-section-heading"><p className="eyebrow"><Database aria-hidden="true" size={15} /> Deploy once</p><h2>Use the MongoDB deployment you already trust.</h2></div>
       <div className="guide-paths">
         <article className="guide-path"><span className="guide-number">01</span><h3>Included Compose stack</h3><p>Copy <code>.env.example</code> to <code>.env</code>, set its required secrets, then start MongoDB as a one-node replica set and m-stash together. Open <code>http://localhost:4000</code> when the health check is ready.</p><code>cp .env.example .env && docker compose up --build --wait</code></article>
         <article className="guide-path"><span className="guide-number">02</span><h3>Your existing MongoDB</h3><p>Use a replica set or sharded cluster. Pass its URI to the service, set your public browser origin, and keep cookies secure behind HTTPS.</p><code>docker run ... m-stash</code></article>
@@ -858,7 +801,7 @@ function GuideContent() {
       <div className="config-snippets"><ConfigSnippet title="Local Compose" description="The included Compose file runs MongoDB only on its private network and wires its replica-set URI into m-stash." content={composeEnvironment} /><ConfigSnippet title="Hosted MongoDB" description="Set these through your platform's encrypted environment-variable or secret-management controls." content={externalMongoEnvironment} /></div>
     </section>
     <section className="guide-section guardrail-section">
-      <div><p className="eyebrow"><Lock aria-hidden="true" size={15} /> Before you ship</p><h2>Keep the browser out of your database.</h2></div>
+      <div><p className="eyebrow"><Lock aria-hidden="true" size={15} /> Before you ship</p><h2>Keep the browser out of MongoDB.</h2></div>
       <ul>
         <li><Check aria-hidden="true" size={17} /> Keep <code>JWT_SECRET</code>, Mongo credentials, and metrics tokens out of browser code.</li>
         <li><Check aria-hidden="true" size={17} /> Set <code>SESSION_COOKIE_SECURE=true</code> on every HTTPS deployment.</li>
@@ -888,7 +831,7 @@ function ConfigSnippet({ title, description, content }: { title: string; descrip
 function PublicLayout({ children }: { children: React.ReactNode }) {
   const session = useContext(SessionContext)
   const authenticated = session.kind === 'authenticated'
-  return <div className="public-shell"><header className="public-header"><Link className="wordmark" to="/discover"><span>m</span>stash</Link><nav><Link to="/discover">Discover</Link><Link to="/guide">How it works</Link><Link className="button secondary small-button" to={authenticated ? '/app/stashes' : '/login'}>{authenticated ? <><BookOpen aria-hidden="true" size={16} /> Workspace</> : <><UserRound aria-hidden="true" size={16} /> Log in</>}</Link></nav></header>{children}<footer className="public-footer"><Link className="wordmark" to="/discover"><span>m</span>stash</Link><Link to="/guide">Run your own workspace</Link><p>Made for work worth returning to.</p></footer></div>
+  return <div className="public-shell"><header className="public-header"><Link className="wordmark" to="/discover"><span>m</span>stash</Link><nav><Link to="/discover">Public items</Link><Link to="/guide">How it works</Link><Link className="button secondary small-button" to={authenticated ? '/app/stashes' : '/login'}>{authenticated ? <><BookOpen aria-hidden="true" size={16} /> Workspace</> : <><UserRound aria-hidden="true" size={16} /> Log in</>}</Link></nav></header>{children}<footer className="public-footer"><Link className="wordmark" to="/discover"><span>m</span>stash</Link><Link to="/guide">Deploy m-stash</Link><p>Secure MongoDB access for applications.</p></footer></div>
 }
 
 function Markdown({ content }: { content: string }) {
@@ -900,32 +843,32 @@ function Avatar({ name, url }: { name: string; url?: string }) {
 }
 
 function LoadingPage() { return <main className="loading-page"><LoaderCircle aria-label="Loading" className="spin" size={26} /></main> }
-function LoadingRows() { return <div className="loading-rows" aria-label="Loading stashes"><span /><span /><span /></div> }
+function LoadingRows() { return <div className="loading-rows" aria-label="Loading data"><span /><span /><span /></div> }
 function EmptyStashes({ status }: { status: 'all' | 'draft' | 'published' }) {
   if (status !== 'all') {
-    return <section className="empty-state"><FilePenLine aria-hidden="true" size={28} /><h2>No {status === 'draft' ? 'private' : 'public'} stashes.</h2><p>Try another view or create a stash for this collection.</p><Link className="button primary" to="/app/stashes/new"><Plus aria-hidden="true" size={17} /> New stash</Link></section>
+    return <section className="empty-state"><FilePenLine aria-hidden="true" size={28} /><h2>No {status === 'draft' ? 'private' : 'shared'} records.</h2><p>Try another view or create a record in the included starter collection.</p><Link className="button primary" to="/app/stashes/new"><Plus aria-hidden="true" size={17} /> New record</Link></section>
   }
 
-  return <section className="empty-state first-stash"><FilePenLine aria-hidden="true" size={28} /><p className="eyebrow">First useful thing</p><h2>Give your workspace a memory.</h2><p>Start with a shape you recognize. Nothing is created until you decide to save it.</p><div className="starter-grid" aria-label="Choose a stash starter">{stashStarters.map((starter) => <Link className="starter-choice" key={starter.key} to={`/app/stashes/new?starter=${starter.key}`}><strong>{starter.label}</strong><span>{starter.detail}</span><ChevronRight aria-hidden="true" size={17} /></Link>)}</div><Link className="text-button" to="/app/stashes/new"><Plus aria-hidden="true" size={16} /> Start from a blank stash</Link></section>
+  return <section className="empty-state activation-state"><ShieldCheck aria-hidden="true" size={28} /><p className="eyebrow">Verify the path</p><h2>Your secure MongoDB layer is ready.</h2><p>Create one private record to verify sign-in, identity, policy enforcement, and your MongoDB connection. Then replace this sample collection with the data model your app needs.</p><div className="empty-actions"><Link className="button primary" to="/app/stashes/new"><Plus aria-hidden="true" size={17} /> Create a private record</Link><Link className="button secondary" to="/app/records"><Database aria-hidden="true" size={17} /> Inspect policy</Link></div></section>
 }
 
 function EmptyDiscovery({ session, tag, onClearTag }: { session: SessionState; tag: string; onClearTag: () => void }) {
   if (tag) {
-    return <section className="empty-state discovery-empty"><Compass aria-hidden="true" size={28} /><h2>No shared stashes match “{tag}”.</h2><p>Try a different tag or browse everything people have chosen to share.</p><button className="button secondary" onClick={onClearTag} type="button"><X aria-hidden="true" size={17} /> Clear filter</button></section>
+    return <section className="empty-state discovery-empty"><Compass aria-hidden="true" size={28} /><h2>No public items match “{tag}”.</h2><p>Try a different tag or browse everything people have explicitly chosen to share.</p><button className="button secondary" onClick={onClearTag} type="button"><X aria-hidden="true" size={17} /> Clear filter</button></section>
   }
 
   const isAuthenticated = session.kind === 'authenticated'
   const isAdmin = isAuthenticated && session.claims.role === 'admin'
-  const title = isAdmin ? 'Open this workspace with something useful.' : isAuthenticated ? 'Start the shared collection.' : 'Be the first useful thing here.'
+  const title = isAdmin ? 'Your secure MongoDB layer is ready.' : isAuthenticated ? 'Your scoped data API is ready.' : 'Secure MongoDB access for your app.'
   const detail = isAdmin
-    ? 'No one has shared a stash yet. Start with a useful draft, then publish it when this workspace is ready for visitors.'
+    ? 'The included starter collection is empty. Create one private record to verify the path, then define policies for the collections your application needs.'
     : isAuthenticated
-      ? 'Start with a useful draft, then choose what is worth sharing with the people who discover this workspace.'
-      : 'This is a new workspace. Create an account, add one useful stash, and make the first visit worth returning to.'
+      ? 'Inspect the policy boundary, verify a private record, then connect your application through the scoped API.'
+      : 'm-stash handles authentication and enforces your MongoDB rules on every request, so browsers never need database credentials.'
 
-  return <section className="empty-state discovery-empty"><Compass aria-hidden="true" size={28} /><p className="eyebrow">{isAdmin ? 'Admin moment' : 'A fresh start'}</p><h2>{title}</h2><p>{detail}</p>{isAuthenticated ? <Link className="button primary" to="/app/stashes/new?starter=context"><Plus aria-hidden="true" size={17} /> Create the first shared stash</Link> : <div className="empty-actions"><Link className="button primary" to="/signup"><Plus aria-hidden="true" size={17} /> Create an account</Link><Link className="button secondary" to="/login">Log in</Link></div>}</section>
+  return <section className="empty-state discovery-empty"><ShieldCheck aria-hidden="true" size={28} /><p className="eyebrow">{isAdmin ? 'Service ready' : isAuthenticated ? 'Authenticated and scoped' : 'The core promise'}</p><h2>{title}</h2><p>{detail}</p>{isAuthenticated ? <div className="empty-actions"><Link className="button primary" to="/app/stashes/new"><Plus aria-hidden="true" size={17} /> Create a private record</Link><Link className="button secondary" to="/app/records"><Database aria-hidden="true" size={17} /> Inspect policy</Link></div> : <div className="empty-actions"><Link className="button primary" to="/signup"><Plus aria-hidden="true" size={17} /> Create account</Link><Link className="button secondary" to="/guide">How it works</Link></div>}</section>
 }
-function StatePage({ title, detail }: { title: string; detail: string }) { return <main className="state-page"><h1>{title}</h1><p>{detail}</p><Link className="button secondary" to="/discover">Browse shared stashes</Link></main> }
+function StatePage({ title, detail }: { title: string; detail: string }) { return <main className="state-page"><h1>{title}</h1><p>{detail}</p><Link className="button secondary" to="/discover">Browse public items</Link></main> }
 function NotFoundPage() { return <PublicLayout><StatePage title="That page has moved on." detail="The address does not point to anything here." /></PublicLayout> }
 
 function initials(name: string) { return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'M' }

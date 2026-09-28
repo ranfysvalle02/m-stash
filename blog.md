@@ -1,43 +1,30 @@
-# A MongoDB Gateway for Private and Public Stashes
+# Secure, Scoped MongoDB Access for Applications
 
-Most applications need both account data and data meant for the open web. Treating both as one generic collection rule makes the boundary easy to blur: a profile can start with a display name and later gain an email address, moderation state, billing metadata, or internal flags.
+Most applications need MongoDB data in the browser without giving the browser a database password. They also need a clear answer to a harder question: which user may read or change which document and field?
 
-`m-stash` makes the boundary explicit.
+`m-stash` is the service boundary for that problem. Your app authenticates with it, calls its API, and m-stash applies the configured collection policy before a request reaches MongoDB.
 
-## Three data boundaries
+## One controlled path
 
-The gateway keeps account records in `_users`, owner-editable profile documents in `profiles`, owner-managed content in `stashes`, and public representations behind named read endpoints.
+The path is deliberately small:
 
-The account collection is gateway-managed. It contains authentication material and is never exposed through the database proxy. Profile documents are writable only by their owner, identified by the JWT. A public endpoint is available only for profiles that opt into publication with `isPublic: true`.
+1. m-stash signs users in, issues browser sessions and JWTs, and verifies incoming tokens.
+2. A request targets a configured collection and action.
+3. The gateway validates the client filter, merges it with the collection rule, and enforces field allowlists for writes.
+4. MongoDB receives only the scoped operation.
 
-The profile endpoint does not return a profile document wholesale. MongoDB applies a projection that includes only `handle`, `displayName`, `bio`, `avatarURL`, and `links`. This protects future private fields by default: adding `email`, `preferences`, `moderation`, or application-specific data to a profile does not make it public.
+Collections that have no rule, along with `_m_stash_*` internal collections, are unavailable through the generic API. The browser never receives the MongoDB connection string.
 
-## Stashes are the publishing primitive
+## Private by default, public by design
 
-A stash is a user-owned document with a required title and optional content, summary, and tags. The gateway adds the owner identity and timestamps. The owner can create, update, and delete only their own stashes through the authenticated API. A stash is private unless its owner chooses `isPublic: true`.
+The default rules include `profiles` and `stashes`. The latter is an included sample collection for verifying the data path; it is not the product's required domain model. Applications can add rules for inventory, application state, preferences, workflow records, or any other owned data.
 
-Public stashes are available at a profile-scoped route:
+Private data stays behind authenticated policy rules. If an application needs a public surface, m-stash uses named endpoints with explicit filters and field projections instead of making a generic collection openly queryable. The public profile route, for example, returns only `handle`, `displayName`, `bio`, `avatarURL`, and `links`, even if the backing document gains additional private fields later.
 
-```http
-GET /v1/public/profiles/ada-lovelace/stashes
-```
+## Built for production boundaries
 
-The route first verifies that the profile is published, then returns only public stashes belonging to that profile's owner. It returns an allowlisted projection rather than the raw document. This lets a stash gain private annotations or product-specific metadata later without leaking it to readers.
+Every authenticated mutation is written alongside an immutable outbox event in the same MongoDB transaction. That requires a replica set or sharded deployment, and gives downstream workers a durable, idempotent boundary for delivery and integration work. Cursor-paginated public feeds, fixed-window authentication limits, request IDs, readiness checks, structured logs, and optional protected metrics are included in the same service.
 
-## A stable external identity
+The result is not an ORM and not direct database access from a browser. It is a focused MongoDB application gateway: secure by default, scoped by policy, and ready to operate alongside the rest of your system.
 
-A profile handle is the external identifier. The endpoint accepts a lowercase handle containing letters, digits, hyphens, or underscores, and resolves only a published profile:
-
-```http
-GET /v1/public/profiles/ada-lovelace
-```
-
-The public profile and stash list can be cached at an edge, linked from a product, or consumed by a static site without carrying a user token. The rest of each document remains controlled through the authenticated gateway.
-
-## Policies still govern private data
-
-The generic database API remains document-policy driven. Stashes use standard MongoDB JSON policy to combine a caller's query with an owner-or-public filter, so signed-in callers can discover public stashes while writes remain owner-only. Profiles use an owner filter for all authenticated reads and mutations.
-
-This split gives applications a useful extension point: create new public surfaces as named routes with explicit filters and projections, while keeping richer operational data behind claims-aware rules. Public data stays intentionally small; private data remains flexible.
-
-For an end-to-end example, see [quickstart.md](quickstart.md).
+For an end-to-end setup, see [quickstart.md](quickstart.md).
