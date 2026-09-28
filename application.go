@@ -32,7 +32,12 @@ func (app *application) Handler(rateLimiter *authRateLimiter) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/auth/signup", app.corsMiddleware(app.rateLimitMiddleware(rateLimiter, "signup", app.handleSignUp)))
 	mux.HandleFunc("/v1/auth/login", app.corsMiddleware(app.rateLimitMiddleware(rateLimiter, "login", app.handleLogin)))
+	mux.HandleFunc("/v1/auth/refresh", app.corsMiddleware(app.handleSessionRefresh))
+	mux.HandleFunc("/v1/auth/logout", app.corsMiddleware(app.handleSessionLogout))
 	mux.HandleFunc("/v1/auth/verify", app.corsMiddleware(app.authenticate(handleTokenVerification)))
+	mux.HandleFunc("/v1/me/profile", app.corsMiddleware(app.authenticate(app.handleMeProfile)))
+	mux.HandleFunc("/v1/me/stashes", app.corsMiddleware(app.authenticate(app.handleMeStashes)))
+	mux.HandleFunc("/v1/me/stashes/", app.corsMiddleware(app.authenticate(app.handleMeStashes)))
 	mux.HandleFunc("/.well-known/m-stash.json", app.corsMiddleware(app.handleServiceManifest))
 	mux.HandleFunc("/v1/public/stashes", app.corsMiddleware(app.handlePublicDiscovery))
 	mux.HandleFunc("/v1/public/stashes/", app.corsMiddleware(app.handlePublicDiscovery))
@@ -42,7 +47,8 @@ func (app *application) Handler(rateLimiter *authRateLimiter) http.Handler {
 	mux.HandleFunc("/metrics", app.handleMetrics)
 	mux.HandleFunc("/healthz", app.handleHealth)
 	mux.HandleFunc("/readyz", app.handleReadiness)
-	return app.requestIDMiddleware(mux)
+	mux.HandleFunc("/", app.handleFrontend)
+	return app.requestIDMiddleware(app.securityHeadersMiddleware(mux))
 }
 
 func (app *application) handleServiceManifest(w http.ResponseWriter, r *http.Request) {

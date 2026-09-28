@@ -9,3 +9,5 @@ tmp
 m-stash
 examples/**/node_modules
 examples/**/dist
+frontend/node_modules
+frontend/dist

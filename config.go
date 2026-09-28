@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type CollectionRule struct {
@@ -18,16 +19,21 @@ type CollectionRule struct {
 }
 
 type Config struct {
-	Port           string                    `json:"port"`
-	MongoURI       string                    `json:"mongo_uri"`
-	Database       string                    `json:"database"`
-	JWTSecret      string                    `json:"jwt_secret"`
-	JWTIssuer      string                    `json:"jwt_issuer"`
-	JWTAudience    string                    `json:"jwt_audience"`
-	TrustProxy     bool                      `json:"trust_proxy"`
-	MetricsToken   string                    `json:"-"`
-	AllowedOrigins []string                  `json:"allowed_origins"`
-	Rules          map[string]CollectionRule `json:"rules"`
+	Port                string                    `json:"port"`
+	MongoURI            string                    `json:"mongo_uri"`
+	Database            string                    `json:"database"`
+	JWTSecret           string                    `json:"jwt_secret"`
+	JWTIssuer           string                    `json:"jwt_issuer"`
+	JWTAudience         string                    `json:"jwt_audience"`
+	TrustProxy          bool                      `json:"trust_proxy"`
+	MetricsToken        string                    `json:"-"`
+	AllowedOrigins      []string                  `json:"allowed_origins"`
+	Rules               map[string]CollectionRule `json:"rules"`
+	AccessTokenTTL      time.Duration             `json:"-"`
+	RefreshSessionTTL   time.Duration             `json:"-"`
+	SessionCookieSecure bool                      `json:"-"`
+	AdminEmail          string                    `json:"-"`
+	AdminPassword       string                    `json:"-"`
 }
 
 func loadConfig() (Config, error) {
@@ -35,16 +41,37 @@ func loadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	accessTokenTTL, err := getEnvDuration("ACCESS_TOKEN_TTL", 15*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	refreshSessionTTL, err := getEnvDuration("REFRESH_SESSION_TTL", 30*24*time.Hour)
+	if err != nil {
+		return Config{}, err
+	}
+	sessionCookieSecure, err := getEnvBool("SESSION_COOKIE_SECURE", true)
+	if err != nil {
+		return Config{}, err
+	}
+	adminEmail, err := validateBootstrapAdminCredentials(getEnv("ADMIN_EMAIL", ""), getEnv("ADMIN_PASSWORD", ""))
+	if err != nil {
+		return Config{}, err
+	}
 	loadedConfig := Config{
-		Port:           getEnv("PORT", "4000"),
-		MongoURI:       getEnv("MONGO_URI", "mongodb://localhost:27017"),
-		Database:       getEnv("MONGO_DB", "app_db"),
-		JWTSecret:      getEnv("JWT_SECRET", ""),
-		JWTIssuer:      getEnv("JWT_ISSUER", "m-stash"),
-		JWTAudience:    getEnv("JWT_AUDIENCE", "m-stash"),
-		TrustProxy:     trustProxy,
-		MetricsToken:   getEnv("METRICS_TOKEN", ""),
-		AllowedOrigins: getAllowedOrigins(),
+		Port:                getEnv("PORT", "4000"),
+		MongoURI:            getEnv("MONGO_URI", "mongodb://localhost:27017"),
+		Database:            getEnv("MONGO_DB", "app_db"),
+		JWTSecret:           getEnv("JWT_SECRET", ""),
+		JWTIssuer:           getEnv("JWT_ISSUER", "m-stash"),
+		JWTAudience:         getEnv("JWT_AUDIENCE", "m-stash"),
+		TrustProxy:          trustProxy,
+		MetricsToken:        getEnv("METRICS_TOKEN", ""),
+		AllowedOrigins:      getAllowedOrigins(),
+		AccessTokenTTL:      accessTokenTTL,
+		RefreshSessionTTL:   refreshSessionTTL,
+		SessionCookieSecure: sessionCookieSecure,
+		AdminEmail:          adminEmail,
+		AdminPassword:       getEnv("ADMIN_PASSWORD", ""),
 		Rules: map[string]CollectionRule{
 			"stashes": {
 				Read:                  map[string]any{"$or": []any{map[string]any{"ownerId": "$auth.uid"}, map[string]any{"isPublic": true}}},
@@ -128,6 +155,32 @@ func getEnvBool(key string, fallback bool) (bool, error) {
 		return false, fmt.Errorf("%s must be true or false", key)
 	}
 	return value, nil
+}
+
+func getEnvDuration(key string, fallback time.Duration) (time.Duration, error) {
+	rawValue, exists := os.LookupEnv(key)
+	if !exists || rawValue == "" {
+		return fallback, nil
+	}
+	value, err := time.ParseDuration(rawValue)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive Go duration", key)
+	}
+	return value, nil
+}
+
+func validateBootstrapAdminCredentials(email, password string) (string, error) {
+	email = normalizeEmail(email)
+	if email == "" && password == "" {
+		return "", nil
+	}
+	if email == "" || password == "" {
+		return "", errors.New("ADMIN_EMAIL and ADMIN_PASSWORD must be configured together")
+	}
+	if err := validateSignUpCredentials(email, password); err != nil {
+		return "", fmt.Errorf("invalid bootstrap admin credentials: %w", err)
+	}
+	return email, nil
 }
 
 func getAllowedOrigins() []string {

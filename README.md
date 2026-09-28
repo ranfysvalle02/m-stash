@@ -2,6 +2,12 @@
 
 `m-stash` is a small Go gateway for MongoDB applications. It owns signup and login, verifies JWTs, applies document-level MongoDB JSON policies, and exposes a deliberate public-profile surface without exposing database credentials to browsers.
 
+## Creator workspace
+
+The gateway serves an embedded, same-origin creator workspace at `/`. It includes signup and login, first-run profile setup, a Markdown post editor with preview and publish controls, owner-only drafts, public profiles, and global discovery. It is compiled into the same Go binary and Docker image as the API, so no second frontend deployment is required.
+
+For local UI development, start the API on port `4000` and run `npm --prefix frontend run dev`; Vite proxies `/v1` requests to the API. Run `make build` to compile the production UI and Go binary together, or `make test` to build the UI before running Go tests.
+
 ## Core model
 
 The default configuration separates identity, private data, and public data:
@@ -88,6 +94,10 @@ Each stash has a required `title`, plus optional `summary`, `content`, and `tags
 | `JWT_SECRET` | Yes | At least 32 characters; used to sign user sessions. |
 | `JWT_ISSUER` | No | JWT issuer. Defaults to `m-stash`. |
 | `JWT_AUDIENCE` | No | JWT audience. Defaults to `m-stash`. |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | No | Create the initial admin account or promote the matching account on startup. Set both together; the password is used only when creating the account. |
+| `ACCESS_TOKEN_TTL` | No | Lifetime for the UI's `HttpOnly` access cookie. Defaults to `15m`. |
+| `REFRESH_SESSION_TTL` | No | Lifetime for rotating browser refresh sessions. Defaults to `720h`. |
+| `SESSION_COOKIE_SECURE` | No | Require HTTPS for browser session cookies. Defaults to `true`; use `false` only for local HTTP development. |
 | `TRUST_PROXY` | No | Accept `X-Forwarded-For` for rate limiting only when set to `true` behind a trusted proxy. Defaults to `false`. |
 | `METRICS_TOKEN` | Production | At least 32 characters. Enables the protected Prometheus metrics endpoint; metrics stay disabled when omitted. |
 | `ALLOWED_ORIGINS` | Production | Comma-separated browser origins, such as `https://app.example.com`. Defaults to `*`. |
@@ -105,6 +115,8 @@ docker run --rm -p 4000:4000 \
   -e MONGO_URI='mongodb://user:password@mongo:27017/?authSource=admin' \
   -e MONGO_DB='app_db' \
   -e JWT_SECRET='replace-with-a-long-random-secret' \
+  -e ADMIN_EMAIL='admin@example.com' \
+  -e ADMIN_PASSWORD='replace-with-a-long-admin-password' \
   -e ALLOWED_ORIGINS='https://app.example.com' \
   YOUR_DOCKERHUB_USERNAME/m-stash:latest
 ```
@@ -119,11 +131,13 @@ docker run --rm -p 4000:4000 \
   -e MONGO_URI='mongodb+srv://...' \
   -e MONGO_DB='app_db' \
   -e JWT_SECRET='replace-with-a-long-random-secret' \
+  -e ADMIN_EMAIL='admin@example.com' \
+  -e ADMIN_PASSWORD='replace-with-a-long-admin-password' \
   -e ALLOWED_ORIGINS='http://localhost:3000' \
   m-stash
 ```
 
-Check readiness with `curl http://localhost:4000/healthz`.
+Check readiness with `curl http://localhost:4000/healthz`, then open `http://localhost:4000` to use the embedded workspace. Set `SESSION_COOKIE_SECURE=false` only for this local HTTP mode.
 
 ### Docker Compose
 

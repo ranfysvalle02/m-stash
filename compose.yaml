@@ -65,6 +65,9 @@ services:
       JWT_ISSUER: ${JWT_ISSUER:-m-stash}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-m-stash}
       TRUST_PROXY: ${TRUST_PROXY:-false}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
     depends_on:

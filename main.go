@@ -43,6 +43,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create user email index: %v", err)
 	}
+	if err := bootstrapAdmin(ctx, database, appConfig); err != nil {
+		log.Fatalf("Failed to bootstrap administrator: %v", err)
+	}
 	_, err = database.Collection("profiles").Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys:    bson.D{{Key: "handle", Value: 1}},
 		Options: options.Index().SetUnique(true).SetSparse(true),
@@ -64,6 +67,9 @@ func main() {
 	}
 	if err := ensureAuthRateLimitIndexes(ctx, database); err != nil {
 		log.Fatalf("Failed to create authentication rate-limit index: %v", err)
+	}
+	if err := ensureSessionIndexes(ctx, database); err != nil {
+		log.Fatalf("Failed to create browser-session indexes: %v", err)
 	}
 	log.Printf("✅ Connected to Mongo database: '%s'", appConfig.Database)
 	if appConfig.MetricsToken == "" {

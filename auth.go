@@ -52,12 +52,24 @@ func validateSignUpCredentials(email, password string) error {
 func (app *application) authenticate(next func(w http.ResponseWriter, r *http.Request, claims *Claims)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authorization := r.Header.Get("Authorization")
-		if !strings.HasPrefix(authorization, "Bearer ") {
-			writeError(w, http.StatusUnauthorized, "Missing or invalid Authorization header")
-			return
+		tokenString := ""
+		source := bearerAuthentication
+		if authorization != "" {
+			if !strings.HasPrefix(authorization, "Bearer ") {
+				writeError(w, http.StatusUnauthorized, "Missing or invalid Authorization header")
+				return
+			}
+			tokenString = strings.TrimPrefix(authorization, "Bearer ")
+		} else {
+			accessCookie, err := r.Cookie(accessCookieName)
+			if err != nil {
+				writeError(w, http.StatusUnauthorized, "Missing or invalid Authorization header")
+				return
+			}
+			tokenString = accessCookie.Value
+			source = cookieAuthentication
 		}
 
-		tokenString := strings.TrimPrefix(authorization, "Bearer ")
 		claims := &Claims{}
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
 			if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
@@ -75,7 +87,11 @@ func (app *application) authenticate(next func(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusForbidden, "Invalid or expired token")
 			return
 		}
-		next(w, r, claims)
+		if source == cookieAuthentication && requiresCSRFProtection(r.Method) && !validCSRFToken(r) {
+			writeError(w, http.StatusForbidden, "Missing or invalid CSRF token")
+			return
+		}
+		next(w, r.WithContext(withAuthenticationSource(r.Context(), source)), claims)
 	}
 }
 
@@ -132,6 +148,10 @@ func (app *application) handleSignUp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to generate token")
 		return
 	}
+	if err := app.issueBrowserSession(ctx, w, user, bson.NilObjectID); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create browser session")
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{"token": token, "user": user})
 }
 
@@ -166,6 +186,10 @@ func (app *application) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to generate token")
 		return
 	}
+	if err := app.issueBrowserSession(ctx, w, user, bson.NilObjectID); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create browser session")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"token": token, "user": user})
 }
 
@@ -190,6 +214,14 @@ func handleTokenVerification(w http.ResponseWriter, r *http.Request, claims *Cla
 }
 
 func (app *application) generateJWT(uid, email, role string) (string, error) {
+	return app.generateJWTWithTTL(uid, email, role, 7*24*time.Hour)
+}
+
+func (app *application) generateAccessJWT(uid, email, role string) (string, error) {
+	return app.generateJWTWithTTL(uid, email, role, app.accessTokenTTL())
+}
+
+func (app *application) generateJWTWithTTL(uid, email, role string, lifetime time.Duration) (string, error) {
 	claims := Claims{
 		UID:   uid,
 		Email: email,
@@ -199,7 +231,7 @@ func (app *application) generateJWT(uid, email, role string) (string, error) {
 			Subject:   uid,
 			Audience:  jwt.ClaimStrings{app.config.JWTAudience},
 			ID:        bson.NewObjectID().Hex(),
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(lifetime)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}

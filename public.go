@@ -23,21 +23,38 @@ const (
 
 type publicStash struct {
 	ID        bson.ObjectID `bson:"_id" json:"_id"`
+	OwnerID   bson.ObjectID `bson:"ownerId" json:"-"`
 	Title     string        `bson:"title" json:"title"`
 	Summary   string        `bson:"summary,omitempty" json:"summary,omitempty"`
 	Content   string        `bson:"content,omitempty" json:"content,omitempty"`
 	Tags      []string      `bson:"tags,omitempty" json:"tags,omitempty"`
 	CreatedAt time.Time     `bson:"createdAt" json:"createdAt"`
 	UpdatedAt time.Time     `bson:"updatedAt" json:"updatedAt"`
+	Author    *publicAuthor `bson:"-" json:"author,omitempty"`
 }
 
 type publicStashPreview struct {
 	ID        bson.ObjectID `bson:"_id" json:"_id"`
+	OwnerID   bson.ObjectID `bson:"ownerId" json:"-"`
 	Title     string        `bson:"title" json:"title"`
 	Summary   string        `bson:"summary,omitempty" json:"summary,omitempty"`
 	Tags      []string      `bson:"tags,omitempty" json:"tags,omitempty"`
 	CreatedAt time.Time     `bson:"createdAt" json:"createdAt"`
 	UpdatedAt time.Time     `bson:"updatedAt" json:"updatedAt"`
+	Author    *publicAuthor `bson:"-" json:"author,omitempty"`
+}
+
+type publicAuthor struct {
+	Handle      string `bson:"handle" json:"handle"`
+	DisplayName string `bson:"displayName" json:"displayName"`
+	AvatarURL   string `bson:"avatarURL,omitempty" json:"avatarURL,omitempty"`
+}
+
+type publicAuthorRecord struct {
+	ID          bson.ObjectID `bson:"_id"`
+	Handle      string        `bson:"handle"`
+	DisplayName string        `bson:"displayName"`
+	AvatarURL   string        `bson:"avatarURL,omitempty"`
 }
 
 type publicStashCursor struct {
@@ -208,6 +225,7 @@ func (app *application) handlePublicDiscovery(w http.ResponseWriter, r *http.Req
 		filter,
 		options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}).SetLimit(int64(pageSize+1)).SetProjection(bson.M{
 			"_id":       1,
+			"ownerId":   1,
 			"title":     1,
 			"summary":   1,
 			"tags":      1,
@@ -229,6 +247,9 @@ func (app *application) handlePublicDiscovery(w http.ResponseWriter, r *http.Req
 	nextCursor := nextPublicStashCursor(stashes, pageSize)
 	if nextCursor != nil {
 		stashes = stashes[:pageSize]
+	}
+	if err := app.addPublicPreviewAuthors(ctx, stashes); err != nil {
+		app.logger.Error("could not load public stash authors", "request_id", requestIDFromContext(r.Context()), "error", err)
 	}
 	writePublicStashPage(w, stashes, pageSize, nextCursor)
 }
@@ -270,6 +291,7 @@ func (app *application) handlePublicStashDetail(w http.ResponseWriter, r *http.R
 		bson.M{"_id": id, "isPublic": true},
 		options.FindOne().SetProjection(bson.M{
 			"_id":       1,
+			"ownerId":   1,
 			"title":     1,
 			"summary":   1,
 			"content":   1,
@@ -286,7 +308,68 @@ func (app *application) handlePublicStashDetail(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "Could not load public stash")
 		return
 	}
+	if err := app.addPublicStashAuthor(ctx, &stash); err != nil {
+		app.logger.Error("could not load public stash author", "request_id", requestIDFromContext(r.Context()), "error", err)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": stash})
+}
+
+func (app *application) addPublicPreviewAuthors(ctx context.Context, stashes []publicStashPreview) error {
+	ownerIDs := make([]bson.ObjectID, 0, len(stashes))
+	for _, stash := range stashes {
+		if !stash.OwnerID.IsZero() {
+			ownerIDs = append(ownerIDs, stash.OwnerID)
+		}
+	}
+	authors, err := app.loadPublicAuthors(ctx, ownerIDs)
+	if err != nil {
+		return err
+	}
+	for index := range stashes {
+		if author, exists := authors[stashes[index].OwnerID]; exists {
+			stashes[index].Author = &author
+		}
+	}
+	return nil
+}
+
+func (app *application) addPublicStashAuthor(ctx context.Context, stash *publicStash) error {
+	authors, err := app.loadPublicAuthors(ctx, []bson.ObjectID{stash.OwnerID})
+	if err != nil {
+		return err
+	}
+	if author, exists := authors[stash.OwnerID]; exists {
+		stash.Author = &author
+	}
+	return nil
+}
+
+func (app *application) loadPublicAuthors(ctx context.Context, ownerIDs []bson.ObjectID) (map[bson.ObjectID]publicAuthor, error) {
+	authors := make(map[bson.ObjectID]publicAuthor)
+	if len(ownerIDs) == 0 {
+		return authors, nil
+	}
+	cursor, err := app.database.Collection("profiles").Find(
+		ctx,
+		bson.M{"_id": bson.M{"$in": ownerIDs}, "isPublic": true},
+		options.Find().SetProjection(bson.M{"_id": 1, "handle": 1, "displayName": 1, "avatarURL": 1}),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+	var records []publicAuthorRecord
+	if err := cursor.All(ctx, &records); err != nil {
+		return nil, err
+	}
+	for _, record := range records {
+		authors[record.ID] = publicAuthor{
+			Handle:      record.Handle,
+			DisplayName: record.DisplayName,
+			AvatarURL:   record.AvatarURL,
+		}
+	}
+	return authors, nil
 }
 
 func parsePublicStashPage(r *http.Request) (int, *publicStashCursor, error) {
