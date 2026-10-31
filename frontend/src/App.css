@@ -243,3 +243,26 @@ input, textarea { transition: border-color .2s ease, box-shadow .25s ease, backg
 .use-in-app-code { background: rgba(3, 17, 23, .86); border: 1px solid var(--line); border-radius: 8px; margin: 0; overflow-x: auto; padding: .85rem .95rem; }
 .use-in-app-code code { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; line-height: 1.55; white-space: pre; }
 .use-in-app-copy { align-self: flex-start; }
+
+.auth-policy-links { display: flex; justify-content: center; gap: 1.25rem; margin-top: 1rem; font-size: .82rem; }
+.auth-policy-links a, .public-footer nav a, .information-page a { color: var(--aqua); }
+.public-footer nav { display: flex; flex-wrap: wrap; gap: .8rem 1.25rem; }
+.information-page { max-width: 58rem; }
+.information-intro { border-bottom: 1px solid var(--line); padding-bottom: 1.75rem; }
+.information-intro h1 { font-size: 2.5rem; line-height: 1.15; overflow-wrap: anywhere; margin: .6rem 0 1rem; }
+.information-page p { color: var(--muted); line-height: 1.75; max-width: 70ch; }
+.information-page section { border-bottom: 1px solid var(--line); padding: 1.5rem 0; }
+.information-page h2 { font-size: 1.3rem; line-height: 1.3; margin: 0 0 .75rem; }
+.faq-list details { border-bottom: 1px solid var(--line); padding: 1.25rem 0; }
+.faq-list summary { cursor: pointer; font-size: 1.05rem; font-weight: 700; line-height: 1.5; }
+.faq-list summary:focus-visible { outline: 2px solid var(--aqua); outline-offset: 5px; }
+.faq-list details p { margin: 1rem 0 0; }
+.information-note { margin-top: 1.75rem; }
+@media (max-width: 760px) {
+	.information-intro h1 { font-size: 2rem; }
+	.public-header { flex-wrap: wrap; gap: .85rem; }
+	.public-header nav { width: 100%; justify-content: space-between; gap: .75rem; }
+	.public-header nav a { white-space: nowrap; }
+	.public-footer { flex-wrap: wrap; gap: 1.25rem; }
+	.public-footer nav { width: 100%; }
+}

@@ -141,6 +141,8 @@ function App() {
           <Route path="/" element={<Navigate replace to="/discover" />} />
           <Route path="/discover" element={<NamespaceLookupPage />} />
           <Route path="/guide" element={<GuidePage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/faq" element={<FAQPage />} />
           <Route
             path="/login"
             element={
@@ -272,7 +274,7 @@ function AuthenticationPage({
         </h1>
         <p className="auth-intro">
           {isSignUp
-            ? "Pick a username and you’re in — your data space is ready in seconds. Everything you create stays private until you choose to share it."
+            ? "Your own space for app data. Start with an editable public welcome record; new records you create default to Private."
             : "Sign in to manage your personal records and shared application data."}
         </p>
         <form onSubmit={submit}>
@@ -357,6 +359,10 @@ function AuthenticationPage({
         <Link className="auth-guide-link" to="/guide">
           <ShieldCheck aria-hidden="true" size={16} /> How it works
         </Link>
+        <nav className="auth-policy-links" aria-label="Account information">
+          <Link to="/privacy">Privacy</Link>
+          <Link to="/faq">FAQ</Link>
+        </nav>
       </section>
     </main>
   );
@@ -448,7 +454,12 @@ function PersonalDashboardRoute() {
 function PersonalEditorRoute() {
   const { namespace } = useWorkspace();
   return namespace ? (
-    <NamespaceResourceEditor scope="personal" canWrite username={namespace.slug} />
+    <NamespaceResourceEditor
+      scope="personal"
+      canWrite
+      username={namespace.slug}
+      namespacePublic={namespace.isPublic}
+    />
   ) : (
     <Navigate replace to="/app/shared" />
   );
@@ -467,7 +478,12 @@ function SharedDashboardRoute() {
 function SharedEditorRoute() {
   const { claims } = useWorkspace();
   return (
-    <NamespaceResourceEditor scope="shared" canWrite={claims.role === "admin"} />
+    <NamespaceResourceEditor
+      scope="shared"
+      canWrite={claims.role === "admin"}
+      isAdmin={claims.role === "admin"}
+      namespacePublic
+    />
   );
 }
 
@@ -969,20 +985,47 @@ function UseInYourApp({
   appKey,
   publicURL,
   isPublic,
+  recordIsPublic,
+  visibility,
+  shared,
+  isAdmin,
 }: {
   endpoint: string;
   appKey: string;
   publicURL?: string;
   isPublic: boolean;
+  recordIsPublic: boolean;
+  visibility: ResourceInput["visibility"];
+  shared: boolean;
+  isAdmin: boolean;
 }) {
   const [lang, setLang] = useState<"curl" | "js" | "python">("curl");
   const [copied, setCopied] = useState(false);
   const key = appKey || "pk_your_app_key";
-  const snippets: Record<"curl" | "js" | "python", string> = {
-    curl: `curl "${endpoint}" \\\n  -H "X-M-Stash-App: ${key}"`,
-    js: `const res = await fetch("${endpoint}", {\n  headers: { "X-M-Stash-App": "${key}" },\n});\nconst { data } = await res.json();`,
-    python: `import requests\n\nres = requests.get(\n    "${endpoint}",\n    headers={"X-M-Stash-App": "${key}"},\n)\nprint(res.json()["data"])`,
-  };
+  const authenticated = !isPublic;
+  const accessDenied = shared && visibility === "private" && !isAdmin;
+  const accessNote = isPublic
+    ? "Public records can be read by anyone. No user login is required."
+    : shared
+      ? visibility === "authenticated"
+        ? "Available to signed-in users. The request needs a valid session or access token."
+        : isAdmin
+          ? "Private app data requires an admin session or server key. Never put a server key in browser code."
+          : "Private app data is restricted to administrators and trusted servers. Your account cannot read it."
+      : recordIsPublic
+        ? "This record is Public, but your profile is private. Your signed-in account can still read it."
+        : "This private record is available to your signed-in account. Browser examples use your current session; server examples need an access token from login.";
+  const snippets: Record<"curl" | "js" | "python", string> = authenticated
+    ? {
+        curl: `curl "${endpoint}" \\\n  -H "X-M-Stash-App: ${key}" \\\n  -H "Authorization: Bearer $ACCESS_TOKEN"`,
+        js: `const res = await fetch("${endpoint}", {\n  credentials: "include",\n  headers: { "X-M-Stash-App": "${key}" },\n});\nif (!res.ok) throw new Error("Request failed: " + res.status);\nconst { data } = await res.json();`,
+        python: `import os\nimport requests\n\nres = requests.get(\n    "${endpoint}",\n    headers={\n        "X-M-Stash-App": "${key}",\n        "Authorization": f"Bearer {os.environ['ACCESS_TOKEN']}",\n    },\n)\nres.raise_for_status()\nprint(res.json()["data"])`,
+      }
+    : {
+        curl: `curl "${endpoint}" \\\n  -H "X-M-Stash-App: ${key}"`,
+        js: `const res = await fetch("${endpoint}", {\n  headers: { "X-M-Stash-App": "${key}" },\n});\nif (!res.ok) throw new Error("Request failed: " + res.status);\nconst { data } = await res.json();`,
+        python: `import requests\n\nres = requests.get(\n    "${endpoint}",\n    headers={"X-M-Stash-App": "${key}"},\n)\nres.raise_for_status()\nprint(res.json()["data"])`,
+      };
   async function copy() {
     try {
       await navigator.clipboard.writeText(snippets[lang]);
@@ -1008,51 +1051,67 @@ function UseInYourApp({
             {publicURL} <ArrowUpRight aria-hidden="true" size={13} />
           </a>
         ) : (
-          <span className="use-in-app-note">
-            Private — switch visibility to Public to read it at this URL.
-          </span>
+          <span className="use-in-app-note">{accessNote}</span>
         )}
       </div>
-      <div
-        aria-label="Snippet language"
-        className="use-in-app-tabs"
-        role="tablist"
-      >
-        {(["curl", "js", "python"] as const).map((option) => (
+      {isPublic && <p className="use-in-app-access">{accessNote}</p>}
+      {accessDenied ? (
+        <p className="use-in-app-note">
+          Ask an app administrator for access or have a trusted server make
+          this request. No user-level snippet can read this private app data.
+        </p>
+      ) : (
+        <>
+          <div
+            aria-label="Snippet language"
+            className="use-in-app-tabs"
+            role="tablist"
+          >
+            {(["curl", "js", "python"] as const).map((option) => (
+              <button
+                aria-selected={lang === option}
+                className={lang === option ? "active" : ""}
+                key={option}
+                onClick={() => setLang(option)}
+                role="tab"
+                type="button"
+              >
+                {option === "curl"
+                  ? "cURL"
+                  : option === "js"
+                    ? "JavaScript"
+                    : "Python"}
+              </button>
+            ))}
+          </div>
+          <pre className="use-in-app-code">
+            <code>{snippets[lang]}</code>
+          </pre>
+          {authenticated && lang !== "js" && (
+            <p className="use-in-app-note">
+              Set ACCESS_TOKEN from the <code>token</code> returned by
+              <code> POST /v1/auth/login</code> (or use an app secret on a
+              trusted server). Keep credentials out of browser code and source
+              control.
+            </p>
+          )}
           <button
-            aria-selected={lang === option}
-            className={lang === option ? "active" : ""}
-            key={option}
-            onClick={() => setLang(option)}
-            role="tab"
+            className="button secondary use-in-app-copy"
+            onClick={() => void copy()}
             type="button"
           >
-            {option === "curl"
-              ? "cURL"
-              : option === "js"
-                ? "JavaScript"
-                : "Python"}
+            {copied ? (
+              <>
+                <Check aria-hidden="true" size={15} /> Copied
+              </>
+            ) : (
+              <>
+                <Copy aria-hidden="true" size={15} /> Copy snippet
+              </>
+            )}
           </button>
-        ))}
-      </div>
-      <pre className="use-in-app-code">
-        <code>{snippets[lang]}</code>
-      </pre>
-      <button
-        className="button secondary use-in-app-copy"
-        onClick={() => void copy()}
-        type="button"
-      >
-        {copied ? (
-          <>
-            <Check aria-hidden="true" size={15} /> Copied
-          </>
-        ) : (
-          <>
-            <Copy aria-hidden="true" size={15} /> Copy snippet
-          </>
-        )}
-      </button>
+        </>
+      )}
     </section>
   );
 }
@@ -1061,10 +1120,14 @@ function NamespaceResourceEditor({
   scope,
   canWrite,
   username,
+  isAdmin = false,
+  namespacePublic = true,
 }: {
   scope: "personal" | "shared";
   canWrite: boolean;
   username?: string;
+  isAdmin?: boolean;
+  namespacePublic?: boolean;
 }) {
   const { type = "record", slug } = useParams();
   const navigate = useNavigate();
@@ -1078,6 +1141,8 @@ function NamespaceResourceEditor({
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const [slugTouched, setSlugTouched] = useState(false);
+  const canReadPublicly =
+    resource.visibility === "public" && (shared || namespacePublic);
 
   useEffect(() => {
     if (!slug) return;
@@ -1285,11 +1350,18 @@ function NamespaceResourceEditor({
           <UseInYourApp
             appKey={api.publishableKey()}
             endpoint={
-              shared
-                ? `${window.location.origin}/v1/public/shared/resources/${type}/${slug}`
-                : `${window.location.origin}/v1/public/${username ?? ""}/${type}/${slug}`
+              canReadPublicly
+                ? shared
+                  ? `${window.location.origin}/v1/public/shared/resources/${type}/${slug}`
+                  : `${window.location.origin}/v1/public/${username ?? ""}/${type}/${slug}`
+                : shared
+                  ? `${window.location.origin}/v1/shared/resources/${type}/${slug}`
+                  : `${window.location.origin}/v1/me/resources/${type}/${slug}`
             }
-            isPublic={resource.visibility === "public"}
+            isPublic={canReadPublicly}
+            recordIsPublic={resource.visibility === "public"}
+            visibility={resource.visibility}
+            isAdmin={isAdmin}
             publicURL={
               shared
                 ? `${window.location.origin}/public/${type}/${slug}`
@@ -1297,6 +1369,7 @@ function NamespaceResourceEditor({
                   ? `${window.location.origin}/${username}/${type}/${slug}`
                   : undefined
             }
+                shared={shared}
           />
         )}
       </div>
@@ -1450,32 +1523,32 @@ function NamespaceLookupPage() {
       <main className="discovery-page">
         <div className="discover-intro">
           <p className="eyebrow">
-            <Compass aria-hidden="true" size={15} /> Application data ownership
+            <Compass aria-hidden="true" size={15} /> A calmer home for app data
           </p>
-          <h1>Two scopes. One source of truth.</h1>
+          <h1>Your app data, under your control.</h1>
           <p>
-            m-stash gives every application personal data for signed-in people
-            and shared data for the deployment. Ownership comes from identity,
-            so browsers never send owner IDs or database credentials.
+            Give every account its own place for profiles, preferences, and
+            saves. New records stay private by default. Share a public link or
+            connect with a ready-to-run API example.
           </p>
           <div className="discover-actions">
             <Link className="button primary" to="/signup">
               <UserRound aria-hidden="true" size={17} /> Create account
             </Link>
             <Link className="discover-guide-link" to="/guide">
-              See the model <ArrowUpRight aria-hidden="true" size={16} />
+              How it works <ArrowUpRight aria-hidden="true" size={16} />
             </Link>
           </div>
         </div>
         <section className="scope-model" aria-labelledby="scope-model-title">
           <header>
-            <p className="eyebrow">Two scopes, one ownership model</p>
+            <p className="eyebrow">Simple by default</p>
             <h2 id="scope-model-title">
-              Personal data for people. Shared data for the app.
+              A space for each person. A space for your app.
             </h2>
           </header>
           <article>
-            <h3>Personal scope</h3>
+            <h3>For each person</h3>
             <p>
               Each account owns its profiles, preferences, saves, and
               user-created records. m-stash resolves that owner from the
@@ -1483,7 +1556,7 @@ function NamespaceLookupPage() {
             </p>
           </article>
           <article>
-            <h3>Shared app scope</h3>
+            <h3>For the whole app</h3>
             <p>
               Deployment administrators and trusted services own the facts
               every user should see: app name, app version, configuration,
@@ -1496,8 +1569,8 @@ function NamespaceLookupPage() {
             <p className="eyebrow">Optional publishing</p>
             <h2 id="public-lookup-title">Browse a public profile</h2>
             <p>
-              Publishing is opt-in. Enter a username to view records that
-              account has chosen to share publicly.
+              Enter a username to browse public records, including the sample
+              welcome record created on signup. Private records stay hidden.
             </p>
           </div>
           <form
@@ -2033,12 +2106,12 @@ function GuideContent() {
         <p className="eyebrow">
           <ShieldCheck aria-hidden="true" size={15} /> The ownership model
         </p>
-        <h1>Ownership is the data model.</h1>
+        <h1>Your data. Your space.</h1>
         <p>
-          m-stash resolves personal writes from the signed-in account. The
-          deployment owns shared app data such as name, version, configuration,
-          feature flags, catalogs, and leaderboards. Clients receive only what
-          their identity and a record's visibility permit.
+          Start with a record, not a database setup. Your account owns what you
+          create. New records default to Private; public records have a link
+          and an API endpoint. App-wide data lives separately, managed by your
+          app's administrators.
         </p>
       </header>
       <section className="guide-section workflow-section">
@@ -2052,40 +2125,42 @@ function GuideContent() {
           <li>
             <span>01</span>
             <div>
-              <h3>Identify</h3>
+              <h3>Claim your space</h3>
               <p>
-                Signup claims one immutable username and personal namespace.
+                Choose a username. A public sample welcome record gives you
+                something to edit, share, or delete immediately.
               </p>
             </div>
           </li>
           <li>
             <span>02</span>
             <div>
-              <h3>Store</h3>
+              <h3>Create a record</h3>
               <p>
-                Profiles, preferences, saves, and app records live in typed
-                buckets with durable routes.
+                Add a title. The link fills itself in, and the record starts
+                private. Add text or structured data as you need it.
               </p>
             </div>
           </li>
           <li>
             <span>03</span>
             <div>
-              <h3>Scope</h3>
+              <h3>Choose who can read it</h3>
               <p>
-                Personal records belong to an account. Shared app records
-                belong to the deployment. Visibility decides who can read each
-                record.
+                Keep it private or make it public. Public means anyone can
+                read it, not just people you send the link to. Your profile
+                must also be public for personal records to be visible.
               </p>
             </div>
           </li>
           <li>
             <span>04</span>
             <div>
-              <h3>Observe</h3>
+              <h3>Connect your app</h3>
               <p>
-                MongoDB transactions and the durable outbox record every
-                mutation.
+                Open a saved record for cURL, JavaScript, and Python snippets.
+                Public examples work without a login; private data needs
+                authentication as well as the app key.
               </p>
             </div>
           </li>
@@ -2124,6 +2199,61 @@ function GuideContent() {
   );
 }
 
+function FAQPage() {
+  const questions = [
+    ["What is m-stash?", "A self-hostable backend for account-owned records and app-wide data. Store text or structured JSON, choose who can read it, and access it through an API. It is not a replacement for every database workload."],
+    ["What happens when I sign up?", "You claim a username and receive a public sample record at /your-username/record/welcome. It contains your username and sample text, not your email or password. You can edit it, make it private, or delete it. Other records you create default to Private."],
+    ["Does Public mean anyone can read my record?", "Yes. Public records can be read without signing in, copied, and potentially indexed by search engines. A personal record is publicly readable only while both the record and your profile are public. Making it private stops future public reads here, but cannot recall copies already made."],
+    ["What are personal and app-wide records?", "Personal records belong to your account. App-wide records are managed by administrators or trusted servers. App-wide records may be private to operators, available to signed-in accounts, or public."],
+    ["Do I need to understand app keys?", "The hosted interface supplies its app key automatically. API calls need that key to identify the application. The publishable key is safe in browser code, but does not grant access to private records. Never expose server keys, passwords, or platform tokens."],
+    ["How do I use a snippet with private data?", "The snippet panel follows the record's access. Public records use a public endpoint. Private personal records use your signed-in browser session in JavaScript, or an access token from POST /v1/auth/login in cURL and Python. An app key identifies the app; it does not grant access to private data. Private app-wide records require administrator or trusted-server access."],
+    ["Can I change my username?", "Usernames are fixed after signup because they identify your public links. Your display name, bio, avatar URL, and profile visibility can be changed in profile settings."],
+    ["How do I remove my data?", "Delete your records from the workspace. There is currently no self-service account deletion or complete account export. Account removal, backup retention, and privacy requests must be handled by the operator of the deployment you use."],
+    ["Who runs this service?", "Each deployment has its own operator and storage configuration. This hosted site runs on Render; self-hosted installations may use other providers. There is no published uptime guarantee, pricing commitment, or support response time on this site."],
+  ];
+  return (
+    <PublicLayout>
+      <main className="setup-page information-page">
+        <header className="information-intro">
+          <p className="eyebrow">The essentials</p>
+          <h1>Frequently asked questions</h1>
+          <p>Clear answers before you create, share, or connect.</p>
+        </header>
+        <div className="faq-list">
+          {questions.map(([question, answer]) => (
+            <details key={question}>
+              <summary>{question}</summary>
+              <p>{answer}</p>
+            </details>
+          ))}
+        </div>
+        <p className="information-note">For details on data handling, read our <Link to="/privacy">Privacy Policy</Link>.</p>
+      </main>
+    </PublicLayout>
+  );
+}
+
+function PrivacyPage() {
+  return (
+    <PublicLayout>
+      <main className="setup-page information-page">
+        <header className="information-intro">
+          <p className="eyebrow">Last updated October 31, 2026</p>
+          <h1>Privacy Policy</h1>
+          <p>This policy describes how the m-stash application handles data. The operator of each deployment controls its hosting, database, access, and retention practices.</p>
+        </header>
+        <section><h2>What we store</h2><p>Your account includes your email address, a hashed password, username, and account identifiers. Your profile may include a display name, bio, avatar URL, and public visibility setting. Records include the content and structured data you submit, ownership identifiers, visibility, and creation and update times.</p></section>
+        <section><h2>Why we use it</h2><p>This data lets the service sign you in, associate records with your account, enforce access rules, and deliver records to authorized clients. Authentication rate limiting uses IP-based identifiers. Browser sessions store hashed refresh tokens and expiry information.</p></section>
+        <section><h2>Public and private data</h2><p>Signup creates a public sample welcome record containing your username and sample text. New records you create default to Private. Public records and public profile information are accessible without signing in; your email and password hash are not part of those public responses. Public is not an unlisted or secret-link mode.</p><p>Private means restricted by the application's access rules, not end-to-end encrypted. Authorized database and deployment operators may access stored data. Do not store passwords, payment details, or other sensitive secrets in records.</p></section>
+        <section><h2>Cookies and external requests</h2><p>The app uses first-party cookies for access tokens, refresh sessions, and protection against cross-site request forgery. Access and refresh cookies are HttpOnly. These cookies are needed for browser sign-in; they are not advertising cookies.</p><p>Avatar and Markdown image URLs may cause your browser to contact external image hosts. Those hosts can receive your IP address and request metadata under their own policies.</p></section>
+        <section><h2>Hosting, logs, and delivery</h2><p>This hosted deployment runs on Render and stores application data in MongoDB. Hosting and database providers process data needed to operate the service. The app logs request identifiers, methods, normalized routes, response statuses, and timing. Infrastructure providers may keep additional operational logs.</p><p>Mutations can leave event metadata in a durable event outbox. If administrators configure webhooks, event data may be sent to their chosen destinations. The operator is responsible for those destinations and their retention policies.</p></section>
+        <section><h2>Retention and deletion</h2><p>Records remain stored until deleted. Session and rate-limit entries expire, although database cleanup may not be immediate. Deleting a record removes it from active record storage; copies in backups, logs, event history, webhook destinations, or third-party caches may remain according to the operator's policies.</p><p>There is currently no self-service account deletion or full account export. This site does not publish a fixed backup or log retention period. You can make your profile and records private or delete individual records from the workspace.</p></section>
+        <section><h2>Requests and policy changes</h2><p>For account removal, access or correction requests, retention details, or privacy concerns, contact the operator of the deployment you use. A dedicated privacy contact and legal operator identity have not yet been published for this hosted site; this policy does not imply a staffed support channel.</p><p>Changes to this policy will appear on this page with an updated date. Self-hosted operators should provide their own identity, contact details, retention schedule, and any notices required in their jurisdiction.</p></section>
+      </main>
+    </PublicLayout>
+  );
+}
+
 function PublicLayout({ children }: { children: React.ReactNode }) {
   const session = useContext(SessionContext);
   const authenticated = session.kind === "authenticated";
@@ -2134,8 +2264,8 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
           <span>m</span>stash
         </Link>
         <nav>
-          <Link to="/discover">User data</Link>
-          <Link to="/public">Deployment data</Link>
+          <Link to="/discover">Explore</Link>
+          <Link to="/public">App data</Link>
           <Link to="/guide">How it works</Link>
           <Link
             className="button secondary small-button"
@@ -2158,7 +2288,11 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
         <Link className="wordmark" to="/discover">
           <span>m</span>stash
         </Link>
-        <Link to="/guide">Platform guide</Link>
+        <nav aria-label="Help and policies">
+          <Link to="/guide">How it works</Link>
+          <Link to="/faq">FAQ</Link>
+          <Link to="/privacy">Privacy Policy</Link>
+        </nav>
         <p>Application data, owned by design.</p>
       </footer>
     </div>
