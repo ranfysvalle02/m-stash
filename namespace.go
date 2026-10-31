@@ -133,17 +133,17 @@ func newOwnerMembership(appID, namespaceID, userID bson.ObjectID, now time.Time)
 	}
 }
 
-// newSampleProfileResource seeds a new account with a live, editable public
-// record so the dashboard is never empty and the user has a shareable link
-// (/{username}/profile/main) the moment they sign in.
-func newSampleProfileResource(appID, namespaceID, userID bson.ObjectID, username string, now time.Time) Resource {
+// newWelcomeResource seeds a new account with a live, editable public record so
+// the landing dashboard is never empty and the user has a shareable link
+// (/{username}/record/welcome) the moment they sign in.
+func newWelcomeResource(appID, namespaceID, userID bson.ObjectID, username string, now time.Time) Resource {
 	return Resource{
 		ID:          bson.NewObjectID(),
 		AppID:       appID,
 		NamespaceID: namespaceID,
 		CreatorID:   userID,
-		Type:        "profile",
-		Slug:        "main",
+		Type:        "record",
+		Slug:        "welcome",
 		Title:       "Welcome to your space",
 		Summary:     "A sample public record — edit the text or delete it anytime.",
 		Content: "# Hi, I’m @" + username + "\n\n" +
@@ -176,7 +176,7 @@ func (app *application) createAccountWithPersonalNamespace(ctx context.Context, 
 		if _, err := app.database.Collection(namespaceMembershipCollection).InsertOne(transactionContext, membership); err != nil {
 			return nil, err
 		}
-		seed := newSampleProfileResource(namespace.AppID, namespace.ID, user.ID, namespace.Slug, namespace.CreatedAt)
+		seed := newWelcomeResource(namespace.AppID, namespace.ID, user.ID, namespace.Slug, namespace.CreatedAt)
 		if _, err := app.database.Collection(resourceCollectionName).InsertOne(transactionContext, seed); err != nil {
 			return nil, err
 		}
