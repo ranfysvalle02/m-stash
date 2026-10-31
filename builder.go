@@ -218,11 +218,48 @@ func (app *application) handleBuilderApp(w http.ResponseWriter, r *http.Request,
 	switch {
 	case len(segments) == 2 && segments[1] == "rotate-secret":
 		app.rotateBuilderAppSecret(w, r, ownerID, appID)
+	case len(segments) == 2 && segments[1] == "usage":
+		app.builderAppUsage(w, r, ownerID, appID)
 	case len(segments) == 1 && r.Method == http.MethodPatch:
 		app.updateBuilderApp(w, r, ownerID, appID)
 	default:
 		writeError(w, http.StatusNotFound, "Not found")
 	}
+}
+
+// builderAppUsage reports how much an owned app is used. Users and records both
+// carry appId, so the counts stay scoped to the single tenant.
+func (app *application) builderAppUsage(w http.ResponseWriter, r *http.Request, ownerID, appID bson.ObjectID) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	owned, err := app.database.Collection(appsCollectionName).
+		CountDocuments(ctx, bson.M{"_id": appID, "ownerId": ownerID})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not read usage")
+		return
+	}
+	if owned == 0 {
+		writeError(w, http.StatusNotFound, "Application not found")
+		return
+	}
+
+	users, err := app.database.Collection("_users").CountDocuments(ctx, bson.M{"appId": appID})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not read usage")
+		return
+	}
+	records, err := app.database.Collection(resourceCollectionName).CountDocuments(ctx, bson.M{"appId": appID})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not read usage")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{"users": users, "records": records},
+	})
 }
 
 func (app *application) rotateBuilderAppSecret(w http.ResponseWriter, r *http.Request, ownerID, appID bson.ObjectID) {
@@ -267,12 +304,16 @@ func (app *application) updateBuilderApp(w http.ResponseWriter, r *http.Request,
 	var input struct {
 		AllowedOrigins *[]string `json:"allowedOrigins"`
 		DisplayName    *string   `json:"displayName"`
+		Active         *bool     `json:"active"`
 	}
 	if !decodeJSONBody(w, r, &input, false) {
 		return
 	}
 
 	set := bson.M{"updatedAt": time.Now().UTC()}
+	if input.Active != nil {
+		set["active"] = *input.Active
+	}
 	if input.AllowedOrigins != nil {
 		origins := make([]string, 0, len(*input.AllowedOrigins))
 		for _, origin := range *input.AllowedOrigins {

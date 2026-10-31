@@ -81,6 +81,11 @@ export interface BuilderAppInput {
   allowedOrigins?: string[]
 }
 
+export interface BuilderAppUsage {
+  users: number
+  records: number
+}
+
 export interface Page<T> {
   data: T[]
   page: {
@@ -331,10 +336,15 @@ export const api = {
     })
   },
 
-  async updateBuilderApp(id: string, input: { allowedOrigins?: string[]; displayName?: string }) {
+  async updateBuilderApp(id: string, input: { allowedOrigins?: string[]; displayName?: string; active?: boolean }) {
     const response = await request<APIEnvelope<BuilderApp>>(`/v1/builder/apps/${encodeURIComponent(id)}`, {
       method: 'PATCH', body: input, retrySession: false,
     })
+    return response.data
+  },
+
+  async builderAppUsage(id: string) {
+    const response = await request<APIEnvelope<BuilderAppUsage>>(`/v1/builder/apps/${encodeURIComponent(id)}/usage`, { retrySession: false })
     return response.data
   },
 }

@@ -46,6 +46,7 @@ import {
   api,
   type BuilderApp,
   type BuilderAppInput,
+  type BuilderAppUsage,
   type Namespace,
   type NamespaceIdentityInput,
   type PublicNamespace,
@@ -2751,9 +2752,53 @@ function ConsoleAppRow({
   onError: (message: string) => void;
 }) {
   const [origins, setOrigins] = useState((app.allowedOrigins ?? []).join("\n"));
-  const [busy, setBusy] = useState<"" | "save" | "rotate">("");
+  const [busy, setBusy] = useState<"" | "save" | "rotate" | "active">("");
   const [copied, setCopied] = useState(false);
   const [savedOrigins, setSavedOrigins] = useState(false);
+  const [usage, setUsage] = useState<BuilderAppUsage>();
+  const [showConnect, setShowConnect] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void api
+      .builderAppUsage(app.id)
+      .then((value) => {
+        if (active) setUsage(value);
+      })
+      .catch(() => {
+        // Usage is best-effort; a failure should not block management.
+      });
+    return () => {
+      active = false;
+    };
+  }, [app.id]);
+
+  const connectSnippet = [
+    `const API_URL = "${window.location.origin}";`,
+    `const APP_KEY = "${app.publishableKey}";`,
+    "",
+    "export async function signUp(email, password, username) {",
+    "  const res = await fetch(`${API_URL}/v1/auth/signup`, {",
+    '    method: "POST",',
+    '    credentials: "include",',
+    '    headers: { "X-M-Stash-App": APP_KEY, "Content-Type": "application/json" },',
+    "    body: JSON.stringify({ email, password, username }),",
+    "  });",
+    '  if (!res.ok) throw new Error("Sign-up failed");',
+    "  return res.json();",
+    "}",
+    "",
+    "export async function saveRecord(type, body) {",
+    "  const res = await fetch(`${API_URL}/v1/me/resources/${type}`, {",
+    '    method: "POST",',
+    '    credentials: "include",',
+    '    headers: { "X-M-Stash-App": APP_KEY, "Content-Type": "application/json" },',
+    "    body: JSON.stringify(body),",
+    "  });",
+    '  if (!res.ok) throw new Error("Save failed");',
+    "  return res.json();",
+    "}",
+  ].join("\n");
 
   async function copyKey() {
     try {
@@ -2806,12 +2851,42 @@ function ConsoleAppRow({
     }
   }
 
+  async function toggleActive() {
+    const next = !app.active;
+    if (
+      !next &&
+      !window.confirm(
+        `Disable ${app.displayName}? Its publishable key stops working until you re-enable it.`,
+      )
+    ) {
+      return;
+    }
+    setBusy("active");
+    onError("");
+    try {
+      const updated = await api.updateBuilderApp(app.id, { active: next });
+      onUpdated(updated);
+    } catch (requestError) {
+      onError(messageFromError(requestError));
+    } finally {
+      setBusy("");
+    }
+  }
+
   return (
-    <li className="console-app-card">
+    <li className={app.active ? "console-app-card" : "console-app-card disabled"}>
       <div className="console-app-row">
         <div className="console-app-main">
-          <h3>{app.displayName}</h3>
+          <div className="console-app-title">
+            <h3>{app.displayName}</h3>
+            {!app.active && <span className="status">Disabled</span>}
+          </div>
           <p className="console-slug">/{app.slug}</p>
+          <p className="console-usage">
+            {usage
+              ? `${usage.users} user${usage.users === 1 ? "" : "s"} · ${usage.records} record${usage.records === 1 ? "" : "s"}`
+              : "…"}
+          </p>
         </div>
         <div className="console-key">
           <code>{app.publishableKey}</code>
@@ -2858,6 +2933,13 @@ function ConsoleAppRow({
             Save origins
           </button>
           <button
+            className="button secondary"
+            onClick={() => setShowConnect((value) => !value)}
+            type="button"
+          >
+            <Code2 aria-hidden="true" size={15} /> {showConnect ? "Hide client" : "Get client code"}
+          </button>
+          <button
             className="button secondary danger-button"
             disabled={busy !== ""}
             onClick={() => void rotate()}
@@ -2870,7 +2952,27 @@ function ConsoleAppRow({
             )}{" "}
             Rotate secret
           </button>
+          <button
+            className="button secondary danger-button"
+            disabled={busy !== ""}
+            onClick={() => void toggleActive()}
+            type="button"
+          >
+            {busy === "active" ? (
+              <LoaderCircle aria-hidden="true" className="spin" size={15} />
+            ) : (
+              <Trash2 aria-hidden="true" size={15} />
+            )}{" "}
+            {app.active ? "Disable" : "Enable"}
+          </button>
         </div>
+        {showConnect && (
+          <CopyableSnippet
+            title="Starter client"
+            description="Paste into your app. The publishable key is safe in frontend code."
+            code={connectSnippet}
+          />
+        )}
       </div>
     </li>
   );

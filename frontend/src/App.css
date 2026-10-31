@@ -271,8 +271,11 @@ input, textarea { transition: border-color .2s ease, box-shadow .25s ease, backg
 .console-empty { color: var(--muted); }
 .console-app-list { display: grid; gap: .6rem; list-style: none; margin: 0; padding: 0; }
 .console-app-card { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: .9rem; padding: 1rem; }
+.console-app-card.disabled { opacity: .6; }
 .console-app-row { align-items: center; display: flex; flex-wrap: wrap; gap: .8rem; justify-content: space-between; }
+.console-app-title { align-items: center; display: flex; flex-wrap: wrap; gap: .5rem; }
 .console-app-main h3 { font-size: 1.05rem; margin: 0; }
+.console-usage { color: var(--muted); font-size: .78rem; margin: .3rem 0 0; }
 .console-slug { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; margin: .2rem 0 0; }
 .console-key { align-items: center; display: flex; gap: .4rem; min-width: 0; }
 .console-key code { background: rgba(3, 17, 23, .86); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; overflow-x: auto; padding: .35rem .5rem; white-space: nowrap; }
