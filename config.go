@@ -26,6 +26,7 @@ type Config struct {
 	UIAppKey            string
 	DefaultAppSlug      string
 	DefaultAppName      string
+	DemoSeed            bool
 	WebhookDelivery     bool
 	WebhookPollInterval time.Duration
 	WebhookMaxAttempts  int
@@ -45,6 +46,10 @@ func loadConfig() (Config, error) {
 		return Config{}, err
 	}
 	sessionCookieSecure, err := getEnvBool("SESSION_COOKIE_SECURE", true)
+	if err != nil {
+		return Config{}, err
+	}
+	demoSeed, err := getEnvBool("DEMO_DATA", true)
 	if err != nil {
 		return Config{}, err
 	}
@@ -77,6 +82,7 @@ func loadConfig() (Config, error) {
 		UIAppKey:            getEnv("UI_APP_KEY", ""),
 		DefaultAppSlug:      getEnv("DEFAULT_APP_SLUG", "m-stash"),
 		DefaultAppName:      getEnv("DEFAULT_APP_NAME", "m-stash"),
+		DemoSeed:            demoSeed,
 		WebhookDelivery:     webhookDelivery,
 		WebhookPollInterval: webhookPollInterval,
 		WebhookMaxAttempts:  webhookMaxAttempts,

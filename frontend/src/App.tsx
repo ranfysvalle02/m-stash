@@ -1869,6 +1869,16 @@ function PublicSharedResourcePage() {
           <article className="markdown-body">
             <Markdown content={resource.content ?? ""} />
           </article>
+          {resource.data && Object.keys(resource.data).length > 0 && (
+            <section className="json-payload" aria-label="JSON payload">
+              <p className="eyebrow">
+                <Globe2 aria-hidden="true" size={15} /> The JSON any client reads
+              </p>
+              <pre>
+                <code>{JSON.stringify(resource.data, null, 2)}</code>
+              </pre>
+            </section>
+          )}
         </main>
       )}
     </PublicLayout>

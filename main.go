@@ -68,6 +68,15 @@ func main() {
 	} else {
 		app.uiAppKey = uiAppKey
 		log.Printf("🪪 UI bound to application key %s", uiAppKey)
+		if record, err := app.lookupApp(ctx, uiAppKey); err != nil {
+			log.Printf("⚠️  Could not resolve default application for demo data: %v", err)
+		} else if err := app.syncDemoData(ctx, record.ID); err != nil {
+			log.Printf("⚠️  Demo data sync failed: %v", err)
+		} else if appConfig.DemoSeed {
+			log.Print("🪄 Demo data seeded (set DEMO_DATA=off to hide it)")
+		} else {
+			log.Print("🧹 Demo data disabled (DEMO_DATA=off)")
+		}
 	}
 	if appConfig.MetricsToken == "" {
 		log.Print("Metrics endpoint disabled because METRICS_TOKEN is not configured")
