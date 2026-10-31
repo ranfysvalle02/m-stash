@@ -1,6 +1,5 @@
 import {
   createContext,
-  useContext,
   useEffect,
   useState,
   type FormEvent,
@@ -26,7 +25,6 @@ import {
   Settings,
   ShieldCheck,
   Trash2,
-  UserRound,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
@@ -267,15 +265,15 @@ function AuthenticationPage({
       </Link>
       <section className="auth-panel" aria-labelledby="auth-title">
         <p className="eyebrow">
-          {isSignUp ? "Create your workspace" : "Your workspace"}
+          Hosted demo app
         </p>
         <h1 id="auth-title">
-          {isSignUp ? "Start storing app data." : "Welcome back."}
+          {isSignUp ? "Create a demo user." : "Sign in to the demo."}
         </h1>
         <p className="auth-intro">
           {isSignUp
-            ? "Your own space for app data. Start with an editable public welcome record; new records you create default to Private."
-            : "Sign in to manage your personal records and shared application data."}
+            ? "This creates an example user for the hosted demo, not a developer account. To add m-stash to your app, start with the builder quickstart."
+            : "This signs you in to the hosted example app. Your own app's users sign up in your product, through the m-stash API."}
         </p>
         <form onSubmit={submit}>
           <label>
@@ -347,17 +345,17 @@ function AuthenticationPage({
             ) : (
               <ChevronRight aria-hidden="true" size={17} />
             )}
-            {isSignUp ? "Create account" : "Continue"}
+            {isSignUp ? "Create demo user" : "Sign in to demo"}
           </button>
         </form>
         <p className="auth-switch">
-          {isSignUp ? "Already have an account?" : "Need an account?"}{" "}
+          {isSignUp ? "Already tried the demo?" : "New to the demo?"} {" "}
           <Link to={isSignUp ? "/login" : "/signup"}>
-            {isSignUp ? "Log in" : "Create one"}
+            {isSignUp ? "Sign in" : "Create a demo user"}
           </Link>
         </p>
         <Link className="auth-guide-link" to="/guide">
-          <ShieldCheck aria-hidden="true" size={16} /> How it works
+          <ShieldCheck aria-hidden="true" size={16} /> Builder quickstart
         </Link>
         <nav className="auth-policy-links" aria-label="Account information">
           <Link to="/privacy">Privacy</Link>
@@ -1515,103 +1513,77 @@ function NamespaceSettings() {
 }
 
 function NamespaceLookupPage() {
-  const navigate = useNavigate();
-  const [username, setUsername] = useState("");
-  const usernameIssue = username ? usernameValidationMessage(username) : "";
   return (
     <PublicLayout>
       <main className="discovery-page">
         <div className="discover-intro">
           <p className="eyebrow">
-            <Compass aria-hidden="true" size={15} /> A calmer home for app data
+            <Compass aria-hidden="true" size={15} /> For AI app builders
           </p>
-          <h1>Your app data, under your control.</h1>
+          <h1>Give your AI-built app a backend.</h1>
           <p>
-            Give every account its own place for profiles, preferences, and
-            saves. New records stay private by default. Share a public link or
-            connect with a ready-to-run API example.
+            Add sign-up, login, and private per-user data without wiring a
+            database or writing security rules. m-stash handles identity and
+            ownership behind a small API. MongoDB stays behind the curtain.
           </p>
           <div className="discover-actions">
-            <Link className="button primary" to="/signup">
-              <UserRound aria-hidden="true" size={17} /> Create account
-            </Link>
-            <Link className="discover-guide-link" to="/guide">
-              How it works <ArrowUpRight aria-hidden="true" size={16} />
+            <a
+              className="button primary"
+              href="https://github.com/ranfysvalle02/m-stash/blob/main/quickstart.md"
+              rel="noreferrer"
+              target="_blank"
+            >
+              <ArrowUpRight aria-hidden="true" size={17} /> Start with the quickstart
+            </a>
+            <Link className="discover-guide-link" to="/public">
+              Explore the live demo <ArrowUpRight aria-hidden="true" size={16} />
             </Link>
           </div>
+          <p className="builder-promise">
+            Your users sign up in <em>your</em> app. No m-stash user account
+            required.
+          </p>
         </div>
         <section className="scope-model" aria-labelledby="scope-model-title">
           <header>
-            <p className="eyebrow">Simple by default</p>
+            <p className="eyebrow">The risky backend work, already done</p>
             <h2 id="scope-model-title">
-              A space for each person. A space for your app.
+              Your AI builds the app. m-stash supplies the backend.
             </h2>
           </header>
           <article>
-            <h3>For each person</h3>
+            <h3>Auth included</h3>
             <p>
-              Each account owns its profiles, preferences, saves, and
-              user-created records. m-stash resolves that owner from the
-              session, not from a browser-supplied ID.
+              Ready-to-use sign-up, login, and sessions. Your app owns the
+              experience; m-stash handles identity underneath.
             </p>
           </article>
           <article>
-            <h3>For the whole app</h3>
+            <h3>Ownership enforced</h3>
             <p>
-              Deployment administrators and trusted services own the facts
-              every user should see: app name, app version, configuration,
-              feature flags, catalogs, leaderboards, and release notes.
+              The server scopes records to the signed-in user. The browser
+              never chooses an owner or receives database credentials.
             </p>
           </article>
         </section>
         <section className="public-lookup" aria-labelledby="public-lookup-title">
           <div>
-            <p className="eyebrow">Optional publishing</p>
-            <h2 id="public-lookup-title">Browse a public profile</h2>
+            <p className="eyebrow">MongoDB underneath</p>
+            <h2 id="public-lookup-title">A small API between your app and your data.</h2>
             <p>
-              Enter a username to browse public records, including the sample
-              welcome record created on signup. Private records stay hidden.
+              Build against m-stash instead of MongoDB. Self-host it, keep
+              control of your database, and reach it directly when you need
+              the escape hatch.
             </p>
           </div>
-          <form
-            className="records-query"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!usernameIssue) navigate(`/${username}`);
-            }}
+          <a
+            className="button secondary"
+            href="https://github.com/ranfysvalle02/m-stash/blob/main/quickstart.md"
+            rel="noreferrer"
+            target="_blank"
           >
-            <label>
-              Public username
-              <input
-                autoCapitalize="none"
-                aria-describedby="namespace-lookup-help"
-                aria-invalid={Boolean(usernameIssue)}
-                onChange={(event) =>
-                  setUsername(normalizeUsername(event.target.value))
-                }
-                placeholder="alex-dev"
-                spellCheck={false}
-                value={username}
-              />
-              <small
-                className={
-                  usernameIssue
-                    ? "username-feedback invalid"
-                    : "username-feedback"
-                }
-                id="namespace-lookup-help"
-              >
-                {usernameIssue || "Enter a username with a published profile."}
-              </small>
-            </label>
-            <button
-              className="button primary"
-              disabled={!username || Boolean(usernameIssue)}
-              type="submit"
-            >
-              <ArrowUpRight aria-hidden="true" size={17} /> View profile
-            </button>
-          </form>
+            Read the quickstart <ArrowUpRight aria-hidden="true" size={16} />
+          </a>
         </section>
       </main>
     </PublicLayout>
@@ -1669,12 +1641,13 @@ function PublicSharedDataPage() {
       <main className="discovery-page public-data-page">
         <div className="discover-intro">
           <p className="eyebrow">
-            <Globe2 aria-hidden="true" size={15} /> Deployment public data
+            <Globe2 aria-hidden="true" size={15} /> Read-only live demo
           </p>
-          <h1>Public app data.</h1>
+          <h1>See app data through the API.</h1>
           <p>
-            This is the deployment's public surface: app records deliberately
-            published for anyone to read, independent of personal profiles.
+            Explore records this sample app has chosen to publish. This is a
+            developer demo of the data API, not an end-user product to sign up
+            for. Builders: start with the <Link to="/guide">Quickstart</Link>.
           </p>
         </div>
         <section className="public-lookup" aria-labelledby="public-bucket-title">
@@ -2104,63 +2077,76 @@ function GuideContent() {
     <>
       <header className="guide-intro">
         <p className="eyebrow">
-          <ShieldCheck aria-hidden="true" size={15} /> The ownership model
+          <ShieldCheck aria-hidden="true" size={15} /> For AI app builders
         </p>
-        <h1>Your data. Your space.</h1>
+        <h1>Ship the app. Skip the backend setup.</h1>
         <p>
-          Start with a record, not a database setup. Your account owns what you
-          create. New records default to Private; public records have a link
-          and an API endpoint. App-wide data lives separately, managed by your
-          app's administrators.
+          Add sign-up, login, and server-enforced user ownership to the app
+          you're building. Your users use your product; m-stash works behind
+          its API. No m-stash accounts for your users, no database access in
+          the frontend.
         </p>
+        <div className="discover-actions">
+          <a
+            className="button primary"
+            href="https://github.com/ranfysvalle02/m-stash/blob/main/quickstart.md"
+            rel="noreferrer"
+            target="_blank"
+          >
+            Start with the quickstart <ArrowUpRight aria-hidden="true" size={16} />
+          </a>
+          <Link className="discover-guide-link" to="/public">
+            Explore the live demo <ArrowUpRight aria-hidden="true" size={16} />
+          </Link>
+        </div>
       </header>
       <section className="guide-section workflow-section">
         <div className="guide-section-heading">
           <p className="eyebrow">
-            <BookOpen aria-hidden="true" size={15} /> The core model
+            <BookOpen aria-hidden="true" size={15} /> Your path to production
           </p>
-          <h2>Two scopes. One server-enforced rule.</h2>
+          <h2>Three steps. No hand-written ownership rules.</h2>
         </div>
         <ol className="workflow-list">
           <li>
             <span>01</span>
             <div>
-              <h3>Claim your space</h3>
+              <h3>Deploy m-stash</h3>
               <p>
-                Choose a username. A public sample welcome record gives you
-                something to edit, share, or delete immediately.
+                Self-host the service with a MongoDB replica set and a few
+                secrets. Keep your database and platform credentials on the
+                server.
               </p>
             </div>
           </li>
           <li>
             <span>02</span>
             <div>
-              <h3>Create a record</h3>
+              <h3>Provision your app</h3>
               <p>
-                Add a title. The link fills itself in, and the record starts
-                private. Add text or structured data as you need it.
+                Use your platform token once to create an isolated app and get
+                its publishable key plus a server-only secret.
               </p>
             </div>
           </li>
           <li>
             <span>03</span>
             <div>
-              <h3>Choose who can read it</h3>
+              <h3>Call the API from your product</h3>
               <p>
-                Keep it private or make it public. Public means anyone can
-                read it, not just people you send the link to. Your profile
-                must also be public for personal records to be visible.
+                Your UI owns sign-up and login. m-stash derives record ownership
+                from the authenticated identity and enforces access on every
+                request.
               </p>
             </div>
           </li>
           <li>
             <span>04</span>
             <div>
-              <h3>Connect your app</h3>
+              <h3>Keep building</h3>
               <p>
-                Open a saved record for cURL, JavaScript, and Python snippets.
-                Public examples work without a login; private data needs
-                authentication as well as the app key.
+                Store user data separately from app-wide config. Start private;
+                choose deliberately when something should be shared or public.
               </p>
             </div>
           </li>
@@ -2201,15 +2187,15 @@ function GuideContent() {
 
 function FAQPage() {
   const questions = [
-    ["What is m-stash?", "A self-hostable backend for account-owned records and app-wide data. Store text or structured JSON, choose who can read it, and access it through an API. It is not a replacement for every database workload."],
-    ["What happens when I sign up?", "You claim a username and receive a public sample record at /your-username/record/welcome. It contains your username and sample text, not your email or password. You can edit it, make it private, or delete it. Other records you create default to Private."],
-    ["Does Public mean anyone can read my record?", "Yes. Public records can be read without signing in, copied, and potentially indexed by search engines. A personal record is publicly readable only while both the record and your profile are public. Making it private stops future public reads here, but cannot recall copies already made."],
-    ["What are personal and app-wide records?", "Personal records belong to your account. App-wide records are managed by administrators or trusted servers. App-wide records may be private to operators, available to signed-in accounts, or public."],
-    ["Do I need to understand app keys?", "The hosted interface supplies its app key automatically. API calls need that key to identify the application. The publishable key is safe in browser code, but does not grant access to private records. Never expose server keys, passwords, or platform tokens."],
-    ["How do I use a snippet with private data?", "The snippet panel follows the record's access. Public records use a public endpoint. Private personal records use your signed-in browser session in JavaScript, or an access token from POST /v1/auth/login in cURL and Python. An app key identifies the app; it does not grant access to private data. Private app-wide records require administrator or trusted-server access."],
-    ["Can I change my username?", "Usernames are fixed after signup because they identify your public links. Your display name, bio, avatar URL, and profile visibility can be changed in profile settings."],
-    ["How do I remove my data?", "Delete your records from the workspace. There is currently no self-service account deletion or complete account export. Account removal, backup retention, and privacy requests must be handled by the operator of the deployment you use."],
-    ["Who runs this service?", "Each deployment has its own operator and storage configuration. This hosted site runs on Render; self-hosted installations may use other providers. There is no published uptime guarantee, pricing commitment, or support response time on this site."],
+    ["What is m-stash?", "A backend layer for AI app builders. It gives your product sign-up, login, and server-enforced per-user data through an API, with MongoDB behind the service instead of exposed to your frontend."],
+    ["Do my users need m-stash accounts?", "No. Your users sign up and log in through your product's UI. Your app calls the m-stash auth API behind the scenes; m-stash is infrastructure, not another consumer account your users need to manage."],
+    ["How do I start building?", "Follow the Quickstart to self-host m-stash, configure MongoDB and secrets, provision an app with your platform token, then connect your app with its publishable key. This hosted site does not currently offer developer-account signup or self-service app provisioning."],
+    ["What is the hosted sign-up page for?", "It creates a sample user in the live demo app so you can inspect the app-user experience. It does not create a developer account or provision an app. Builders should start with the Quickstart."],
+    ["How does m-stash keep users' data separate?", "The API derives ownership from the authenticated identity. Clients do not send an owner ID, and the server applies that identity to reads and writes. Personal and app-wide data use separate scopes."],
+    ["Do I need MongoDB in my frontend?", "No. Your application calls the m-stash API; database credentials stay server-side. MongoDB powers storage underneath and remains under your deployment's control."],
+    ["Can I make records public?", "Yes, when your app deliberately chooses public visibility. Public data can be read without signing in, copied, and potentially indexed. Private is the default for records created through the workspace."],
+    ["How do app keys work?", "The publishable key identifies your app and can be used in frontend requests. It does not grant access to private data. Keep platform tokens, passwords, and server-only app secrets out of browser code."],
+    ["Who runs the hosted demo?", "The demo runs on Render and uses MongoDB. For production, you deploy and operate your own instance. This site does not publish an uptime guarantee, pricing commitment, or support response time."],
   ];
   return (
     <PublicLayout>
@@ -2217,7 +2203,7 @@ function FAQPage() {
         <header className="information-intro">
           <p className="eyebrow">The essentials</p>
           <h1>Frequently asked questions</h1>
-          <p>Clear answers before you create, share, or connect.</p>
+          <p>Builder-first answers about the backend layer and the hosted demo.</p>
         </header>
         <div className="faq-list">
           {questions.map(([question, answer]) => (
@@ -2240,7 +2226,7 @@ function PrivacyPage() {
         <header className="information-intro">
           <p className="eyebrow">Last updated October 31, 2026</p>
           <h1>Privacy Policy</h1>
-          <p>This policy describes how the m-stash application handles data. The operator of each deployment controls its hosting, database, access, and retention practices.</p>
+          <p>This policy describes the hosted m-stash developer demo. Signing up here creates a sample app-user account, not a developer account. The operator controls hosting, database access, and retention.</p>
         </header>
         <section><h2>What we store</h2><p>Your account includes your email address, a hashed password, username, and account identifiers. Your profile may include a display name, bio, avatar URL, and public visibility setting. Records include the content and structured data you submit, ownership identifiers, visibility, and creation and update times.</p></section>
         <section><h2>Why we use it</h2><p>This data lets the service sign you in, associate records with your account, enforce access rules, and deliver records to authorized clients. Authentication rate limiting uses IP-based identifiers. Browser sessions store hashed refresh tokens and expiry information.</p></section>
@@ -2255,8 +2241,6 @@ function PrivacyPage() {
 }
 
 function PublicLayout({ children }: { children: React.ReactNode }) {
-  const session = useContext(SessionContext);
-  const authenticated = session.kind === "authenticated";
   return (
     <div className="public-shell">
       <header className="public-header">
@@ -2264,23 +2248,16 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
           <span>m</span>stash
         </Link>
         <nav>
-          <Link to="/discover">Explore</Link>
-          <Link to="/public">App data</Link>
-          <Link to="/guide">How it works</Link>
-          <Link
+          <Link to="/guide">For builders</Link>
+          <Link to="/public">Live demo</Link>
+          <a
             className="button secondary small-button"
-            to={authenticated ? "/app/resources/record" : "/login"}
+            href="https://github.com/ranfysvalle02/m-stash/blob/main/quickstart.md"
+            rel="noreferrer"
+            target="_blank"
           >
-            {authenticated ? (
-              <>
-                <BookOpen aria-hidden="true" size={16} /> Workspace
-              </>
-            ) : (
-              <>
-                <UserRound aria-hidden="true" size={16} /> Log in
-              </>
-            )}
-          </Link>
+            Quickstart <ArrowUpRight aria-hidden="true" size={15} />
+          </a>
         </nav>
       </header>
       {children}

@@ -1,8 +1,12 @@
 # m-stash
 
-m-stash is an ownership layer for application data. It sits between authentication and MongoDB, turning a signed-in identity into the server-enforced answer to: who owns this record, and who may read it?
+**Give your AI-built app sign-up, login, and private per-user data—without wiring a database or writing security rules.**
 
-Every application gets two scopes: personal records owned by an account and shared app records owned by the deployment. Typed buckets organize records; per-record visibility keeps them private, available to signed-in users, or deliberately public. Use it for profiles and preferences, game saves, feature configuration, catalogs, leaderboards, public portfolios, and community submissions without exposing MongoDB to a browser.
+m-stash is a small, self-hostable API between your app and MongoDB. Your users sign up in your product; m-stash derives record ownership from their authenticated identity and enforces access on every request. MongoDB stays off the client.
+
+Use it for profiles, preferences, game saves, and app-wide configuration. Personal records belong to users; shared records belong to the app. New records are private by default, with deliberate options for signed-in or public access.
+
+**Start building:** follow the [Quickstart](quickstart.md) to deploy m-stash and provision an app. The hosted site is a demo, not a developer-account portal; app provisioning uses a platform token.
 
 ## Applications
 
