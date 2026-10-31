@@ -434,9 +434,12 @@ function useWorkspace(): WorkspaceContext {
 }
 
 function WorkspaceIndexRoute() {
-  const { namespace } = useWorkspace();
+  const { namespace, claims } = useWorkspace();
   return (
-    <Navigate replace to={namespace ? "/app/resources/record" : "/app/shared"} />
+    <Navigate
+      replace
+      to={claims.role === "admin" || !namespace ? "/app/shared" : "/app/resources/record"}
+    />
   );
 }
 
@@ -520,11 +523,16 @@ function WorkspaceShell({
       <aside className={menuOpen ? "sidebar open" : "sidebar"}>
         <Link
           className="wordmark"
-          to={namespace ? "/app/resources/record" : "/app/shared"}
+          to={claims.role === "admin" || !namespace ? "/app/shared" : "/app/resources/record"}
         >
           <span>m</span>stash
         </Link>
         <nav aria-label="Workspace">
+          {claims.role === "admin" && (
+            <NavLink onClick={() => setMenuOpen(false)} to="/app/shared">
+              <Database aria-hidden="true" size={18} /> App data
+            </NavLink>
+          )}
           {namespace && (
             <>
               <NavLink
@@ -532,26 +540,28 @@ function WorkspaceShell({
                 onClick={() => setMenuOpen(false)}
                 to="/app/resources/record"
               >
-                <BookOpen aria-hidden="true" size={18} /> My data
+                <BookOpen aria-hidden="true" size={18} /> User data
               </NavLink>
               <NavLink
                 onClick={() => setMenuOpen(false)}
                 to="/app/resources/record/new"
               >
-                <PenLine aria-hidden="true" size={18} /> New record
+                <PenLine aria-hidden="true" size={18} /> Add user data
               </NavLink>
             </>
           )}
-          <NavLink onClick={() => setMenuOpen(false)} to="/app/shared">
-            <Database aria-hidden="true" size={18} /> Shared app data
-          </NavLink>
+          {claims.role !== "admin" && (
+            <NavLink onClick={() => setMenuOpen(false)} to="/app/shared">
+              <Database aria-hidden="true" size={18} /> App data
+            </NavLink>
+          )}
           {namespace && (
             <NavLink onClick={() => setMenuOpen(false)} to="/app/namespace">
-              <Settings aria-hidden="true" size={18} /> Namespace
+              <Settings aria-hidden="true" size={18} /> Profile
             </NavLink>
           )}
           <NavLink onClick={() => setMenuOpen(false)} to="/app/guide">
-            <ShieldCheck aria-hidden="true" size={18} /> Platform guide
+            <ShieldCheck aria-hidden="true" size={18} /> Builder guide
           </NavLink>
         </nav>
         <div className="sidebar-foot">
@@ -598,25 +608,25 @@ function WorkspaceShell({
           </button>
           <Link
             className="wordmark"
-            to={namespace ? "/app/resources/record" : "/app/shared"}
+            to={claims.role === "admin" || !namespace ? "/app/shared" : "/app/resources/record"}
           >
             <span>m</span>stash
           </Link>
-          {namespace ? (
-            <Link
-              aria-label="Create record"
-              className="icon-button"
-              title="Create record"
-              to="/app/resources/record/new"
-            >
-              <Plus aria-hidden="true" size={21} />
-            </Link>
-          ) : claims.role === "admin" ? (
+          {claims.role === "admin" ? (
             <Link
               aria-label="Manage shared data"
               className="icon-button"
               title="Manage shared data"
               to="/app/shared"
+            >
+              <Plus aria-hidden="true" size={21} />
+            </Link>
+          ) : namespace ? (
+            <Link
+              aria-label="Create user data record"
+              className="icon-button"
+              title="Create user data record"
+              to="/app/resources/record/new"
             >
               <Plus aria-hidden="true" size={21} />
             </Link>
@@ -642,12 +652,12 @@ function SharedDataHome({ canWrite }: { canWrite: boolean }) {
   return (
     <main className="dashboard-page shared-data-home">
       <div className="page-heading compact">
-        <p className="eyebrow">Deployment-owned app data</p>
-        <h1>Shared app data</h1>
+          <p className="eyebrow">App management</p>
+        <h1>App data</h1>
         <p>
-          Types are reusable buckets. Create as many as the application needs,
-          then set visibility per record: private for operators, signed-in for
-          members, or public for anyone at a deployment URL.
+          Manage app-wide config, feature flags, catalogs, and leaderboards.
+          Each record has its own access level: private to operators, readable
+          by signed-in users, or public to everyone.
         </p>
       </div>
       <section className="workspace-guide-callout">
@@ -2152,6 +2162,51 @@ function GuideContent() {
           </li>
         </ol>
       </section>
+      <section className="guide-section builder-examples">
+        <div className="guide-section-heading">
+          <p className="eyebrow">
+            <Code2 aria-hidden="true" size={15} /> Build something real
+          </p>
+          <h2>Profiles for users. Config for your app.</h2>
+          <p>
+            Your app owns the sign-up screen. After m-stash returns a user token,
+            save a profile under that identity. Manage shared config separately
+            with an admin credential on your server.
+          </p>
+        </div>
+        <div className="config-snippets">
+          <CopyableSnippet
+            title="Create a private user profile"
+            description="Run in your app after sign-up. The owner comes from the user's token."
+            code={[
+              'const response = await fetch(`${API_URL}/v1/me/resources/profile`, {',
+              '  method: "POST",',
+              '  headers: {',
+              '    "X-M-Stash-App": APP_KEY,',
+              '    Authorization: `Bearer ${accessToken}`,',
+              '    "Content-Type": "application/json",',
+              '  },',
+              '  body: JSON.stringify({',
+              '    slug: "main",',
+              '    title: "My profile",',
+              '    visibility: "private",',
+              '    data: { displayName: "Ada" },',
+              '  }),',
+              '});',
+              'if (!response.ok) throw new Error("Profile save failed");',
+            ].join("\n")}
+          />
+          <CopyableSnippet
+            title="Manage app-wide config"
+            description="Run on a trusted server. Never expose APP_SECRET in browser code."
+            code={`curl "$API_URL/v1/shared/resources/config" \\
+  -H "X-M-Stash-App: $APP_KEY" \\
+  -H "Authorization: Bearer $APP_SECRET" \\
+  -H "Content-Type: application/json" \\
+  -d '{"slug":"release","title":"Release config","visibility":"authenticated","data":{"version":"1.0.0"}}'`}
+          />
+        </div>
+      </section>
       <section className="guide-section data-ownership-section">
         <div className="guide-section-heading">
           <p className="eyebrow">
@@ -2182,6 +2237,49 @@ function GuideContent() {
         </div>
       </section>
     </>
+  );
+}
+
+function CopyableSnippet({
+  title,
+  description,
+  code,
+}: {
+  title: string;
+  description: string;
+  code: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <article className="config-snippet">
+      <div className="snippet-heading">
+        <div>
+          <h3>{title}</h3>
+          <p>{description}</p>
+        </div>
+        <button
+          aria-label={copied ? "Copied" : `Copy ${title} example`}
+          className="icon-button"
+          onClick={() => void copy()}
+          title={copied ? "Copied" : "Copy example"}
+          type="button"
+        >
+          {copied ? <Check aria-hidden="true" size={17} /> : <Copy aria-hidden="true" size={17} />}
+        </button>
+      </div>
+      <pre><code>{code}</code></pre>
+    </article>
   );
 }
 
