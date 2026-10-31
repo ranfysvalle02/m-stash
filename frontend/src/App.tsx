@@ -530,6 +530,7 @@ function WorkspaceShell({
           className="wordmark"
           to={claims.role === "admin" || !namespace ? "/app/shared" : "/app/resources/record"}
         >
+          <MustacheMark />
           <span>m</span>stash
         </Link>
         <nav aria-label="Workspace">
@@ -615,6 +616,7 @@ function WorkspaceShell({
             className="wordmark"
             to={claims.role === "admin" || !namespace ? "/app/shared" : "/app/resources/record"}
           >
+            <MustacheMark />
             <span>m</span>stash
           </Link>
           {claims.role === "admin" ? (
@@ -3028,7 +3030,7 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
           <Link to="/faq">FAQ</Link>
           <Link to="/privacy">Privacy Policy</Link>
         </nav>
-        <p>Application data, owned by design.</p>
+        <p>Stash it. ’Stache it. — application data, owned by design.</p>
       </footer>
     </div>
   );
@@ -3070,7 +3072,7 @@ function StatePage({ title, detail }: { title: string; detail: string }) {
       <h1>{title}</h1>
       <p>{detail}</p>
       <Link className="button secondary" to="/discover">
-        Find a namespace
+        Back to m-stash
       </Link>
     </main>
   );
@@ -3079,8 +3081,8 @@ function NotFoundPage() {
   return (
     <PublicLayout>
       <StatePage
-        title="That page has moved on."
-        detail="The address does not point to anything here."
+        title="This page shaved."
+        detail="Nothing’s stashed at this address — let’s get you back."
       />
     </PublicLayout>
   );
