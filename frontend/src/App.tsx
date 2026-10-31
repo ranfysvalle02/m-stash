@@ -1529,6 +1529,99 @@ function NamespaceSettings() {
   );
 }
 
+function LiveApiDemo() {
+  const [state, setState] = useState<"idle" | "loading" | "done" | "error">(
+    "idle",
+  );
+  const [payload, setPayload] = useState<Record<string, unknown> | null>(null);
+  const [elapsed, setElapsed] = useState<number | null>(null);
+  const [errorText, setErrorText] = useState("");
+
+  async function run() {
+    setState("loading");
+    setErrorText("");
+    const started = performance.now();
+    try {
+      const resource = await api.getPublicSharedResource("config", "release");
+      setPayload(resource.data ?? {});
+      setElapsed(Math.max(1, Math.round(performance.now() - started)));
+      setState("done");
+    } catch (requestError) {
+      setErrorText(messageFromError(requestError));
+      setState("error");
+    }
+  }
+
+  return (
+    <section className="live-demo" aria-labelledby="live-demo-title">
+      <div className="live-demo-head">
+        <p className="eyebrow">
+          <Code2 aria-hidden="true" size={15} /> See for yourself
+        </p>
+        <h2 id="live-demo-title">Press run. Watch a real backend answer.</h2>
+        <p>
+          No account, no keys, no setup — this hits the live m-stash API right
+          now. Your app reads its own data the exact same way.
+        </p>
+      </div>
+      <div className="live-demo-terminal">
+        <div className="live-demo-bar">
+          <span className="live-demo-dot" />
+          <span className="live-demo-dot" />
+          <span className="live-demo-dot" />
+          <code>GET /v1/public/shared/resources/config/release</code>
+        </div>
+        <div className="live-demo-body">
+          {state === "idle" && (
+            <p className="live-demo-hint">// the response appears here</p>
+          )}
+          {state === "loading" && (
+            <p className="live-demo-hint">
+              <LoaderCircle aria-hidden="true" className="spin" size={15} />{" "}
+              calling the API…
+            </p>
+          )}
+          {state === "error" && <p className="live-demo-error">{errorText}</p>}
+          {state === "done" && payload && (
+            <>
+              <p className="live-demo-status">
+                <Check aria-hidden="true" size={14} /> 200 OK
+                {elapsed !== null ? ` · ${elapsed} ms` : ""}
+              </p>
+              <pre>
+                <code>{JSON.stringify(payload, null, 2)}</code>
+              </pre>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="live-demo-actions">
+        <button
+          className="button primary"
+          disabled={state === "loading"}
+          onClick={() => void run()}
+          type="button"
+        >
+          {state === "done" ? (
+            <>
+              <ArrowUpRight aria-hidden="true" size={17} /> Run it again
+            </>
+          ) : (
+            <>
+              <Code2 aria-hidden="true" size={17} /> Run the request
+            </>
+          )}
+        </button>
+        {state === "done" && (
+          <p className="live-demo-realize">
+            That’s the whole move — the server owns the data, your app just asks.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function NamespaceLookupPage() {
   return (
     <PublicLayout>
@@ -1561,6 +1654,7 @@ function NamespaceLookupPage() {
             required.
           </p>
         </div>
+        <LiveApiDemo />
         <section className="scope-model" aria-labelledby="scope-model-title">
           <header>
             <p className="eyebrow">The risky backend work, already done</p>
