@@ -22,9 +22,10 @@ type Config struct {
 	AccessTokenTTL      time.Duration
 	RefreshSessionTTL   time.Duration
 	SessionCookieSecure bool
-	AdminEmail          string
-	AdminPassword       string
-	ServiceToken        string
+	PlatformToken       string
+	WebhookDelivery     bool
+	WebhookPollInterval time.Duration
+	WebhookMaxAttempts  int
 }
 
 func loadConfig() (Config, error) {
@@ -44,10 +45,15 @@ func loadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	adminEmail, err := validateBootstrapAdminCredentials(
-		getEnv("ADMIN_EMAIL", ""),
-		getEnv("ADMIN_PASSWORD", ""),
-	)
+	webhookDelivery, err := getEnvBool("WEBHOOK_DELIVERY", false)
+	if err != nil {
+		return Config{}, err
+	}
+	webhookPollInterval, err := getEnvDuration("WEBHOOK_POLL_INTERVAL", 5*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	webhookMaxAttempts, err := getEnvInt("WEBHOOK_MAX_ATTEMPTS", 6)
 	if err != nil {
 		return Config{}, err
 	}
@@ -64,9 +70,10 @@ func loadConfig() (Config, error) {
 		AccessTokenTTL:      accessTokenTTL,
 		RefreshSessionTTL:   refreshSessionTTL,
 		SessionCookieSecure: sessionCookieSecure,
-		AdminEmail:          adminEmail,
-		AdminPassword:       getEnv("ADMIN_PASSWORD", ""),
-		ServiceToken:        getEnv("SERVICE_TOKEN", ""),
+		PlatformToken:       getEnv("PLATFORM_TOKEN", ""),
+		WebhookDelivery:     webhookDelivery,
+		WebhookPollInterval: webhookPollInterval,
+		WebhookMaxAttempts:  webhookMaxAttempts,
 	}
 
 	if len(loadedConfig.JWTSecret) < 32 {
@@ -75,11 +82,14 @@ func loadConfig() (Config, error) {
 	if loadedConfig.MetricsToken != "" && len(loadedConfig.MetricsToken) < 32 {
 		return Config{}, errors.New("METRICS_TOKEN must be at least 32 characters when configured")
 	}
-	if loadedConfig.ServiceToken != "" && len(loadedConfig.ServiceToken) < 32 {
-		return Config{}, errors.New("SERVICE_TOKEN must be at least 32 characters when configured")
+	if len(loadedConfig.PlatformToken) < 32 {
+		return Config{}, errors.New("PLATFORM_TOKEN must be at least 32 characters")
 	}
 	if loadedConfig.JWTIssuer == "" || loadedConfig.JWTAudience == "" {
 		return Config{}, errors.New("JWT_ISSUER and JWT_AUDIENCE must be configured")
+	}
+	if loadedConfig.WebhookMaxAttempts < 1 || loadedConfig.WebhookMaxAttempts > 100 {
+		return Config{}, errors.New("WEBHOOK_MAX_ATTEMPTS must be between 1 and 100")
 	}
 	return loadedConfig, nil
 }
@@ -111,6 +121,18 @@ func getEnvDuration(key string, fallback time.Duration) (time.Duration, error) {
 	value, err := time.ParseDuration(rawValue)
 	if err != nil || value <= 0 {
 		return 0, fmt.Errorf("%s must be a positive Go duration", key)
+	}
+	return value, nil
+}
+
+func getEnvInt(key string, fallback int) (int, error) {
+	rawValue, exists := os.LookupEnv(key)
+	if !exists || rawValue == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(rawValue)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer", key)
 	}
 	return value, nil
 }

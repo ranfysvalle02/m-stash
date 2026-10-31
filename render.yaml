@@ -13,12 +13,8 @@ services:
         value: app_db
       - key: JWT_SECRET
         generateValue: true
-      - key: ADMIN_EMAIL
-        sync: false
-      - key: ADMIN_PASSWORD
-        sync: false
-      - key: SERVICE_TOKEN
-        sync: false
+      - key: PLATFORM_TOKEN
+        generateValue: true
       - key: METRICS_TOKEN
         generateValue: true
       - key: ALLOWED_ORIGINS

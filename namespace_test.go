@@ -51,15 +51,16 @@ func TestValidateResourcePathSegments(t *testing.T) {
 }
 
 func TestNewPersonalNamespaceCreatesOwnerMembership(t *testing.T) {
+	appID := bson.NewObjectID()
 	userID := bson.NewObjectID()
 	now := time.Date(2026, time.September, 28, 12, 0, 0, 0, time.UTC)
-	namespace := newPersonalNamespace(userID, "ada-lovelace", now)
-	membership := newOwnerMembership(namespace.ID, userID, now)
+	namespace := newPersonalNamespace(appID, userID, "ada-lovelace", now)
+	membership := newOwnerMembership(appID, namespace.ID, userID, now)
 
-	if namespace.ID.IsZero() || namespace.OwnerID != userID || namespace.Slug != "ada-lovelace" || namespace.Kind != personalNamespaceKind || !namespace.IsPublic {
+	if namespace.ID.IsZero() || namespace.AppID != appID || namespace.OwnerID != userID || namespace.Slug != "ada-lovelace" || namespace.Kind != personalNamespaceKind || !namespace.IsPublic {
 		t.Fatalf("personal namespace = %#v", namespace)
 	}
-	if membership.NamespaceID != namespace.ID || membership.UserID != userID || membership.Role != namespaceOwnerRole {
+	if membership.NamespaceID != namespace.ID || membership.AppID != appID || membership.UserID != userID || membership.Role != namespaceOwnerRole {
 		t.Fatalf("owner membership = %#v", membership)
 	}
 }
@@ -81,8 +82,9 @@ func TestSharedNamespaceAccessRules(t *testing.T) {
 }
 
 func TestNewSharedNamespaceIsDeploymentManagedAndPrivateByDefault(t *testing.T) {
-	namespace := newSharedNamespace(time.Now().UTC())
-	if namespace.Kind != sharedNamespaceKind || namespace.Slug != sharedNamespaceSlug || !namespace.OwnerID.IsZero() || namespace.IsPublic {
+	appID := bson.NewObjectID()
+	namespace := newSharedNamespace(appID, time.Now().UTC())
+	if namespace.Kind != sharedNamespaceKind || namespace.AppID != appID || namespace.Slug != sharedNamespaceSlug || !namespace.OwnerID.IsZero() || namespace.IsPublic {
 		t.Fatalf("shared namespace = %#v", namespace)
 	}
 }

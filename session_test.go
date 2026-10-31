@@ -12,7 +12,7 @@ func TestCookieAuthenticatedWriteRequiresCSRFToken(t *testing.T) {
 		JWTIssuer:   "test-issuer",
 		JWTAudience: "test-audience",
 	}, nil, nil)
-	accessToken, err := app.generateAccessJWT("507f1f77bcf86cd799439011", "ada@example.com", "user")
+	accessToken, err := app.generateAccessJWT("507f1f77bcf86cd799439011", "ada@example.com", "user", "")
 	if err != nil {
 		t.Fatalf("generate access token: %v", err)
 	}

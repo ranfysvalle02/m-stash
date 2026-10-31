@@ -36,6 +36,7 @@ var reservedNamespaceSlugs = map[string]struct{}{
 
 type Namespace struct {
 	ID          bson.ObjectID `bson:"_id,omitempty" json:"id"`
+	AppID       bson.ObjectID `bson:"appId" json:"-"`
 	Slug        string        `bson:"slug" json:"slug"`
 	Kind        string        `bson:"kind" json:"kind"`
 	OwnerID     bson.ObjectID `bson:"ownerId" json:"-"`
@@ -49,6 +50,7 @@ type Namespace struct {
 
 type NamespaceMember struct {
 	ID          bson.ObjectID `bson:"_id,omitempty" json:"id"`
+	AppID       bson.ObjectID `bson:"appId" json:"-"`
 	NamespaceID bson.ObjectID `bson:"namespaceId" json:"namespaceId"`
 	UserID      bson.ObjectID `bson:"userId" json:"userId"`
 	Role        string        `bson:"role" json:"role"`
@@ -57,6 +59,7 @@ type NamespaceMember struct {
 
 type Resource struct {
 	ID          bson.ObjectID `bson:"_id,omitempty" json:"id"`
+	AppID       bson.ObjectID `bson:"appId" json:"-"`
 	NamespaceID bson.ObjectID `bson:"namespaceId" json:"namespaceId"`
 	CreatorID   bson.ObjectID `bson:"creatorId" json:"creatorId"`
 	Type        string        `bson:"type" json:"type"`
@@ -70,9 +73,10 @@ type Resource struct {
 	UpdatedAt   time.Time     `bson:"updatedAt" json:"updatedAt"`
 }
 
-func newPersonalNamespace(userID bson.ObjectID, username string, now time.Time) Namespace {
+func newPersonalNamespace(appID, userID bson.ObjectID, username string, now time.Time) Namespace {
 	return Namespace{
 		ID:          bson.NewObjectID(),
+		AppID:       appID,
 		Slug:        username,
 		Kind:        personalNamespaceKind,
 		OwnerID:     userID,
@@ -83,9 +87,10 @@ func newPersonalNamespace(userID bson.ObjectID, username string, now time.Time) 
 	}
 }
 
-func newSharedNamespace(now time.Time) Namespace {
+func newSharedNamespace(appID bson.ObjectID, now time.Time) Namespace {
 	return Namespace{
 		ID:          bson.NewObjectID(),
+		AppID:       appID,
 		Slug:        sharedNamespaceSlug,
 		Kind:        sharedNamespaceKind,
 		DisplayName: "Shared space",
@@ -96,8 +101,12 @@ func newSharedNamespace(now time.Time) Namespace {
 }
 
 func (app *application) sharedNamespace(ctx context.Context) (Namespace, error) {
+	filter := bson.M{"kind": sharedNamespaceKind}
+	if appID, ok := appIDFromContext(ctx); ok {
+		filter["appId"] = appID
+	}
 	var namespace Namespace
-	err := app.database.Collection(namespaceCollectionName).FindOne(ctx, bson.M{"kind": sharedNamespaceKind}).Decode(&namespace)
+	err := app.database.Collection(namespaceCollectionName).FindOne(ctx, filter).Decode(&namespace)
 	return namespace, err
 }
 
@@ -112,9 +121,10 @@ func visibleToAuthenticatedUser(claims *Claims) bson.M {
 	return bson.M{"$in": bson.A{authenticatedVisibility, publicVisibility}}
 }
 
-func newOwnerMembership(namespaceID, userID bson.ObjectID, now time.Time) NamespaceMember {
+func newOwnerMembership(appID, namespaceID, userID bson.ObjectID, now time.Time) NamespaceMember {
 	return NamespaceMember{
 		ID:          bson.NewObjectID(),
+		AppID:       appID,
 		NamespaceID: namespaceID,
 		UserID:      userID,
 		Role:        namespaceOwnerRole,
@@ -136,7 +146,7 @@ func (app *application) createAccountWithPersonalNamespace(ctx context.Context, 
 		if _, err := app.database.Collection(namespaceCollectionName).InsertOne(transactionContext, namespace); err != nil {
 			return nil, err
 		}
-		membership := newOwnerMembership(namespace.ID, user.ID, namespace.CreatedAt)
+		membership := newOwnerMembership(namespace.AppID, namespace.ID, user.ID, namespace.CreatedAt)
 		if _, err := app.database.Collection(namespaceMembershipCollection).InsertOne(transactionContext, membership); err != nil {
 			return nil, err
 		}
@@ -147,9 +157,9 @@ func (app *application) createAccountWithPersonalNamespace(ctx context.Context, 
 
 func ensureNamespaceIndexes(ctx context.Context, database *mongo.Database) error {
 	if _, err := database.Collection(namespaceCollectionName).Indexes().CreateMany(ctx, []mongo.IndexModel{
-		{Keys: bson.D{{Key: "slug", Value: 1}}, Options: options.Index().SetUnique(true)},
-		{Keys: bson.D{{Key: "ownerId", Value: 1}}, Options: options.Index().SetUnique(true).SetPartialFilterExpression(bson.M{"kind": personalNamespaceKind})},
-		{Keys: bson.D{{Key: "kind", Value: 1}}, Options: options.Index().SetUnique(true).SetPartialFilterExpression(bson.M{"kind": sharedNamespaceKind})},
+		{Keys: bson.D{{Key: "appId", Value: 1}, {Key: "slug", Value: 1}}, Options: options.Index().SetUnique(true)},
+		{Keys: bson.D{{Key: "appId", Value: 1}, {Key: "ownerId", Value: 1}}, Options: options.Index().SetUnique(true).SetPartialFilterExpression(bson.M{"kind": personalNamespaceKind})},
+		{Keys: bson.D{{Key: "appId", Value: 1}, {Key: "kind", Value: 1}}, Options: options.Index().SetUnique(true).SetPartialFilterExpression(bson.M{"kind": sharedNamespaceKind})},
 	}); err != nil {
 		return err
 	}
@@ -162,6 +172,7 @@ func ensureNamespaceIndexes(ctx context.Context, database *mongo.Database) error
 	if _, err := database.Collection(resourceCollectionName).Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{Keys: bson.D{{Key: "namespaceId", Value: 1}, {Key: "type", Value: 1}, {Key: "slug", Value: 1}}, Options: options.Index().SetUnique(true)},
 		{Keys: bson.D{{Key: "namespaceId", Value: 1}, {Key: "type", Value: 1}, {Key: "visibility", Value: 1}, {Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}},
+		{Keys: bson.D{{Key: "title", Value: "text"}, {Key: "summary", Value: "text"}, {Key: "content", Value: "text"}}, Options: options.Index().SetName("resources_text")},
 	}); err != nil {
 		return err
 	}

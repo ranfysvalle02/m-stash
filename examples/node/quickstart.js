@@ -3,6 +3,7 @@
 import { WebSocket } from "ws";
 
 const API_URL = process.env.API_URL || "http://localhost:4000";
+const APP_KEY = process.env.APP_KEY || "";
 
 function randomSuffix() {
   return Math.random().toString(36).slice(2, 8);
@@ -10,6 +11,7 @@ function randomSuffix() {
 
 async function api(path, { method = "GET", token, body } = {}) {
   const headers = { "Content-Type": "application/json" };
+  if (APP_KEY) headers["X-M-Stash-App"] = APP_KEY;
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(`${API_URL}${path}`, {

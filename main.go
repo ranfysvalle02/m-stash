@@ -37,11 +37,14 @@ func main() {
 		log.Fatalf("MongoDB configuration error: %v", err)
 	}
 	_, err = database.Collection("_users").Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "email", Value: 1}},
+		Keys:    bson.D{{Key: "appId", Value: 1}, {Key: "email", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	})
 	if err != nil {
 		log.Fatalf("Failed to create user email index: %v", err)
+	}
+	if err := ensureAppIndexes(ctx, database); err != nil {
+		log.Fatalf("Failed to create application indexes: %v", err)
 	}
 	if err := ensureNamespaceIndexes(ctx, database); err != nil {
 		log.Fatalf("Failed to create namespace indexes: %v", err)
@@ -55,19 +58,22 @@ func main() {
 	if err := ensureSessionIndexes(ctx, database); err != nil {
 		log.Fatalf("Failed to create browser-session indexes: %v", err)
 	}
+	if err := ensureWebhookIndexes(ctx, database); err != nil {
+		log.Fatalf("Failed to create webhook indexes: %v", err)
+	}
 	app := newApplication(appConfig, database, client)
-	if err := ensureSharedNamespace(ctx, app); err != nil {
-		log.Fatalf("Failed to initialize shared namespace: %v", err)
-	}
-	if err := bootstrapAdmin(ctx, app); err != nil {
-		log.Fatalf("Failed to bootstrap administrator: %v", err)
-	}
 	log.Printf("✅ Connected to Mongo database: '%s'", appConfig.Database)
 	if appConfig.MetricsToken == "" {
 		log.Print("Metrics endpoint disabled because METRICS_TOKEN is not configured")
 	}
 
 	authRateLimiter := newAuthRateLimiter(database, 10, 5*time.Minute)
+	var deliveryWorker *webhookWorker
+	if appConfig.WebhookDelivery {
+		deliveryWorker = newWebhookWorker(app)
+		deliveryWorker.Start()
+		log.Printf("📡 Webhook delivery worker started (poll %s, max attempts %d)", appConfig.WebhookPollInterval, appConfig.WebhookMaxAttempts)
+	}
 	server := &http.Server{
 		Addr:              ":" + appConfig.Port,
 		Handler:           app.Handler(authRateLimiter),
@@ -84,6 +90,9 @@ func main() {
 		<-shutdown
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
+		if deliveryWorker != nil {
+			deliveryWorker.Stop(ctx)
+		}
 		if err := server.Shutdown(ctx); err != nil {
 			log.Printf("Graceful shutdown failed: %v", err)
 		}

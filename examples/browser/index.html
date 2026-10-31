@@ -140,6 +140,8 @@
     </main>
     <script>
       const state = { token: "", user: null, namespace: null, tab: "personal" };
+      // Identify which app this client targets. Pass ?app=pk_... in the URL, or replace the fallback.
+      const appKey = new URLSearchParams(location.search).get("app") || "pk_replace_with_your_publishable_key";
       const usernamePattern = /^[a-z0-9](?:[a-z0-9]|[-_](?=[a-z0-9])){2,31}$/;
       const $ = (id) => document.getElementById(id);
       const apiBase = () => location.origin;
@@ -190,6 +192,7 @@
       }
       async function request(path, { method = "GET", body, authenticated = true } = {}) {
         const headers = new Headers({ Accept: "application/json" });
+        if (appKey) headers.set("X-M-Stash-App", appKey);
         if (body !== undefined) headers.set("Content-Type", "application/json");
         if (authenticated && state.token) headers.set("Authorization", `Bearer ${state.token}`);
         const response = await fetch(`${apiBase()}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });

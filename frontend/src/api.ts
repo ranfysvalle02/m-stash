@@ -95,6 +95,14 @@ function csrfToken() {
   return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : ''
 }
 
+// Publishable application key identifying which app this UI talks to (set at deploy time).
+function appKey() {
+  const fromGlobal = (window as unknown as { __M_STASH_APP__?: string }).__M_STASH_APP__
+  if (fromGlobal) return fromGlobal
+  const meta = document.querySelector('meta[name="m-stash-app"]')
+  return meta?.getAttribute('content') ?? ''
+}
+
 async function parseResponse<T>(response: Response): Promise<T> {
   if (response.status === 204) return undefined as T
   const payload = (await response.json().catch(() => ({}))) as { error?: string }
@@ -106,10 +114,13 @@ let refreshPromise: Promise<void> | undefined
 
 async function refreshSession() {
   if (!refreshPromise) {
+    const headers: Record<string, string> = { 'X-CSRF-Token': csrfToken() }
+    const key = appKey()
+    if (key) headers['X-M-Stash-App'] = key
     refreshPromise = fetch('/v1/auth/refresh', {
       method: 'POST',
       credentials: 'include',
-      headers: { 'X-CSRF-Token': csrfToken() },
+      headers,
     }).then(async (response) => { await parseResponse(response) }).finally(() => { refreshPromise = undefined })
   }
   return refreshPromise
@@ -120,6 +131,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const headers = new Headers(providedHeaders)
   const method = (fetchOptions.method ?? 'GET').toUpperCase()
   if (body !== undefined) headers.set('Content-Type', 'application/json')
+  const key = appKey()
+  if (key) headers.set('X-M-Stash-App', key)
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
     const token = csrfToken()
     if (token) headers.set('X-CSRF-Token', token)

@@ -37,6 +37,7 @@ type outboxDelivery struct {
 // outboxEvent is an internal, immutable contract for independently deployed workers.
 type outboxEvent struct {
 	ID            bson.ObjectID  `bson:"_id" json:"id"`
+	AppID         string         `bson:"appId,omitempty" json:"appId,omitempty"`
 	Type          string         `bson:"type" json:"type"`
 	SchemaVersion string         `bson:"schemaVersion" json:"schemaVersion"`
 	OccurredAt    time.Time      `bson:"occurredAt" json:"occurredAt"`
@@ -76,7 +77,7 @@ func verifyTransactionSupport(ctx context.Context, client *mongo.Client) error {
 func ensureOutboxIndexes(ctx context.Context, database *mongo.Database) error {
 	_, err := database.Collection(outboxCollectionName).Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{Keys: bson.D{{Key: "delivery.state", Value: 1}, {Key: "delivery.availableAt", Value: 1}, {Key: "_id", Value: 1}}},
-		{Keys: bson.D{{Key: "occurredAt", Value: -1}, {Key: "_id", Value: -1}}},
+		{Keys: bson.D{{Key: "appId", Value: 1}, {Key: "occurredAt", Value: -1}, {Key: "_id", Value: -1}}},
 		{Keys: bson.D{{Key: "requestId", Value: 1}}},
 	})
 	if err != nil {
@@ -105,7 +106,7 @@ func (app *application) executeMutationWithOutbox(ctx context.Context, claims *C
 			return outcome.Result, nil
 		}
 
-		event := newOutboxEvent(eventID, occurredAt, requestIDFromContext(ctx), claims, collectionName, outcome.Event)
+		event := newOutboxEvent(eventID, occurredAt, requestIDFromContext(ctx), appIDHexFromContext(ctx), claims, collectionName, outcome.Event)
 		if _, err := app.database.Collection(outboxCollectionName).InsertOne(transactionContext, event); err != nil {
 			return nil, fmt.Errorf("write outbox event: %w", err)
 		}
@@ -121,9 +122,10 @@ func (app *application) executeMutationWithOutbox(ctx context.Context, claims *C
 	return result, nil
 }
 
-func newOutboxEvent(id bson.ObjectID, occurredAt time.Time, requestID string, claims *Claims, collectionName string, event *mutationEvent) outboxEvent {
+func newOutboxEvent(id bson.ObjectID, occurredAt time.Time, requestID string, appID string, claims *Claims, collectionName string, event *mutationEvent) outboxEvent {
 	return outboxEvent{
 		ID:            id,
+		AppID:         appID,
 		Type:          event.Type,
 		SchemaVersion: outboxSchemaVersion,
 		OccurredAt:    occurredAt,

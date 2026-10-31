@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -117,6 +119,82 @@ func validateResourceVisibilityForNamespace(namespace Namespace, visibility stri
 	return nil
 }
 
+type resourceIncrementInput struct {
+	Op    string      `json:"op"`
+	Field string      `json:"field"`
+	By    json.Number `json:"by"`
+}
+
+// normalizeAndValidate enforces the $inc-only contract and returns the data.* field
+// path and the numeric delta (int64 when integral, else float64 to preserve counter types).
+func (input *resourceIncrementInput) normalizeAndValidate() (string, any, error) {
+	if strings.ToLower(strings.TrimSpace(input.Op)) != "increment" {
+		return "", nil, errors.New(`op must be "increment"`)
+	}
+	field := strings.TrimSpace(input.Field)
+	if err := validateIncrementFieldPath(field); err != nil {
+		return "", nil, err
+	}
+	delta, err := parseIncrementDelta(input.By)
+	if err != nil {
+		return "", nil, err
+	}
+	return field, delta, nil
+}
+
+func validateIncrementFieldPath(field string) error {
+	segments := strings.Split(field, ".")
+	if len(segments) < 2 || len(segments) > 16 || segments[0] != "data" {
+		return errors.New("field must be a data.* path with at least one subfield")
+	}
+	for _, segment := range segments[1:] {
+		if segment == "" {
+			return errors.New("field must not contain empty path segments")
+		}
+		for _, character := range segment {
+			if !unicode.IsLetter(character) && !unicode.IsDigit(character) && character != '_' {
+				return errors.New("field path segments must contain only letters, numbers, or underscores")
+			}
+		}
+	}
+	return nil
+}
+
+func parseIncrementDelta(value json.Number) (any, error) {
+	raw := strings.TrimSpace(value.String())
+	if raw == "" {
+		return nil, errors.New("by is required and must be a number")
+	}
+	if integer, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		return integer, nil
+	}
+	number, err := value.Float64()
+	if err != nil {
+		return nil, errors.New("by must be a valid number")
+	}
+	if math.IsNaN(number) || math.IsInf(number, 0) {
+		return nil, errors.New("by must be a finite number")
+	}
+	return number, nil
+}
+
+// isNonNumericIncrementError reports a Mongo TypeMismatch (code 14) from applying $inc to a non-numeric field.
+func isNonNumericIncrementError(err error) bool {
+	var commandError mongo.CommandError
+	if errors.As(err, &commandError) {
+		return commandError.Code == 14
+	}
+	var writeException mongo.WriteException
+	if errors.As(err, &writeException) {
+		for _, writeError := range writeException.WriteErrors {
+			if writeError.Code == 14 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (input *namespaceIdentityInput) normalizeAndValidate() error {
 	input.DisplayName = strings.TrimSpace(input.DisplayName)
 	input.Bio = strings.TrimSpace(input.Bio)
@@ -151,9 +229,13 @@ func (app *application) personalNamespaceForClaims(ctx context.Context, claims *
 		return Namespace{}, err
 	}
 	var namespace Namespace
+	namespaceFilter := bson.M{"_id": membership.NamespaceID, "ownerId": userID, "kind": personalNamespaceKind}
+	if appID, ok := appIDFromContext(ctx); ok {
+		namespaceFilter["appId"] = appID
+	}
 	if err := app.database.Collection(namespaceCollectionName).FindOne(
 		ctx,
-		bson.M{"_id": membership.NamespaceID, "ownerId": userID, "kind": personalNamespaceKind},
+		namespaceFilter,
 	).Decode(&namespace); err != nil {
 		return Namespace{}, err
 	}
@@ -330,21 +412,49 @@ func (app *application) handleResourceCollection(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		filter := bson.M{"namespaceId": namespace.ID, "type": typeName}
+		baseFilter := bson.M{"namespaceId": namespace.ID, "type": typeName}
 		if len(access.VisibilityFilter) > 0 {
-			filter["visibility"] = access.VisibilityFilter
+			baseFilter["visibility"] = access.VisibilityFilter
 		}
+		userFilter, err := parseResourceFilterParam(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		query, err := parseResourceSearchQuery(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		scoped := mergeResourceFilter(baseFilter, userFilter)
+		if query != "" {
+			scoped = mergeResourceFilter(scoped, bson.M{"$text": bson.M{"$search": query}})
+		}
+		if resourceCountRequested(r) {
+			total, err := app.database.Collection(resourceCollectionName).CountDocuments(r.Context(), scoped)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "Could not count resources")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"count": total}})
+			return
+		}
+		if query != "" {
+			app.writeResourceSearch(w, r, scoped, limit)
+			return
+		}
+		listFilter := scoped
 		if cursor != nil {
 			cursorFilter, err := resourceCursorFilter(cursor)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, "cursor is invalid")
 				return
 			}
-			filter["$or"] = cursorFilter["$or"]
+			listFilter = mergeResourceFilter(scoped, bson.M{"$or": cursorFilter["$or"]})
 		}
 		mongoCursor, err := app.database.Collection(resourceCollectionName).Find(
 			r.Context(),
-			filter,
+			listFilter,
 			options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}).SetLimit(int64(limit+1)).SetProjection(bson.M{
 				"_id": 1, "type": 1, "slug": 1, "title": 1, "summary": 1, "visibility": 1, "createdAt": 1, "updatedAt": 1,
 			}),
@@ -386,6 +496,7 @@ func (app *application) handleResourceCollection(w http.ResponseWriter, r *http.
 		now := time.Now().UTC()
 		resource := Resource{
 			ID:          bson.NewObjectID(),
+			AppID:       namespace.AppID,
 			NamespaceID: namespace.ID,
 			CreatorID:   creatorID,
 			Type:        typeName,
@@ -522,6 +633,50 @@ func (app *application) handleResourceDocument(w http.ResponseWriter, r *http.Re
 		}
 		w.WriteHeader(http.StatusNoContent)
 
+	case http.MethodPatch:
+		if !access.CanWrite {
+			writeError(w, http.StatusForbidden, "Only administrators can write shared resources")
+			return
+		}
+		var input resourceIncrementInput
+		if !decodeJSONBody(w, r, &input, false) {
+			return
+		}
+		field, delta, err := input.normalizeAndValidate()
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		update := bson.M{"$inc": bson.M{field: delta}, "$set": bson.M{"updatedAt": time.Now().UTC()}}
+		result, err := app.executeMutationWithOutbox(r.Context(), claims, resourceCollectionName, "increment", func(transactionContext context.Context) (mutationOutcome, error) {
+			var resource Resource
+			if err := app.database.Collection(resourceCollectionName).FindOneAndUpdate(
+				transactionContext, filter, update,
+				options.FindOneAndUpdate().SetReturnDocument(options.After),
+			).Decode(&resource); err != nil {
+				return mutationOutcome{}, err
+			}
+			return mutationOutcome{Result: resource, Event: &mutationEvent{
+				Type:        mutationEventType(resourceCollectionName, "increment"),
+				ResourceID:  resource.ID.Hex(),
+				NamespaceID: namespace.ID.Hex(),
+				Data:        bson.M{"field": field, "by": delta},
+			}}, nil
+		})
+		if err != nil {
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				writeError(w, http.StatusNotFound, "Resource not found")
+				return
+			}
+			if isNonNumericIncrementError(err) {
+				writeError(w, http.StatusConflict, "Field is not numeric and cannot be incremented")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "Could not update resource")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": result})
+
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
@@ -565,9 +720,13 @@ func (app *application) handlePublicNamespace(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var namespace Namespace
+	publicFilter := bson.M{"slug": username, "isPublic": true}
+	if appID, ok := appIDFromContext(r.Context()); ok {
+		publicFilter["appId"] = appID
+	}
 	if err := app.database.Collection(namespaceCollectionName).FindOne(
 		r.Context(),
-		bson.M{"slug": username, "isPublic": true},
+		publicFilter,
 	).Decode(&namespace); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			writeError(w, http.StatusNotFound, "Public namespace not found")

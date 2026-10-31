@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestParseResourcePageCursorRoundTrip(t *testing.T) {
@@ -80,6 +81,7 @@ func TestNewOutboxEvent(t *testing.T) {
 		eventID,
 		occurredAt,
 		"request-123",
+		"507f1f77bcf86cd799439099",
 		&Claims{UID: "507f1f77bcf86cd799439011", Role: "user"},
 		resourceCollectionName,
 		&mutationEvent{
@@ -90,7 +92,7 @@ func TestNewOutboxEvent(t *testing.T) {
 		},
 	)
 
-	if event.ID != eventID || event.RequestID != "request-123" || !event.OccurredAt.Equal(occurredAt) {
+	if event.ID != eventID || event.RequestID != "request-123" || event.AppID != "507f1f77bcf86cd799439099" || !event.OccurredAt.Equal(occurredAt) {
 		t.Fatalf("event identity = %#v", event)
 	}
 	if event.SchemaVersion != outboxSchemaVersion || event.Delivery.State != "pending" || event.Delivery.Attempts != 0 {
@@ -115,7 +117,7 @@ func TestRateLimitIdentifierIsOpaqueAndWindowScoped(t *testing.T) {
 
 func TestAuthenticateRequiresConfiguredIssuerAndAudience(t *testing.T) {
 	app := newApplication(Config{JWTSecret: "test-secret", JWTIssuer: "test-issuer", JWTAudience: "test-audience"}, nil, nil)
-	token, err := app.generateJWT("507f1f77bcf86cd799439011", "ada@example.com", "user")
+	token, err := app.generateJWT("507f1f77bcf86cd799439011", "ada@example.com", "user", "")
 	if err != nil {
 		t.Fatalf("generateJWT() error = %v", err)
 	}
@@ -159,18 +161,25 @@ func TestAuthenticateRequiresConfiguredIssuerAndAudience(t *testing.T) {
 }
 
 func TestServiceCredentialIsLimitedToSharedResourceMutations(t *testing.T) {
-	app := newApplication(Config{ServiceToken: "test-service-token-with-at-least-32-characters"}, nil, nil)
+	app := newApplication(Config{}, nil, nil)
+	secretKey := secretKeyPrefix + "test-secret-key-value"
+	secretHash, err := bcrypt.GenerateFromPassword([]byte(secretKey), bcryptCost)
+	if err != nil {
+		t.Fatalf("hash secret key: %v", err)
+	}
+	record := &AppRecord{ID: bson.NewObjectID(), SecretKeyHash: string(secretHash)}
 	handled := false
 	handler := app.authenticateSharedResource(func(w http.ResponseWriter, _ *http.Request, claims *Claims) {
 		handled = true
-		if claims.Role != sharedServiceRole || claims.UID != bson.NilObjectID.Hex() {
+		if claims.Role != sharedServiceRole || claims.UID != bson.NilObjectID.Hex() || claims.AppID != record.ID.Hex() {
 			t.Fatalf("service claims = %#v", claims)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 
 	mutation := httptest.NewRequest(http.MethodPost, "/v1/shared/resources/score", nil)
-	mutation.Header.Set("Authorization", "Bearer "+app.config.ServiceToken)
+	mutation = mutation.WithContext(withApp(mutation.Context(), record))
+	mutation.Header.Set("Authorization", "Bearer "+secretKey)
 	mutationResponse := httptest.NewRecorder()
 	handler(mutationResponse, mutation)
 	if !handled || mutationResponse.Code != http.StatusNoContent {
@@ -179,7 +188,8 @@ func TestServiceCredentialIsLimitedToSharedResourceMutations(t *testing.T) {
 
 	handled = false
 	read := httptest.NewRequest(http.MethodGet, "/v1/shared/resources/score", nil)
-	read.Header.Set("Authorization", "Bearer "+app.config.ServiceToken)
+	read = read.WithContext(withApp(read.Context(), record))
+	read.Header.Set("Authorization", "Bearer "+secretKey)
 	readResponse := httptest.NewRecorder()
 	handler(readResponse, read)
 	if handled || readResponse.Code != http.StatusForbidden {

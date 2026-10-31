@@ -60,6 +60,44 @@ func TestResourceInputAllowsAuthenticatedVisibility(t *testing.T) {
 	}
 }
 
+func TestResourceIncrementInputNormalizeAndValidate(t *testing.T) {
+	input := resourceIncrementInput{Op: " Increment ", Field: " data.score ", By: "10"}
+	field, delta, err := input.normalizeAndValidate()
+	if err != nil {
+		t.Fatalf("valid increment input rejected: %v", err)
+	}
+	if field != "data.score" {
+		t.Fatalf("normalized field = %q", field)
+	}
+	if value, ok := delta.(int64); !ok || value != 10 {
+		t.Fatalf("integral delta = %#v", delta)
+	}
+
+	negative := resourceIncrementInput{Op: "increment", Field: "data.stats.wins", By: "-3"}
+	if _, delta, err := negative.normalizeAndValidate(); err != nil || delta.(int64) != -3 {
+		t.Fatalf("negative delta = %#v, %v", delta, err)
+	}
+
+	fractional := resourceIncrementInput{Op: "increment", Field: "data.rating", By: "1.5"}
+	if _, delta, err := fractional.normalizeAndValidate(); err != nil || delta.(float64) != 1.5 {
+		t.Fatalf("fractional delta = %#v, %v", delta, err)
+	}
+
+	for name, input := range map[string]resourceIncrementInput{
+		"bad op":          {Op: "set", Field: "data.score", By: "1"},
+		"non-data field":  {Op: "increment", Field: "score", By: "1"},
+		"bare data":       {Op: "increment", Field: "data", By: "1"},
+		"operator inject": {Op: "increment", Field: "data.$where", By: "1"},
+		"dotted inject":   {Op: "increment", Field: "data.a.", By: "1"},
+		"missing by":      {Op: "increment", Field: "data.score"},
+		"non-numeric by":  {Op: "increment", Field: "data.score", By: "abc"},
+	} {
+		if _, _, err := input.normalizeAndValidate(); err == nil {
+			t.Errorf("invalid increment input %q was accepted", name)
+		}
+	}
+}
+
 func TestAuthenticatedVisibilityIsRestrictedToSharedNamespaces(t *testing.T) {
 	if err := validateResourceVisibilityForNamespace(Namespace{Kind: personalNamespaceKind}, authenticatedVisibility); err == nil {
 		t.Fatal("personal namespace accepted authenticated visibility")

@@ -8,19 +8,45 @@ Deploy m-stash once to give an application two server-enforced data scopes: pers
 2. In Render, choose **New**, then **Blueprint**, and select the repository. Render reads [render.yaml](render.yaml) and builds the Docker image.
 3. Set `MONGO_URI` to an Atlas or self-hosted **replica set or sharded** URI. Set `MONGO_DB` when `app_db` is not appropriate.
 4. Set a 32-character-or-longer `JWT_SECRET` when your platform does not generate it.
-5. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` together to create the deployment administrator. This account controls shared data; it does not need or receive a username.
-6. Optionally set `SERVICE_TOKEN` for a trusted API, game server, worker, or webhook processor that must write shared data.
+5. Set a 32-character-or-longer `PLATFORM_TOKEN`. It authorizes provisioning new applications through `POST /v1/apps`.
 
-Render sets secure cookies and trusted-proxy behavior for its HTTPS edge. Configure exact `ALLOWED_ORIGINS` before using browser authentication from a different origin.
+Render sets secure cookies and trusted-proxy behavior for its HTTPS edge. Configure exact `ALLOWED_ORIGINS` (globally, or per app) before using browser authentication from a different origin.
 
-## 2. Register application users
+## 2. Provision an application
 
-Your frontend calls the open registration endpoint. The username is immutable because it is both a personal route and a stable ownership key.
+One deployment hosts many apps. Create one with the platform token; the response returns the app's publishable key and a one-time secret key.
 
 ```sh
 export API_URL='https://your-service.onrender.com'
+export PLATFORM_TOKEN='the-platform-token-you-configured'
 
+curl --request POST "$API_URL/v1/apps" \
+  --header "Authorization: Bearer $PLATFORM_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "slug":"arcade",
+    "displayName":"Arcade",
+    "adminEmail":"admin@example.com",
+    "adminPassword":"use-a-long-unique-password"
+  }'
+```
+
+Capture the keys from the response:
+
+```sh
+export APP_KEY='pk_...'          # publishable key, safe in frontend code
+export APP_SECRET='sk_...'       # secret key, backend only, shown once
+```
+
+Every request below identifies its app with the `X-M-Stash-App: $APP_KEY` header.
+
+## 3. Register application users
+
+Your frontend calls the open registration endpoint. The username is immutable because it is both a personal route and a stable ownership key, and it is unique within the app.
+
+```sh
 curl --request POST "$API_URL/v1/auth/signup" \
+  --header "X-M-Stash-App: $APP_KEY" \
   --header 'Content-Type: application/json' \
   --data '{"email":"player@example.com","password":"use-a-long-unique-password","username":"player-one"}'
 ```
@@ -31,14 +57,15 @@ The response contains a `token`, `user`, and `namespace`. Use the token in nativ
 export TOKEN='paste-the-token-from-the-signup-response'
 ```
 
-Browser signup and login also issue HttpOnly session cookies. Never expose MongoDB credentials, `JWT_SECRET`, an admin password, or `SERVICE_TOKEN` to browser code.
+Browser signup and login also issue HttpOnly session cookies. Never expose MongoDB credentials, `JWT_SECRET`, `PLATFORM_TOKEN`, an admin password, or an app secret key to browser code.
 
-## 3. Store personal data
+## 4. Store personal data
 
 Personal routes are ideal for profiles, preferences, loadouts, save files, submissions, or public work. The server assigns namespace and creator identity from the token.
 
 ```sh
 curl --request POST "$API_URL/v1/me/resources/profile" \
+  --header "X-M-Stash-App: $APP_KEY" \
   --header "Authorization: Bearer $TOKEN" \
   --header 'Content-Type: application/json' \
   --data '{
@@ -53,15 +80,14 @@ curl --request POST "$API_URL/v1/me/resources/profile" \
 
 The public route is now `https://your-service.onrender.com/player-one/profile/main`.
 
-## 4. Store shared application data
+## 5. Store shared application data
 
 The deployment's shared app scope holds data the application controls: app name, version, configuration, feature flags, catalogs, and leaderboards. Types are buckets; visibility belongs to each record. Signed-in users can read `authenticated` records, but only admins or a trusted backend can write them.
 
 ```sh
-export SERVICE_TOKEN='store-this-only-in-your-backend'
-
 curl --request POST "$API_URL/v1/shared/resources/leaderboard" \
-  --header "Authorization: Bearer $SERVICE_TOKEN" \
+  --header "X-M-Stash-App: $APP_KEY" \
+  --header "Authorization: Bearer $APP_SECRET" \
   --header 'Content-Type: application/json' \
   --data '{
     "slug":"weekly",
@@ -73,9 +99,9 @@ curl --request POST "$API_URL/v1/shared/resources/leaderboard" \
   }'
 ```
 
-The service token can mutate only shared resources. It cannot read data or impersonate a user. Use an administrator's normal email/password session for the embedded shared-data workspace.
+The secret key can mutate only shared resources. It cannot read data or impersonate a user. Use an administrator's normal email/password session for the embedded shared-data workspace.
 
-## 5. Verify the service
+## 6. Verify the service
 
 ```sh
 curl "$API_URL/.well-known/m-stash.json"

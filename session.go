@@ -127,7 +127,7 @@ func (app *application) issueBrowserSession(ctx context.Context, w http.Response
 		return fmt.Errorf("store refresh session: %w", err)
 	}
 
-	accessToken, err := app.generateAccessJWT(user.ID.Hex(), user.Email, user.Role)
+	accessToken, err := app.generateAccessJWT(user.ID.Hex(), user.Email, user.Role, user.AppID.Hex())
 	if err != nil {
 		return fmt.Errorf("generate access token: %w", err)
 	}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net/http"
@@ -24,11 +23,13 @@ type Claims struct {
 	UID   string `json:"uid"`
 	Email string `json:"email"`
 	Role  string `json:"role"`
+	AppID string `json:"appId"`
 	jwt.RegisteredClaims
 }
 
 type User struct {
 	ID           bson.ObjectID `bson:"_id,omitempty" json:"id"`
+	AppID        bson.ObjectID `bson:"appId" json:"-"`
 	Email        string        `bson:"email" json:"email"`
 	PasswordHash string        `bson:"password" json:"-"`
 	Role         string        `bson:"role" json:"role"`
@@ -91,6 +92,10 @@ func (app *application) authenticate(next func(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusForbidden, "Invalid or expired token")
 			return
 		}
+		if appID, ok := appIDFromContext(r.Context()); ok && claims.AppID != appID.Hex() {
+			writeError(w, http.StatusForbidden, "Token does not belong to this application")
+			return
+		}
 		if source == cookieAuthentication && requiresCSRFProtection(r.Method) && !validCSRFToken(r) {
 			writeError(w, http.StatusForbidden, "Missing or invalid CSRF token")
 			return
@@ -101,27 +106,20 @@ func (app *application) authenticate(next func(w http.ResponseWriter, r *http.Re
 
 func (app *application) authenticateSharedResource(next func(w http.ResponseWriter, r *http.Request, claims *Claims)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if app.matchesServiceToken(r.Header.Get("Authorization")) {
+		if app.matchesAppSecret(r.Context(), r.Header.Get("Authorization")) {
 			if r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodDelete {
 				writeError(w, http.StatusForbidden, "Service credentials are limited to shared resource mutations")
 				return
 			}
-			next(w, r.WithContext(withAuthenticationSource(r.Context(), bearerAuthentication)), &Claims{UID: bson.NilObjectID.Hex(), Role: sharedServiceRole})
+			appID := ""
+			if record, ok := appFromContext(r.Context()); ok {
+				appID = record.ID.Hex()
+			}
+			next(w, r.WithContext(withAuthenticationSource(r.Context(), bearerAuthentication)), &Claims{UID: bson.NilObjectID.Hex(), Role: sharedServiceRole, AppID: appID})
 			return
 		}
 		app.authenticate(next)(w, r)
 	}
-}
-
-func (app *application) matchesServiceToken(authorization string) bool {
-	if app.config.ServiceToken == "" || !strings.HasPrefix(authorization, "Bearer ") {
-		return false
-	}
-	token := strings.TrimPrefix(authorization, "Bearer ")
-	if len(token) != len(app.config.ServiceToken) {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(token), []byte(app.config.ServiceToken)) == 1
 }
 
 func (app *application) handleSignUp(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +149,12 @@ func (app *application) handleSignUp(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
+	appID, ok := appIDFromContext(ctx)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "Missing application context")
+		return
+	}
+
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(request.Password), bcryptCost)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Error hashing password")
@@ -159,12 +163,13 @@ func (app *application) handleSignUp(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	user := User{
 		ID:           bson.NewObjectID(),
+		AppID:        appID,
 		Email:        request.Email,
 		PasswordHash: string(passwordHash),
 		Role:         "user",
 		CreatedAt:    now,
 	}
-	namespace := newPersonalNamespace(user.ID, request.Username, now)
+	namespace := newPersonalNamespace(appID, user.ID, request.Username, now)
 	if err := app.createAccountWithPersonalNamespace(ctx, user, namespace); err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			writeError(w, http.StatusConflict, "Email or username is already claimed")
@@ -174,7 +179,7 @@ func (app *application) handleSignUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := app.generateJWT(user.ID.Hex(), user.Email, user.Role)
+	token, err := app.generateJWT(user.ID.Hex(), user.Email, user.Role, user.AppID.Hex())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to generate token")
 		return
@@ -202,8 +207,13 @@ func (app *application) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
+	appID, ok := appIDFromContext(ctx)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "Missing application context")
+		return
+	}
 	var user User
-	if err := app.database.Collection("_users").FindOne(ctx, bson.M{"email": request.Email}).Decode(&user); err != nil {
+	if err := app.database.Collection("_users").FindOne(ctx, bson.M{"appId": appID, "email": request.Email}).Decode(&user); err != nil {
 		writeError(w, http.StatusUnauthorized, "Invalid email or password")
 		return
 	}
@@ -212,7 +222,7 @@ func (app *application) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := app.generateJWT(user.ID.Hex(), user.Email, user.Role)
+	token, err := app.generateJWT(user.ID.Hex(), user.Email, user.Role, user.AppID.Hex())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to generate token")
 		return
@@ -244,19 +254,20 @@ func handleTokenVerification(w http.ResponseWriter, r *http.Request, claims *Cla
 	})
 }
 
-func (app *application) generateJWT(uid, email, role string) (string, error) {
-	return app.generateJWTWithTTL(uid, email, role, 7*24*time.Hour)
+func (app *application) generateJWT(uid, email, role, appID string) (string, error) {
+	return app.generateJWTWithTTL(uid, email, role, appID, 7*24*time.Hour)
 }
 
-func (app *application) generateAccessJWT(uid, email, role string) (string, error) {
-	return app.generateJWTWithTTL(uid, email, role, app.accessTokenTTL())
+func (app *application) generateAccessJWT(uid, email, role, appID string) (string, error) {
+	return app.generateJWTWithTTL(uid, email, role, appID, app.accessTokenTTL())
 }
 
-func (app *application) generateJWTWithTTL(uid, email, role string, lifetime time.Duration) (string, error) {
+func (app *application) generateJWTWithTTL(uid, email, role, appID string, lifetime time.Duration) (string, error) {
 	claims := Claims{
 		UID:   uid,
 		Email: email,
 		Role:  role,
+		AppID: appID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    app.config.JWTIssuer,
 			Subject:   uid,

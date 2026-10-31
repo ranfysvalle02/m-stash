@@ -41,9 +41,13 @@ func (app *application) corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		allowed := false
+		allowedOrigins := app.config.AllowedOrigins
+		if record, ok := appFromContext(r.Context()); ok && len(record.AllowedOrigins) > 0 {
+			allowedOrigins = record.AllowedOrigins
+		}
 
 		if origin != "" {
-			for _, allowedOrigin := range app.config.AllowedOrigins {
+			for _, allowedOrigin := range allowedOrigins {
 				if allowedOrigin == "*" || allowedOrigin == origin {
 					allowed = true
 					w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -57,11 +61,11 @@ func (app *application) corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 		}
 
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token, "+appKeyHeader)
 
 		if r.Method == http.MethodOptions {
-			if !allowed && origin != "" && len(app.config.AllowedOrigins) > 0 && app.config.AllowedOrigins[0] != "*" {
+			if !allowed && origin != "" && len(allowedOrigins) > 0 && allowedOrigins[0] != "*" {
 				w.WriteHeader(http.StatusForbidden)
 				return
 			}

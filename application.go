@@ -16,6 +16,7 @@ type application struct {
 	mongoClient *mongo.Client
 	metrics     *metricsRegistry
 	logger      *slog.Logger
+	appCache    *appKeyCache
 }
 
 func newApplication(appConfig Config, database *mongo.Database, client *mongo.Client) *application {
@@ -25,23 +26,27 @@ func newApplication(appConfig Config, database *mongo.Database, client *mongo.Cl
 		mongoClient: client,
 		metrics:     newMetricsRegistry(),
 		logger:      slog.New(slog.NewJSONHandler(os.Stdout, nil)),
+		appCache:    newAppKeyCache(30 * time.Second),
 	}
 }
 
 func (app *application) Handler(rateLimiter *authRateLimiter) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/auth/signup", app.corsMiddleware(app.rateLimitMiddleware(rateLimiter, "signup", app.handleSignUp)))
-	mux.HandleFunc("/v1/auth/login", app.corsMiddleware(app.rateLimitMiddleware(rateLimiter, "login", app.handleLogin)))
-	mux.HandleFunc("/v1/auth/refresh", app.corsMiddleware(app.handleSessionRefresh))
-	mux.HandleFunc("/v1/auth/logout", app.corsMiddleware(app.handleSessionLogout))
-	mux.HandleFunc("/v1/auth/verify", app.corsMiddleware(app.authenticate(handleTokenVerification)))
-	mux.HandleFunc("/v1/me/namespace", app.corsMiddleware(app.authenticate(app.handleMeNamespace)))
-	mux.HandleFunc("/v1/me/resources/", app.corsMiddleware(app.authenticate(app.handleMeResources)))
-	mux.HandleFunc("/v1/shared/namespace", app.corsMiddleware(app.authenticate(app.handleSharedNamespace)))
-	mux.HandleFunc("/v1/shared/resources/", app.corsMiddleware(app.authenticateSharedResource(app.handleSharedResources)))
+	mux.HandleFunc("/v1/apps", app.corsMiddleware(app.requirePlatformToken(app.handleApps)))
+	mux.HandleFunc("/v1/auth/signup", app.resolveApp(app.corsMiddleware(app.rateLimitMiddleware(rateLimiter, "signup", app.handleSignUp))))
+	mux.HandleFunc("/v1/auth/login", app.resolveApp(app.corsMiddleware(app.rateLimitMiddleware(rateLimiter, "login", app.handleLogin))))
+	mux.HandleFunc("/v1/auth/refresh", app.resolveApp(app.corsMiddleware(app.handleSessionRefresh)))
+	mux.HandleFunc("/v1/auth/logout", app.resolveApp(app.corsMiddleware(app.handleSessionLogout)))
+	mux.HandleFunc("/v1/auth/verify", app.resolveApp(app.corsMiddleware(app.authenticate(handleTokenVerification))))
+	mux.HandleFunc("/v1/me/namespace", app.resolveApp(app.corsMiddleware(app.authenticate(app.handleMeNamespace))))
+	mux.HandleFunc("/v1/me/resources/", app.resolveApp(app.corsMiddleware(app.authenticate(app.handleMeResources))))
+	mux.HandleFunc("/v1/shared/namespace", app.resolveApp(app.corsMiddleware(app.authenticate(app.handleSharedNamespace))))
+	mux.HandleFunc("/v1/shared/resources/", app.resolveApp(app.corsMiddleware(app.authenticateSharedResource(app.handleSharedResources))))
+	mux.HandleFunc("/v1/shared/webhooks", app.resolveApp(app.corsMiddleware(app.authenticateSharedResource(app.handleSharedWebhooks))))
+	mux.HandleFunc("/v1/shared/webhooks/", app.resolveApp(app.corsMiddleware(app.authenticateSharedResource(app.handleSharedWebhooks))))
 	mux.HandleFunc("/.well-known/m-stash.json", app.corsMiddleware(app.handleServiceManifest))
-	mux.HandleFunc("/v1/public/shared/resources/", app.corsMiddleware(app.handlePublicSharedResources))
-	mux.HandleFunc("/v1/public/", app.corsMiddleware(app.handlePublicNamespace))
+	mux.HandleFunc("/v1/public/shared/resources/", app.resolveApp(app.corsMiddleware(app.handlePublicSharedResources)))
+	mux.HandleFunc("/v1/public/", app.resolveApp(app.corsMiddleware(app.handlePublicNamespace)))
 	mux.HandleFunc("/metrics", app.handleMetrics)
 	mux.HandleFunc("/healthz", app.handleHealth)
 	mux.HandleFunc("/readyz", app.handleReadiness)
@@ -59,11 +64,16 @@ func (app *application) handleServiceManifest(w http.ResponseWriter, r *http.Req
 		"service":    "m-stash",
 		"authentication": map[string]any{
 			"scheme":               "Bearer",
+			"applicationKeyHeader": appKeyHeader,
 			"verificationEndpoint": "/v1/auth/verify",
 			"issuer":               app.config.JWTIssuer,
 			"audience":             app.config.JWTAudience,
 		},
 		"capabilities": map[string]any{
+			"applications": map[string]string{
+				"provision": "/v1/apps",
+				"keyHeader": appKeyHeader,
+			},
 			"namespace": map[string]string{
 				"mine":      "/v1/me/namespace",
 				"resources": "/v1/me/resources/{type}/{slug}",
