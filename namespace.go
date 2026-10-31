@@ -133,6 +133,31 @@ func newOwnerMembership(appID, namespaceID, userID bson.ObjectID, now time.Time)
 	}
 }
 
+// newSampleProfileResource seeds a new account with a live, editable public
+// record so the dashboard is never empty and the user has a shareable link
+// (/{username}/profile/main) the moment they sign in.
+func newSampleProfileResource(appID, namespaceID, userID bson.ObjectID, username string, now time.Time) Resource {
+	return Resource{
+		ID:          bson.NewObjectID(),
+		AppID:       appID,
+		NamespaceID: namespaceID,
+		CreatorID:   userID,
+		Type:        "profile",
+		Slug:        "main",
+		Title:       "Welcome to your space",
+		Summary:     "A sample public record — edit the text or delete it anytime.",
+		Content: "# Hi, I’m @" + username + "\n\n" +
+			"m-stash created this sample record for you. It’s **public**, so anyone can read it at your link above.\n\n" +
+			"- Edit this text and press **Save**.\n" +
+			"- Switch visibility to **Private** to hide it.\n" +
+			"- Create more records from your dashboard.\n\n" +
+			"Everything here is yours, served straight from your own space.",
+		Visibility: publicVisibility,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+}
+
 func (app *application) createAccountWithPersonalNamespace(ctx context.Context, user User, namespace Namespace) error {
 	session, err := app.mongoClient.StartSession()
 	if err != nil {
@@ -149,6 +174,10 @@ func (app *application) createAccountWithPersonalNamespace(ctx context.Context, 
 		}
 		membership := newOwnerMembership(namespace.AppID, namespace.ID, user.ID, namespace.CreatedAt)
 		if _, err := app.database.Collection(namespaceMembershipCollection).InsertOne(transactionContext, membership); err != nil {
+			return nil, err
+		}
+		seed := newSampleProfileResource(namespace.AppID, namespace.ID, user.ID, namespace.Slug, namespace.CreatedAt)
+		if _, err := app.database.Collection(resourceCollectionName).InsertOne(transactionContext, seed); err != nil {
 			return nil, err
 		}
 		return nil, nil

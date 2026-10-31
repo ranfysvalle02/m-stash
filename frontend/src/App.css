@@ -228,3 +228,18 @@ input, textarea { transition: border-color .2s ease, box-shadow .25s ease, backg
 .visibility-select { border-color: var(--line); }
 .visibility-select select { background: rgba(3, 17, 23, .86); border-color: var(--line); color: var(--text); }
 .visibility-select small { color: var(--muted); }
+
+.slug-field { display: flex; flex-direction: column; gap: .4rem; }
+.slug-field small { color: var(--muted); font-size: .8rem; line-height: 1.45; }
+
+.use-in-app { border: 1px solid var(--line); border-radius: 10px; display: flex; flex-direction: column; gap: .8rem; margin-top: 1.6rem; padding: 1.1rem 1.15rem; }
+.use-in-app-head { align-items: center; display: flex; flex-wrap: wrap; gap: .5rem .9rem; justify-content: space-between; }
+.use-in-app .eyebrow { align-items: center; color: var(--aqua); display: inline-flex; gap: .4rem; margin: 0; }
+.use-in-app-url { align-items: center; color: var(--aqua); display: inline-flex; font-size: .82rem; font-weight: 700; gap: .25rem; word-break: break-all; }
+.use-in-app-note { color: var(--muted); font-size: .82rem; }
+.use-in-app-tabs { display: flex; flex-wrap: wrap; gap: .35rem; }
+.use-in-app-tabs button { background: transparent; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); cursor: pointer; font-size: .78rem; font-weight: 700; padding: .32rem .8rem; }
+.use-in-app-tabs button.active { border-color: var(--aqua); color: var(--aqua); }
+.use-in-app-code { background: rgba(3, 17, 23, .86); border: 1px solid var(--line); border-radius: 8px; margin: 0; overflow-x: auto; padding: .85rem .95rem; }
+.use-in-app-code code { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; line-height: 1.55; white-space: pre; }
+.use-in-app-copy { align-self: flex-start; }

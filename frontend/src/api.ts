@@ -156,6 +156,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 }
 
 export const api = {
+  publishableKey: () => appKey(),
+
   async signUpWithNamespace(email: string, password: string, username: string) {
     return request<{ token: string; user: { id: string; email: string; role: string }; namespace: Namespace }>('/v1/auth/signup', {
       method: 'POST', body: { email, password, username }, retrySession: false,

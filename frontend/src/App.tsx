@@ -11,7 +11,9 @@ import {
   BookOpen,
   Check,
   ChevronRight,
+  Code2,
   Compass,
+  Copy,
   Database,
   FilePenLine,
   Globe2,
@@ -74,6 +76,17 @@ const usernamePattern = /^[a-z0-9](?:[a-z0-9]|[-_](?=[a-z0-9])){2,31}$/;
 
 function normalizeUsername(value: string) {
   return value.trim().toLowerCase();
+}
+
+// Derive a URL-safe slug from free text so users never have to think about slugs.
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64)
+    .replace(/-+$/g, "");
 }
 
 function usernameValidationMessage(value: string) {
@@ -435,7 +448,7 @@ function PersonalDashboardRoute() {
 function PersonalEditorRoute() {
   const { namespace } = useWorkspace();
   return namespace ? (
-    <NamespaceResourceEditor scope="personal" canWrite />
+    <NamespaceResourceEditor scope="personal" canWrite username={namespace.slug} />
   ) : (
     <Navigate replace to="/app/shared" />
   );
@@ -951,12 +964,107 @@ function NamespaceDashboard({
   );
 }
 
+function UseInYourApp({
+  endpoint,
+  appKey,
+  publicURL,
+  isPublic,
+}: {
+  endpoint: string;
+  appKey: string;
+  publicURL?: string;
+  isPublic: boolean;
+}) {
+  const [lang, setLang] = useState<"curl" | "js" | "python">("curl");
+  const [copied, setCopied] = useState(false);
+  const key = appKey || "pk_your_app_key";
+  const snippets: Record<"curl" | "js" | "python", string> = {
+    curl: `curl "${endpoint}" \\\n  -H "X-M-Stash-App: ${key}"`,
+    js: `const res = await fetch("${endpoint}", {\n  headers: { "X-M-Stash-App": "${key}" },\n});\nconst { data } = await res.json();`,
+    python: `import requests\n\nres = requests.get(\n    "${endpoint}",\n    headers={"X-M-Stash-App": "${key}"},\n)\nprint(res.json()["data"])`,
+  };
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(snippets[lang]);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard may be unavailable; ignore.
+    }
+  }
+  return (
+    <section className="use-in-app">
+      <div className="use-in-app-head">
+        <p className="eyebrow">
+          <Code2 aria-hidden="true" size={15} /> Use in your app
+        </p>
+        {isPublic && publicURL ? (
+          <a
+            className="use-in-app-url"
+            href={publicURL}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {publicURL} <ArrowUpRight aria-hidden="true" size={13} />
+          </a>
+        ) : (
+          <span className="use-in-app-note">
+            Private — switch visibility to Public to read it at this URL.
+          </span>
+        )}
+      </div>
+      <div
+        aria-label="Snippet language"
+        className="use-in-app-tabs"
+        role="tablist"
+      >
+        {(["curl", "js", "python"] as const).map((option) => (
+          <button
+            aria-selected={lang === option}
+            className={lang === option ? "active" : ""}
+            key={option}
+            onClick={() => setLang(option)}
+            role="tab"
+            type="button"
+          >
+            {option === "curl"
+              ? "cURL"
+              : option === "js"
+                ? "JavaScript"
+                : "Python"}
+          </button>
+        ))}
+      </div>
+      <pre className="use-in-app-code">
+        <code>{snippets[lang]}</code>
+      </pre>
+      <button
+        className="button secondary use-in-app-copy"
+        onClick={() => void copy()}
+        type="button"
+      >
+        {copied ? (
+          <>
+            <Check aria-hidden="true" size={15} /> Copied
+          </>
+        ) : (
+          <>
+            <Copy aria-hidden="true" size={15} /> Copy snippet
+          </>
+        )}
+      </button>
+    </section>
+  );
+}
+
 function NamespaceResourceEditor({
   scope,
   canWrite,
+  username,
 }: {
   scope: "personal" | "shared";
   canWrite: boolean;
+  username?: string;
 }) {
   const { type = "record", slug } = useParams();
   const navigate = useNavigate();
@@ -969,6 +1077,7 @@ function NamespaceResourceEditor({
   const [mode, setMode] = useState<"write" | "preview">("write");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [slugTouched, setSlugTouched] = useState(false);
 
   useEffect(() => {
     if (!slug) return;
@@ -1001,9 +1110,11 @@ function NamespaceResourceEditor({
     setError("");
     try {
       if (creating) {
+        const slugValue =
+          resource.slug || slugify(resource.title) || `${type}-${Date.now()}`;
         const created = await api[
           shared ? "createSharedResource" : "createResource"
-        ](type, resource);
+        ](type, { ...resource, slug: slugValue });
         navigate(`${routeBase}/${type}/${created.slug}`, { replace: true });
       } else if (slug) {
         const updated = await api[
@@ -1059,33 +1170,47 @@ function NamespaceResourceEditor({
         </div>
       </header>
       <div className="editor-canvas">
+        <input
+          aria-label="Resource title"
+          className="title-input"
+          maxLength={200}
+          onChange={(event) => {
+            const title = event.target.value;
+            setResource((current) => ({
+              ...current,
+              title,
+              slug: creating && !slugTouched ? slugify(title) : current.slug,
+            }));
+            setSaved(false);
+            setError("");
+          }}
+          placeholder={`Untitled ${type}`}
+          value={resource.title}
+        />
         {creating ? (
-          <label>
-            URL slug
+          <label className="slug-field">
+            Link
             <input
               autoCapitalize="none"
               maxLength={64}
-              onChange={(event) =>
-                update("slug", event.target.value.toLowerCase())
-              }
+              onChange={(event) => {
+                setSlugTouched(true);
+                update("slug", event.target.value.toLowerCase());
+              }}
               pattern="[a-z0-9]+(-[a-z0-9]+)*"
-              placeholder="profile-card"
+              placeholder="auto-from-title"
               value={resource.slug}
             />
+            <small>
+              Auto-generated from the title — edit if you want. Lives at /{type}/
+              {resource.slug || "…"}.
+            </small>
           </label>
         ) : (
           <p className="eyebrow">
             /{type}/{slug}
           </p>
         )}
-        <input
-          aria-label="Resource title"
-          className="title-input"
-          maxLength={200}
-          onChange={(event) => update("title", event.target.value)}
-          placeholder={`Untitled ${type}`}
-          value={resource.title}
-        />
         <textarea
           aria-label="Resource summary"
           className="summary-input"
@@ -1155,6 +1280,24 @@ function NamespaceResourceEditor({
           <p className="form-error" role="alert">
             {error}
           </p>
+        )}
+        {!creating && slug && (
+          <UseInYourApp
+            appKey={api.publishableKey()}
+            endpoint={
+              shared
+                ? `${window.location.origin}/v1/public/shared/resources/${type}/${slug}`
+                : `${window.location.origin}/v1/public/${username ?? ""}/${type}/${slug}`
+            }
+            isPublic={resource.visibility === "public"}
+            publicURL={
+              shared
+                ? `${window.location.origin}/public/${type}/${slug}`
+                : username
+                  ? `${window.location.origin}/${username}/${type}/${slug}`
+                  : undefined
+            }
+          />
         )}
       </div>
     </main>

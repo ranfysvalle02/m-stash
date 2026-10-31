@@ -88,3 +88,23 @@ func TestNewSharedNamespaceIsDeploymentManagedAndPrivateByDefault(t *testing.T) 
 		t.Fatalf("shared namespace = %#v", namespace)
 	}
 }
+
+func TestNewSampleProfileResourceIsPublicAndOwned(t *testing.T) {
+	appID := bson.NewObjectID()
+	namespaceID := bson.NewObjectID()
+	userID := bson.NewObjectID()
+	now := time.Now().UTC()
+	resource := newSampleProfileResource(appID, namespaceID, userID, "ada", now)
+	if resource.Type != "profile" || resource.Slug != "main" {
+		t.Fatalf("seed type/slug = %s/%s, want profile/main", resource.Type, resource.Slug)
+	}
+	if resource.Visibility != publicVisibility {
+		t.Fatalf("seed visibility = %s, want %s", resource.Visibility, publicVisibility)
+	}
+	if resource.AppID != appID || resource.NamespaceID != namespaceID || resource.CreatorID != userID {
+		t.Fatalf("seed ownership fields = %#v", resource)
+	}
+	if resource.Title == "" || resource.Content == "" {
+		t.Fatal("seed should include a title and content")
+	}
+}
