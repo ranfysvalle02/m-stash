@@ -2302,7 +2302,7 @@ function FAQPage() {
   const questions = [
     ["What is m-stash?", "A backend layer for AI app builders. It gives your product sign-up, login, and server-enforced per-user data through an API, with MongoDB behind the service instead of exposed to your frontend."],
     ["Do my users need m-stash accounts?", "No. Your users sign up and log in through your product's UI. Your app calls the m-stash auth API behind the scenes; m-stash is infrastructure, not another consumer account your users need to manage."],
-    ["How do I start building?", "Follow the Quickstart to self-host m-stash, configure MongoDB and secrets, provision an app with your platform token, then connect your app with its publishable key. This hosted site does not currently offer developer-account signup or self-service app provisioning."],
+    ["How do I start building?", "Follow the Quickstart to self-host m-stash and configure MongoDB. Bootstrap a builder account once with your platform token, then use the builder console to create apps, copy their keys, edit allowed origins, and rotate secrets — no platform token in the browser."],
     ["What is the hosted sign-up page for?", "It creates a sample user in the live demo app so you can inspect the app-user experience. It does not create a developer account or provision an app. Builders should start with the Quickstart."],
     ["How does m-stash keep users' data separate?", "The API derives ownership from the authenticated identity. Clients do not send an owner ID, and the server applies that identity to reads and writes. Personal and app-wide data use separate scopes."],
     ["Do I need MongoDB in my frontend?", "No. Your application calls the m-stash API; database credentials stay server-side. MongoDB powers storage underneath and remains under your deployment's control."],
@@ -2495,7 +2495,11 @@ function ConsoleDashboard({
 }) {
   const [apps, setApps] = useState<BuilderApp[]>();
   const [error, setError] = useState("");
-  const [created, setCreated] = useState<{ app: BuilderApp; secretKey: string }>();
+  const [reveal, setReveal] = useState<{
+    app: BuilderApp;
+    secretKey: string;
+    rotated: boolean;
+  }>();
   const [displayName, setDisplayName] = useState("");
   const [slug, setSlug] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
@@ -2542,7 +2546,7 @@ function ConsoleDashboard({
         input.adminPassword = adminPassword;
       }
       const result = await api.createBuilderApp(input);
-      setCreated({ app: result.data, secretKey: result.secretKey });
+      setReveal({ app: result.data, secretKey: result.secretKey, rotated: false });
       setApps((current) => [result.data, ...(current ?? [])]);
       setDisplayName("");
       setSlug("");
@@ -2563,6 +2567,16 @@ function ConsoleDashboard({
     }
   }
 
+  function handleUpdated(updated: BuilderApp) {
+    setApps((current) =>
+      (current ?? []).map((item) => (item.id === updated.id ? updated : item)),
+    );
+  }
+
+  function handleRotated(app: BuilderApp, secretKey: string) {
+    setReveal({ app, secretKey, rotated: true });
+  }
+
   return (
     <main className="setup-page console-page">
       <div className="console-head">
@@ -2576,23 +2590,27 @@ function ConsoleDashboard({
         </button>
       </div>
 
-      {created && (
+      {reveal && (
         <section className="console-secret" role="alert">
           <p className="eyebrow">
             <ShieldCheck aria-hidden="true" size={15} /> Save your secret key now
           </p>
-          <h2>{created.app.displayName} is ready.</h2>
+          <h2>
+            {reveal.rotated
+              ? `New secret key for ${reveal.app.displayName}`
+              : `${reveal.app.displayName} is ready.`}
+          </h2>
           <p>
             The secret key is shown once. Store it on your server; it is never
-            displayed again.
+            displayed again{reveal.rotated ? ", and the previous key no longer works" : ""}.
           </p>
           <div className="key-row">
             <span>Publishable key</span>
-            <code>{created.app.publishableKey}</code>
+            <code>{reveal.app.publishableKey}</code>
             <button
               aria-label="Copy publishable key"
               className="icon-button"
-              onClick={() => void copy("pk", created.app.publishableKey)}
+              onClick={() => void copy("pk", reveal.app.publishableKey)}
               type="button"
             >
               {copied === "pk" ? (
@@ -2604,11 +2622,11 @@ function ConsoleDashboard({
           </div>
           <div className="key-row">
             <span>Secret key</span>
-            <code>{created.secretKey}</code>
+            <code>{reveal.secretKey}</code>
             <button
               aria-label="Copy secret key"
               className="icon-button"
-              onClick={() => void copy("sk", created.secretKey)}
+              onClick={() => void copy("sk", reveal.secretKey)}
               type="button"
             >
               {copied === "sk" ? (
@@ -2620,7 +2638,7 @@ function ConsoleDashboard({
           </div>
           <button
             className="button secondary"
-            onClick={() => setCreated(undefined)}
+            onClick={() => setReveal(undefined)}
             type="button"
           >
             I saved the secret key
@@ -2706,32 +2724,155 @@ function ConsoleDashboard({
         ) : (
           <ul className="console-app-list">
             {apps.map((item) => (
-              <li key={item.id}>
-                <div className="console-app-main">
-                  <h3>{item.displayName}</h3>
-                  <p className="console-slug">/{item.slug}</p>
-                </div>
-                <div className="console-key">
-                  <code>{item.publishableKey}</code>
-                  <button
-                    aria-label={`Copy publishable key for ${item.displayName}`}
-                    className="icon-button"
-                    onClick={() => void copy(item.id, item.publishableKey)}
-                    type="button"
-                  >
-                    {copied === item.id ? (
-                      <Check aria-hidden="true" size={16} />
-                    ) : (
-                      <Copy aria-hidden="true" size={16} />
-                    )}
-                  </button>
-                </div>
-              </li>
+              <ConsoleAppRow
+                app={item}
+                key={item.id}
+                onError={setError}
+                onRotated={handleRotated}
+                onUpdated={handleUpdated}
+              />
             ))}
           </ul>
         )}
       </section>
     </main>
+  );
+}
+
+function ConsoleAppRow({
+  app,
+  onRotated,
+  onUpdated,
+  onError,
+}: {
+  app: BuilderApp;
+  onRotated: (app: BuilderApp, secretKey: string) => void;
+  onUpdated: (app: BuilderApp) => void;
+  onError: (message: string) => void;
+}) {
+  const [origins, setOrigins] = useState((app.allowedOrigins ?? []).join("\n"));
+  const [busy, setBusy] = useState<"" | "save" | "rotate">("");
+  const [copied, setCopied] = useState(false);
+  const [savedOrigins, setSavedOrigins] = useState(false);
+
+  async function copyKey() {
+    try {
+      await navigator.clipboard.writeText(app.publishableKey);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  async function saveOrigins() {
+    setBusy("save");
+    onError("");
+    try {
+      const list = origins
+        .split(/[\n,]/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const updated = await api.updateBuilderApp(app.id, { allowedOrigins: list });
+      onUpdated(updated);
+      setOrigins((updated.allowedOrigins ?? []).join("\n"));
+      setSavedOrigins(true);
+      window.setTimeout(() => setSavedOrigins(false), 1500);
+    } catch (requestError) {
+      onError(messageFromError(requestError));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function rotate() {
+    if (
+      !window.confirm(
+        `Rotate the secret key for ${app.displayName}? The current key stops working immediately.`,
+      )
+    ) {
+      return;
+    }
+    setBusy("rotate");
+    onError("");
+    try {
+      const result = await api.rotateBuilderAppSecret(app.id);
+      onUpdated(result.data);
+      onRotated(result.data, result.secretKey);
+    } catch (requestError) {
+      onError(messageFromError(requestError));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <li className="console-app-card">
+      <div className="console-app-row">
+        <div className="console-app-main">
+          <h3>{app.displayName}</h3>
+          <p className="console-slug">/{app.slug}</p>
+        </div>
+        <div className="console-key">
+          <code>{app.publishableKey}</code>
+          <button
+            aria-label={`Copy publishable key for ${app.displayName}`}
+            className="icon-button"
+            onClick={() => void copyKey()}
+            type="button"
+          >
+            {copied ? (
+              <Check aria-hidden="true" size={16} />
+            ) : (
+              <Copy aria-hidden="true" size={16} />
+            )}
+          </button>
+        </div>
+      </div>
+      <div className="console-app-manage">
+        <label>
+          Allowed browser origins
+          <textarea
+            onChange={(event) => setOrigins(event.target.value)}
+            placeholder={"https://app.example.com\nhttps://staging.example.com"}
+            rows={2}
+            spellCheck={false}
+            value={origins}
+          />
+          <small>One origin per line. Leave empty to use the deployment default.</small>
+        </label>
+        <div className="console-app-actions">
+          <button
+            className="button secondary"
+            disabled={busy !== ""}
+            onClick={() => void saveOrigins()}
+            type="button"
+          >
+            {busy === "save" ? (
+              <LoaderCircle aria-hidden="true" className="spin" size={15} />
+            ) : savedOrigins ? (
+              <Check aria-hidden="true" size={15} />
+            ) : (
+              <Save aria-hidden="true" size={15} />
+            )}{" "}
+            Save origins
+          </button>
+          <button
+            className="button secondary danger-button"
+            disabled={busy !== ""}
+            onClick={() => void rotate()}
+            type="button"
+          >
+            {busy === "rotate" ? (
+              <LoaderCircle aria-hidden="true" className="spin" size={15} />
+            ) : (
+              <ShieldCheck aria-hidden="true" size={15} />
+            )}{" "}
+            Rotate secret
+          </button>
+        </div>
+      </div>
+    </li>
   );
 }
 

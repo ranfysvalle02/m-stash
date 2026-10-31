@@ -324,4 +324,17 @@ export const api = {
       method: 'POST', body: input, retrySession: false,
     })
   },
+
+  async rotateBuilderAppSecret(id: string) {
+    return request<{ data: BuilderApp; secretKey: string }>(`/v1/builder/apps/${encodeURIComponent(id)}/rotate-secret`, {
+      method: 'POST', retrySession: false,
+    })
+  },
+
+  async updateBuilderApp(id: string, input: { allowedOrigins?: string[]; displayName?: string }) {
+    const response = await request<APIEnvelope<BuilderApp>>(`/v1/builder/apps/${encodeURIComponent(id)}`, {
+      method: 'PATCH', body: input, retrySession: false,
+    })
+    return response.data
+  },
 }

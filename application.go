@@ -40,6 +40,7 @@ func (app *application) Handler(rateLimiter *authRateLimiter) http.Handler {
 	mux.HandleFunc("/v1/builder/auth/logout", app.corsMiddleware(app.handleSessionLogout))
 	mux.HandleFunc("/v1/builder/me", app.corsMiddleware(app.authenticateBuilder(handleBuilderMe)))
 	mux.HandleFunc("/v1/builder/apps", app.corsMiddleware(app.authenticateBuilder(app.handleBuilderApps)))
+	mux.HandleFunc("/v1/builder/apps/", app.corsMiddleware(app.authenticateBuilder(app.handleBuilderApp)))
 	mux.HandleFunc("/v1/auth/signup", app.resolveApp(app.corsMiddleware(app.rateLimitMiddleware(rateLimiter, "signup", app.handleSignUp))))
 	mux.HandleFunc("/v1/auth/login", app.resolveApp(app.corsMiddleware(app.rateLimitMiddleware(rateLimiter, "login", app.handleLogin))))
 	mux.HandleFunc("/v1/auth/refresh", app.resolveApp(app.corsMiddleware(app.handleSessionRefresh)))

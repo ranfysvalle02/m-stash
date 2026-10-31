@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -194,4 +196,129 @@ func (app *application) createBuilderApp(w http.ResponseWriter, r *http.Request,
 		"secretKey": secretKey,
 		"admin":     admin,
 	})
+}
+
+// handleBuilderApp serves owner-scoped per-app operations: update settings and
+// rotate the secret key. Every write is matched on {_id, ownerId} so a builder
+// can only touch apps they own.
+func (app *application) handleBuilderApp(w http.ResponseWriter, r *http.Request, claims *Claims) {
+	ownerID, err := bson.ObjectIDFromHex(claims.UID)
+	if err != nil || ownerID.IsZero() {
+		writeError(w, http.StatusForbidden, "Invalid builder identity")
+		return
+	}
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/builder/apps/"), "/")
+	segments := strings.Split(rest, "/")
+	appID, err := bson.ObjectIDFromHex(segments[0])
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid application id")
+		return
+	}
+
+	switch {
+	case len(segments) == 2 && segments[1] == "rotate-secret":
+		app.rotateBuilderAppSecret(w, r, ownerID, appID)
+	case len(segments) == 1 && r.Method == http.MethodPatch:
+		app.updateBuilderApp(w, r, ownerID, appID)
+	default:
+		writeError(w, http.StatusNotFound, "Not found")
+	}
+}
+
+func (app *application) rotateBuilderAppSecret(w http.ResponseWriter, r *http.Request, ownerID, appID bson.ObjectID) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	var record AppRecord
+	if err := app.database.Collection(appsCollectionName).
+		FindOne(ctx, bson.M{"_id": appID, "ownerId": ownerID}).Decode(&record); err != nil {
+		writeError(w, http.StatusNotFound, "Application not found")
+		return
+	}
+
+	secretKey, err := generateAppKey(secretKeyPrefix)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not rotate secret key")
+		return
+	}
+	secretHash, err := bcrypt.GenerateFromPassword([]byte(secretKey), bcryptCost)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not rotate secret key")
+		return
+	}
+	result, err := app.database.Collection(appsCollectionName).UpdateOne(
+		ctx,
+		bson.M{"_id": appID, "ownerId": ownerID},
+		bson.M{"$set": bson.M{"secretKeyHash": string(secretHash), "updatedAt": time.Now().UTC()}},
+	)
+	if err != nil || result.MatchedCount != 1 {
+		writeError(w, http.StatusInternalServerError, "Could not rotate secret key")
+		return
+	}
+	// Evict the memoized record so the previous secret stops working immediately.
+	app.appCache.delete(record.PublishableKey)
+	writeJSON(w, http.StatusCreated, map[string]any{"data": record, "secretKey": secretKey})
+}
+
+func (app *application) updateBuilderApp(w http.ResponseWriter, r *http.Request, ownerID, appID bson.ObjectID) {
+	var input struct {
+		AllowedOrigins *[]string `json:"allowedOrigins"`
+		DisplayName    *string   `json:"displayName"`
+	}
+	if !decodeJSONBody(w, r, &input, false) {
+		return
+	}
+
+	set := bson.M{"updatedAt": time.Now().UTC()}
+	if input.AllowedOrigins != nil {
+		origins := make([]string, 0, len(*input.AllowedOrigins))
+		for _, origin := range *input.AllowedOrigins {
+			trimmed := strings.TrimSpace(origin)
+			if trimmed == "" {
+				continue
+			}
+			if len(trimmed) > 200 || strings.ContainsAny(trimmed, " \t\r\n") {
+				writeError(w, http.StatusBadRequest, "Each origin must be a single value such as https://app.example.com")
+				return
+			}
+			origins = append(origins, trimmed)
+		}
+		if len(origins) > 20 {
+			writeError(w, http.StatusBadRequest, "An app supports at most 20 allowed origins")
+			return
+		}
+		set["allowedOrigins"] = origins
+	}
+	if input.DisplayName != nil {
+		displayName := strings.TrimSpace(*input.DisplayName)
+		if displayName == "" || len(displayName) > 80 {
+			writeError(w, http.StatusBadRequest, "displayName must be 1 to 80 characters")
+			return
+		}
+		set["displayName"] = displayName
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	var record AppRecord
+	err := app.database.Collection(appsCollectionName).FindOneAndUpdate(
+		ctx,
+		bson.M{"_id": appID, "ownerId": ownerID},
+		bson.M{"$set": set},
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	).Decode(&record)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			writeError(w, http.StatusNotFound, "Application not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "Could not update application")
+		return
+	}
+	// Keep CORS and key checks consistent with the new settings right away.
+	app.appCache.delete(record.PublishableKey)
+	writeJSON(w, http.StatusOK, map[string]any{"data": record})
 }

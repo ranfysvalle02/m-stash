@@ -115,6 +115,14 @@ func (cache *appKeyCache) put(key string, record *AppRecord) {
 	cache.entries[key] = appCacheEntry{record: record, expiresAt: time.Now().Add(cache.ttl)}
 }
 
+// delete evicts a memoized app so a key rotation or origin change takes effect
+// immediately instead of after the cache TTL.
+func (cache *appKeyCache) delete(key string) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	delete(cache.entries, key)
+}
+
 func (app *application) lookupApp(ctx context.Context, publishableKey string) (*AppRecord, error) {
 	if record, ok := app.appCache.get(publishableKey); ok {
 		return record, nil

@@ -270,11 +270,17 @@ input, textarea { transition: border-color .2s ease, box-shadow .25s ease, backg
 .console-create .profile-form { margin-top: 0; max-width: none; }
 .console-empty { color: var(--muted); }
 .console-app-list { display: grid; gap: .6rem; list-style: none; margin: 0; padding: 0; }
-.console-app-list li { align-items: center; border: 1px solid var(--line); border-radius: 8px; display: flex; flex-wrap: wrap; gap: .8rem; justify-content: space-between; padding: .9rem 1rem; }
+.console-app-card { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: .9rem; padding: 1rem; }
+.console-app-row { align-items: center; display: flex; flex-wrap: wrap; gap: .8rem; justify-content: space-between; }
 .console-app-main h3 { font-size: 1.05rem; margin: 0; }
 .console-slug { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; margin: .2rem 0 0; }
 .console-key { align-items: center; display: flex; gap: .4rem; min-width: 0; }
 .console-key code { background: rgba(3, 17, 23, .86); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; overflow-x: auto; padding: .35rem .5rem; white-space: nowrap; }
+.console-app-manage { border-top: 1px solid var(--line); display: grid; gap: .7rem; padding-top: .9rem; }
+.console-app-manage textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; line-height: 1.5; min-height: 3.2rem; resize: vertical; }
+.console-app-manage small { color: var(--muted); font-size: .76rem; font-weight: 500; }
+.console-app-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.danger-button:hover { border-color: var(--pink); color: var(--pink); }
 .console-secret { border: 1px solid var(--aqua); border-radius: 10px; margin-top: 1.75rem; padding: 1.25rem; }
 .console-secret h2 { font-size: 1.25rem; margin: .4rem 0 .5rem; }
 .console-secret > p { color: var(--muted); line-height: 1.6; max-width: 48ch; }
