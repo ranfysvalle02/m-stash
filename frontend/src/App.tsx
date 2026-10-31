@@ -265,6 +265,7 @@ function AuthenticationPage({
   return (
     <main className="auth-page">
       <Link className="wordmark" to="/discover">
+        <MustacheMark />
         <span>m</span>stash
       </Link>
       <section className="auth-panel" aria-labelledby="auth-title">
@@ -2978,11 +2979,28 @@ function ConsoleAppRow({
   );
 }
 
+function MustacheMark() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="wordmark-mark"
+      focusable="false"
+      viewBox="8 26 104 32"
+    >
+      <path
+        fill="currentColor"
+        d="M60 40C66 32 70 28 76 28 84 28 88 31 92 34 98 36 100 37 102 38 107 40 110 34 108 28 106 32 103 40 100 46 94 53 88 56 82 55 74 53 68 50 60 52 52 50 46 53 38 55 32 56 26 53 20 46 17 40 14 32 12 28 10 34 13 40 18 38 20 37 22 36 28 34 32 31 36 28 44 28 50 28 54 32 60 40Z"
+      />
+    </svg>
+  );
+}
+
 function PublicLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="public-shell">
       <header className="public-header">
         <Link className="wordmark" to="/discover">
+          <MustacheMark />
           <span>m</span>stash
         </Link>
         <nav>
@@ -3002,6 +3020,7 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
       {children}
       <footer className="public-footer">
         <Link className="wordmark" to="/discover">
+          <MustacheMark />
           <span>m</span>stash
         </Link>
         <nav aria-label="Help and policies">
