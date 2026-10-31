@@ -62,6 +62,25 @@ export interface PublicResource extends PublicResourcePreview {
   data?: Record<string, unknown>
 }
 
+export interface BuilderApp {
+  id: string
+  slug: string
+  displayName: string
+  publishableKey: string
+  allowedOrigins?: string[]
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface BuilderAppInput {
+  slug: string
+  displayName: string
+  adminEmail?: string
+  adminPassword?: string
+  allowedOrigins?: string[]
+}
+
 export interface Page<T> {
   data: T[]
   page: {
@@ -274,5 +293,35 @@ export const api = {
   async getPublicSharedResource(type: string, slug: string) {
     const response = await request<APIEnvelope<PublicResource>>(`/v1/public/shared/resources/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`)
     return response.data
+  },
+
+  async builderLogin(email: string, password: string) {
+    return request<{ token: string; builder: { id: string; email: string } }>('/v1/builder/auth/login', {
+      method: 'POST', body: { email, password }, retrySession: false,
+    })
+  },
+
+  async builderRefresh() {
+    await request<{ active: boolean }>('/v1/builder/auth/refresh', { method: 'POST', retrySession: false })
+  },
+
+  async builderLogout() {
+    return request<void>('/v1/builder/auth/logout', { method: 'POST', retrySession: false })
+  },
+
+  async builderMe() {
+    const response = await request<APIEnvelope<{ id: string; email: string }>>('/v1/builder/me', { retrySession: false })
+    return response.data
+  },
+
+  async listBuilderApps() {
+    const response = await request<APIEnvelope<BuilderApp[]>>('/v1/builder/apps', { retrySession: false })
+    return response.data
+  },
+
+  async createBuilderApp(input: BuilderAppInput) {
+    return request<{ data: BuilderApp; secretKey: string }>('/v1/builder/apps', {
+      method: 'POST', body: input, retrySession: false,
+    })
   },
 }

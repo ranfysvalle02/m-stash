@@ -31,6 +31,7 @@ const appContextKey contextKey = "app-record"
 // AppRecord is one tenant: an isolated application sharing the deployment.
 type AppRecord struct {
 	ID             bson.ObjectID `bson:"_id,omitempty" json:"id"`
+	OwnerID        bson.ObjectID `bson:"ownerId,omitempty" json:"-"`
 	Slug           string        `bson:"slug" json:"slug"`
 	DisplayName    string        `bson:"displayName" json:"displayName"`
 	PublishableKey string        `bson:"publishableKey" json:"publishableKey"`
@@ -77,6 +78,7 @@ func ensureAppIndexes(ctx context.Context, database *mongo.Database) error {
 	_, err := database.Collection(appsCollectionName).Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{Keys: bson.D{{Key: "publishableKey", Value: 1}}, Options: options.Index().SetUnique(true)},
 		{Keys: bson.D{{Key: "slug", Value: 1}}, Options: options.Index().SetUnique(true)},
+		{Keys: bson.D{{Key: "ownerId", Value: 1}, {Key: "createdAt", Value: -1}}},
 	})
 	return err
 }
@@ -252,11 +254,12 @@ func (app *application) matchesAppSecret(ctx context.Context, authorization stri
 }
 
 type provisionAppInput struct {
-	Slug           string   `json:"slug"`
-	DisplayName    string   `json:"displayName"`
-	AdminEmail     string   `json:"adminEmail"`
-	AdminPassword  string   `json:"adminPassword"`
-	AllowedOrigins []string `json:"allowedOrigins"`
+	Slug           string        `json:"slug"`
+	DisplayName    string        `json:"displayName"`
+	AdminEmail     string        `json:"adminEmail"`
+	AdminPassword  string        `json:"adminPassword"`
+	AllowedOrigins []string      `json:"allowedOrigins"`
+	OwnerID        bson.ObjectID `json:"-"`
 }
 
 func (input *provisionAppInput) normalizeAndValidate() error {
@@ -339,6 +342,7 @@ func (app *application) provisionApp(ctx context.Context, input provisionAppInpu
 	now := time.Now().UTC()
 	record := AppRecord{
 		ID:             bson.NewObjectID(),
+		OwnerID:        input.OwnerID,
 		Slug:           input.Slug,
 		DisplayName:    input.DisplayName,
 		PublishableKey: publishableKey,

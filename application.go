@@ -34,6 +34,12 @@ func newApplication(appConfig Config, database *mongo.Database, client *mongo.Cl
 func (app *application) Handler(rateLimiter *authRateLimiter) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/apps", app.corsMiddleware(app.requirePlatformToken(app.handleApps)))
+	mux.HandleFunc("/v1/builder/accounts", app.corsMiddleware(app.requirePlatformToken(app.handleBuilderAccounts)))
+	mux.HandleFunc("/v1/builder/auth/login", app.corsMiddleware(app.rateLimitMiddleware(rateLimiter, "builder-login", app.handleBuilderLogin)))
+	mux.HandleFunc("/v1/builder/auth/refresh", app.corsMiddleware(app.handleSessionRefresh))
+	mux.HandleFunc("/v1/builder/auth/logout", app.corsMiddleware(app.handleSessionLogout))
+	mux.HandleFunc("/v1/builder/me", app.corsMiddleware(app.authenticateBuilder(handleBuilderMe)))
+	mux.HandleFunc("/v1/builder/apps", app.corsMiddleware(app.authenticateBuilder(app.handleBuilderApps)))
 	mux.HandleFunc("/v1/auth/signup", app.resolveApp(app.corsMiddleware(app.rateLimitMiddleware(rateLimiter, "signup", app.handleSignUp))))
 	mux.HandleFunc("/v1/auth/login", app.resolveApp(app.corsMiddleware(app.rateLimitMiddleware(rateLimiter, "login", app.handleLogin))))
 	mux.HandleFunc("/v1/auth/refresh", app.resolveApp(app.corsMiddleware(app.handleSessionRefresh)))

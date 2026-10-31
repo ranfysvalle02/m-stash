@@ -44,6 +44,8 @@ import {
 import {
   APIError,
   api,
+  type BuilderApp,
+  type BuilderAppInput,
   type Namespace,
   type NamespaceIdentityInput,
   type PublicNamespace,
@@ -141,6 +143,7 @@ function App() {
           <Route path="/guide" element={<GuidePage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/faq" element={<FAQPage />} />
+          <Route path="/console" element={<ConsolePage />} />
           <Route
             path="/login"
             element={
@@ -2134,8 +2137,10 @@ function GuideContent() {
             <div>
               <h3>Provision your app</h3>
               <p>
-                Use your platform token once to create an isolated app and get
-                its publishable key plus a server-only secret.
+                Bootstrap a builder account with your platform token once, then
+                sign in to the <Link to="/console">builder console</Link> to
+                create apps and copy their keys — no platform token in the
+                browser.
               </p>
             </div>
           </li>
@@ -2175,6 +2180,16 @@ function GuideContent() {
           </p>
         </div>
         <div className="config-snippets">
+          <CopyableSnippet
+            title="Bootstrap a builder account"
+            description="Run once on your server with the platform token. Then sign in to the console."
+            code={[
+              'curl "$API_URL/v1/builder/accounts" \\',
+              '  -H "Authorization: Bearer $PLATFORM_TOKEN" \\',
+              '  -H "Content-Type: application/json" \\',
+              `  -d '{"email":"you@example.com","password":"a-long-unique-password"}'`,
+            ].join("\n")}
+          />
           <CopyableSnippet
             title="Create a private user profile"
             description="Run in your app after sign-up. The owner comes from the user's token."
@@ -2338,6 +2353,388 @@ function PrivacyPage() {
   );
 }
 
+type BuilderIdentity = { id: string; email: string };
+
+type BuilderState =
+  | { kind: "loading" }
+  | { kind: "anonymous" }
+  | { kind: "authenticated"; builder: BuilderIdentity };
+
+function ConsolePage() {
+  const [state, setState] = useState<BuilderState>({ kind: "loading" });
+
+  useEffect(() => {
+    let active = true;
+    async function restore() {
+      try {
+        const builder = await api.builderMe();
+        if (active) setState({ kind: "authenticated", builder });
+        return;
+      } catch {
+        // Fall through to a refresh attempt before giving up.
+      }
+      try {
+        await api.builderRefresh();
+        const builder = await api.builderMe();
+        if (active) setState({ kind: "authenticated", builder });
+      } catch {
+        if (active) setState({ kind: "anonymous" });
+      }
+    }
+    void restore();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return (
+    <PublicLayout>
+      {state.kind === "loading" ? (
+        <LoadingPage />
+      ) : state.kind === "anonymous" ? (
+        <ConsoleLogin
+          onAuthenticated={(builder) =>
+            setState({ kind: "authenticated", builder })
+          }
+        />
+      ) : (
+        <ConsoleDashboard
+          builder={state.builder}
+          onSignedOut={() => setState({ kind: "anonymous" })}
+        />
+      )}
+    </PublicLayout>
+  );
+}
+
+function ConsoleLogin({
+  onAuthenticated,
+}: {
+  onAuthenticated: (builder: BuilderIdentity) => void;
+}) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setSubmitting(true);
+    try {
+      const result = await api.builderLogin(email, password);
+      onAuthenticated(result.builder);
+    } catch (requestError) {
+      setError(messageFromError(requestError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="setup-page information-page">
+      <header className="information-intro">
+        <p className="eyebrow">Builder console</p>
+        <h1>Sign in to manage your apps.</h1>
+        <p>
+          Builder accounts are created by the deployment operator with the
+          platform token. This console never sees that token.
+        </p>
+      </header>
+      <form className="profile-form console-form" onSubmit={submit}>
+        <label>
+          Email
+          <input
+            autoComplete="email"
+            onChange={(event) => setEmail(event.target.value)}
+            required
+            type="email"
+            value={email}
+          />
+        </label>
+        <label>
+          Password
+          <input
+            autoComplete="current-password"
+            onChange={(event) => setPassword(event.target.value)}
+            required
+            type="password"
+            value={password}
+          />
+        </label>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="form-actions">
+          <button className="button primary" disabled={submitting} type="submit">
+            {submitting ? (
+              <LoaderCircle aria-hidden="true" className="spin" size={17} />
+            ) : (
+              <ChevronRight aria-hidden="true" size={17} />
+            )}{" "}
+            Sign in
+          </button>
+        </div>
+      </form>
+      <p className="information-note">
+        No builder account yet? Ask your operator to run the bootstrap in the{" "}
+        <Link to="/guide">builder guide</Link>.
+      </p>
+    </main>
+  );
+}
+
+function ConsoleDashboard({
+  builder,
+  onSignedOut,
+}: {
+  builder: BuilderIdentity;
+  onSignedOut: () => void;
+}) {
+  const [apps, setApps] = useState<BuilderApp[]>();
+  const [error, setError] = useState("");
+  const [created, setCreated] = useState<{ app: BuilderApp; secretKey: string }>();
+  const [displayName, setDisplayName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [copied, setCopied] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void api
+      .listBuilderApps()
+      .then((list) => {
+        if (active) setApps(list);
+      })
+      .catch((requestError) => {
+        if (active) {
+          setApps([]);
+          setError(messageFromError(requestError));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function copy(label: string, value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(label);
+      window.setTimeout(() => setCopied(""), 1500);
+    } catch {
+      setCopied("");
+    }
+  }
+
+  async function createApp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setCreating(true);
+    try {
+      const input: BuilderAppInput = { slug, displayName };
+      if (adminEmail && adminPassword) {
+        input.adminEmail = adminEmail;
+        input.adminPassword = adminPassword;
+      }
+      const result = await api.createBuilderApp(input);
+      setCreated({ app: result.data, secretKey: result.secretKey });
+      setApps((current) => [result.data, ...(current ?? [])]);
+      setDisplayName("");
+      setSlug("");
+      setAdminEmail("");
+      setAdminPassword("");
+    } catch (requestError) {
+      setError(messageFromError(requestError));
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function signOut() {
+    try {
+      await api.builderLogout();
+    } finally {
+      onSignedOut();
+    }
+  }
+
+  return (
+    <main className="setup-page console-page">
+      <div className="console-head">
+        <div>
+          <p className="eyebrow">Builder console</p>
+          <h1>Your apps</h1>
+          <p className="console-id">Signed in as {builder.email}</p>
+        </div>
+        <button className="text-button" onClick={() => void signOut()} type="button">
+          <LogOut aria-hidden="true" size={16} /> Sign out
+        </button>
+      </div>
+
+      {created && (
+        <section className="console-secret" role="alert">
+          <p className="eyebrow">
+            <ShieldCheck aria-hidden="true" size={15} /> Save your secret key now
+          </p>
+          <h2>{created.app.displayName} is ready.</h2>
+          <p>
+            The secret key is shown once. Store it on your server; it is never
+            displayed again.
+          </p>
+          <div className="key-row">
+            <span>Publishable key</span>
+            <code>{created.app.publishableKey}</code>
+            <button
+              aria-label="Copy publishable key"
+              className="icon-button"
+              onClick={() => void copy("pk", created.app.publishableKey)}
+              type="button"
+            >
+              {copied === "pk" ? (
+                <Check aria-hidden="true" size={16} />
+              ) : (
+                <Copy aria-hidden="true" size={16} />
+              )}
+            </button>
+          </div>
+          <div className="key-row">
+            <span>Secret key</span>
+            <code>{created.secretKey}</code>
+            <button
+              aria-label="Copy secret key"
+              className="icon-button"
+              onClick={() => void copy("sk", created.secretKey)}
+              type="button"
+            >
+              {copied === "sk" ? (
+                <Check aria-hidden="true" size={16} />
+              ) : (
+                <Copy aria-hidden="true" size={16} />
+              )}
+            </button>
+          </div>
+          <button
+            className="button secondary"
+            onClick={() => setCreated(undefined)}
+            type="button"
+          >
+            I saved the secret key
+          </button>
+        </section>
+      )}
+
+      <section className="console-create">
+        <h2>Create an app</h2>
+        <form className="profile-form" onSubmit={createApp}>
+          <div className="form-grid">
+            <label>
+              App name
+              <input
+                maxLength={80}
+                onChange={(event) => setDisplayName(event.target.value)}
+                placeholder="Arcade"
+                required
+                value={displayName}
+              />
+            </label>
+            <label>
+              Slug
+              <input
+                autoCapitalize="none"
+                onChange={(event) => setSlug(normalizeResourceType(event.target.value))}
+                placeholder="arcade"
+                required
+                spellCheck={false}
+                value={slug}
+              />
+            </label>
+          </div>
+          <div className="form-grid">
+            <label>
+              Admin email (optional)
+              <input
+                onChange={(event) => setAdminEmail(event.target.value)}
+                placeholder="admin@example.com"
+                type="email"
+                value={adminEmail}
+              />
+            </label>
+            <label>
+              Admin password (optional)
+              <input
+                minLength={12}
+                onChange={(event) => setAdminPassword(event.target.value)}
+                placeholder="at least 12 characters"
+                type="password"
+                value={adminPassword}
+              />
+            </label>
+          </div>
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="form-actions">
+            <button
+              className="button primary"
+              disabled={creating || !slug || !displayName}
+              type="submit"
+            >
+              {creating ? (
+                <LoaderCircle aria-hidden="true" className="spin" size={17} />
+              ) : (
+                <Plus aria-hidden="true" size={17} />
+              )}{" "}
+              Create app
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="console-apps">
+        <h2>Apps</h2>
+        {!apps ? (
+          <LoadingRows />
+        ) : apps.length === 0 ? (
+          <p className="console-empty">No apps yet. Create your first one above.</p>
+        ) : (
+          <ul className="console-app-list">
+            {apps.map((item) => (
+              <li key={item.id}>
+                <div className="console-app-main">
+                  <h3>{item.displayName}</h3>
+                  <p className="console-slug">/{item.slug}</p>
+                </div>
+                <div className="console-key">
+                  <code>{item.publishableKey}</code>
+                  <button
+                    aria-label={`Copy publishable key for ${item.displayName}`}
+                    className="icon-button"
+                    onClick={() => void copy(item.id, item.publishableKey)}
+                    type="button"
+                  >
+                    {copied === item.id ? (
+                      <Check aria-hidden="true" size={16} />
+                    ) : (
+                      <Copy aria-hidden="true" size={16} />
+                    )}
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </main>
+  );
+}
+
 function PublicLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="public-shell">
@@ -2348,6 +2745,7 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
         <nav>
           <Link to="/guide">For builders</Link>
           <Link to="/public">Live demo</Link>
+          <Link to="/console">Console</Link>
           <a
             className="button secondary small-button"
             href="https://github.com/ranfysvalle02/m-stash/blob/main/quickstart.md"

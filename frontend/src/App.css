@@ -259,6 +259,30 @@ input, textarea { transition: border-color .2s ease, box-shadow .25s ease, backg
 .faq-list summary:focus-visible { outline: 2px solid var(--aqua); outline-offset: 5px; }
 .faq-list details p { margin: 1rem 0 0; }
 .information-note { margin-top: 1.75rem; }
+
+.console-page { max-width: 62rem; }
+.console-form { max-width: 26rem; }
+.console-head { align-items: start; border-bottom: 1px solid var(--line); display: flex; gap: 1rem; justify-content: space-between; padding-bottom: 1.5rem; }
+.console-head h1 { font-size: clamp(2rem, 4vw, 3rem); margin: .4rem 0 .3rem; }
+.console-id { color: var(--muted); font-size: .85rem; margin: 0; }
+.console-create, .console-apps { border-bottom: 1px solid var(--line); padding: 1.75rem 0; }
+.console-create h2, .console-apps h2 { font-size: 1.35rem; margin: 0 0 1rem; }
+.console-create .profile-form { margin-top: 0; max-width: none; }
+.console-empty { color: var(--muted); }
+.console-app-list { display: grid; gap: .6rem; list-style: none; margin: 0; padding: 0; }
+.console-app-list li { align-items: center; border: 1px solid var(--line); border-radius: 8px; display: flex; flex-wrap: wrap; gap: .8rem; justify-content: space-between; padding: .9rem 1rem; }
+.console-app-main h3 { font-size: 1.05rem; margin: 0; }
+.console-slug { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; margin: .2rem 0 0; }
+.console-key { align-items: center; display: flex; gap: .4rem; min-width: 0; }
+.console-key code { background: rgba(3, 17, 23, .86); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; overflow-x: auto; padding: .35rem .5rem; white-space: nowrap; }
+.console-secret { border: 1px solid var(--aqua); border-radius: 10px; margin-top: 1.75rem; padding: 1.25rem; }
+.console-secret h2 { font-size: 1.25rem; margin: .4rem 0 .5rem; }
+.console-secret > p { color: var(--muted); line-height: 1.6; max-width: 48ch; }
+.key-row { align-items: center; display: grid; gap: .6rem; grid-template-columns: 8rem minmax(0, 1fr) auto; margin-top: .8rem; }
+.key-row span { color: var(--muted); font-size: .8rem; font-weight: 700; }
+.key-row code { background: rgba(3, 17, 23, .86); border: 1px solid var(--line); border-radius: 6px; color: var(--mongo); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; overflow-x: auto; padding: .4rem .55rem; white-space: nowrap; }
+.console-secret .button { margin-top: 1.1rem; }
+
 @media (max-width: 760px) {
 	.information-intro h1 { font-size: 2rem; }
 	.public-header { flex-wrap: wrap; gap: .85rem; }
@@ -266,4 +290,6 @@ input, textarea { transition: border-color .2s ease, box-shadow .25s ease, backg
 	.public-header nav a { white-space: nowrap; }
 	.public-footer { flex-wrap: wrap; gap: 1.25rem; }
 	.public-footer nav { width: 100%; }
+	.key-row { grid-template-columns: 1fr auto; }
+	.key-row span { grid-column: 1 / -1; }
 }
