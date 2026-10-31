@@ -34,9 +34,11 @@ import {
   Link,
   Navigate,
   NavLink,
+  Outlet,
   Route,
   Routes,
   useNavigate,
+  useOutletContext,
   useParams,
 } from "react-router-dom";
 import {
@@ -145,14 +147,35 @@ function App() {
             }
           />
           <Route
-            path="/app/*"
+            path="/app"
             element={
               <Workspace
                 session={browserSession.session}
                 setSession={browserSession.setSession}
               />
             }
-          />
+          >
+            <Route index element={<WorkspaceIndexRoute />} />
+            <Route
+              path="resources/:type"
+              element={<PersonalDashboardRoute />}
+            />
+            <Route
+              path="resources/:type/new"
+              element={<PersonalEditorRoute />}
+            />
+            <Route
+              path="resources/:type/:slug"
+              element={<PersonalEditorRoute />}
+            />
+            <Route path="shared" element={<SharedHomeRoute />} />
+            <Route path="shared/:type" element={<SharedDashboardRoute />} />
+            <Route path="shared/:type/new" element={<SharedEditorRoute />} />
+            <Route path="shared/:type/:slug" element={<SharedEditorRoute />} />
+            <Route path="namespace" element={<NamespaceSettingsRoute />} />
+            <Route path="guide" element={<GuideContent />} />
+            <Route path="*" element={<WorkspaceIndexRoute />} />
+          </Route>
           <Route path="/public" element={<PublicSharedDataPage />} />
           <Route
             path="/public/:type"
@@ -379,90 +402,68 @@ function WorkspaceGate({
       namespace={namespace}
       setSession={setSession}
     >
-      <Routes>
-        <Route
-          path="resources/:type"
-          element={
-            namespace ? (
-              <NamespaceDashboard scope="personal" canWrite />
-            ) : (
-              <Navigate replace to="/app/shared" />
-            )
-          }
-        />
-        <Route
-          path="resources/:type/new"
-          element={
-            namespace ? (
-              <NamespaceResourceEditor scope="personal" canWrite />
-            ) : (
-              <Navigate replace to="/app/shared" />
-            )
-          }
-        />
-        <Route
-          path="resources/:type/:slug"
-          element={
-            namespace ? (
-              <NamespaceResourceEditor scope="personal" canWrite />
-            ) : (
-              <Navigate replace to="/app/shared" />
-            )
-          }
-        />
-        <Route
-          path="shared"
-          element={<SharedDataHome canWrite={claims.role === "admin"} />}
-        />
-        <Route
-          path="shared/:type"
-          element={
-            <NamespaceDashboard
-              scope="shared"
-              canWrite={claims.role === "admin"}
-            />
-          }
-        />
-        <Route
-          path="shared/:type/new"
-          element={
-            <NamespaceResourceEditor
-              scope="shared"
-              canWrite={claims.role === "admin"}
-            />
-          }
-        />
-        <Route
-          path="shared/:type/:slug"
-          element={
-            <NamespaceResourceEditor
-              scope="shared"
-              canWrite={claims.role === "admin"}
-            />
-          }
-        />
-        <Route
-          path="namespace"
-          element={
-            namespace ? (
-              <NamespaceSettings />
-            ) : (
-              <Navigate replace to="/app/shared" />
-            )
-          }
-        />
-        <Route path="guide" element={<GuideContent />} />
-        <Route
-          path="*"
-          element={
-            <Navigate
-              replace
-              to={namespace ? "resources/record" : "shared"}
-            />
-          }
-        />
-      </Routes>
+      <Outlet context={{ namespace, claims } satisfies WorkspaceContext} />
     </WorkspaceShell>
+  );
+}
+
+type WorkspaceContext = {
+  namespace?: Namespace;
+  claims: UserClaims;
+};
+
+function useWorkspace(): WorkspaceContext {
+  return useOutletContext<WorkspaceContext>();
+}
+
+function WorkspaceIndexRoute() {
+  const { namespace } = useWorkspace();
+  return (
+    <Navigate replace to={namespace ? "/app/resources/record" : "/app/shared"} />
+  );
+}
+
+function PersonalDashboardRoute() {
+  const { namespace } = useWorkspace();
+  return namespace ? (
+    <NamespaceDashboard scope="personal" canWrite />
+  ) : (
+    <Navigate replace to="/app/shared" />
+  );
+}
+
+function PersonalEditorRoute() {
+  const { namespace } = useWorkspace();
+  return namespace ? (
+    <NamespaceResourceEditor scope="personal" canWrite />
+  ) : (
+    <Navigate replace to="/app/shared" />
+  );
+}
+
+function SharedHomeRoute() {
+  const { claims } = useWorkspace();
+  return <SharedDataHome canWrite={claims.role === "admin"} />;
+}
+
+function SharedDashboardRoute() {
+  const { claims } = useWorkspace();
+  return <NamespaceDashboard scope="shared" canWrite={claims.role === "admin"} />;
+}
+
+function SharedEditorRoute() {
+  const { claims } = useWorkspace();
+  return (
+    <NamespaceResourceEditor scope="shared" canWrite={claims.role === "admin"} />
+  );
+}
+
+function NamespaceSettingsRoute() {
+  const { namespace } = useWorkspace();
+  return namespace ? (
+    <NamespaceSettings />
+  ) : (
+    <Navigate replace to="/app/shared" />
   );
 }
 
