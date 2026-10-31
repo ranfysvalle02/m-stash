@@ -63,12 +63,12 @@ func main() {
 	}
 	app := newApplication(appConfig, database, client)
 	log.Printf("✅ Connected to Mongo database: '%s'", appConfig.Database)
-	uiAppKey, err := app.ensureDefaultApp(ctx)
-	if err != nil {
-		log.Fatalf("Failed to ensure default application: %v", err)
+	if uiAppKey, err := app.ensureDefaultApp(ctx); err != nil {
+		log.Printf("⚠️  Could not ensure default application (UI may need UI_APP_KEY): %v", err)
+	} else {
+		app.uiAppKey = uiAppKey
+		log.Printf("🪪 UI bound to application key %s", uiAppKey)
 	}
-	app.uiAppKey = uiAppKey
-	log.Printf("🪪 UI bound to application key %s", uiAppKey)
 	if appConfig.MetricsToken == "" {
 		log.Print("Metrics endpoint disabled because METRICS_TOKEN is not configured")
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -156,6 +157,9 @@ func (app *application) createAccountWithPersonalNamespace(ctx context.Context, 
 }
 
 func ensureNamespaceIndexes(ctx context.Context, database *mongo.Database) error {
+	if err := dropLegacySingleTenantIndexes(ctx, database); err != nil {
+		return err
+	}
 	if _, err := database.Collection(namespaceCollectionName).Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{Keys: bson.D{{Key: "appId", Value: 1}, {Key: "slug", Value: 1}}, Options: options.Index().SetUnique(true)},
 		{Keys: bson.D{{Key: "appId", Value: 1}, {Key: "ownerId", Value: 1}}, Options: options.Index().SetUnique(true).SetPartialFilterExpression(bson.M{"kind": personalNamespaceKind})},
@@ -177,6 +181,38 @@ func ensureNamespaceIndexes(ctx context.Context, database *mongo.Database) error
 		return err
 	}
 	return nil
+}
+
+// dropLegacySingleTenantIndexes removes global unique indexes left over from the
+// pre-multi-tenant schema. They enforced uniqueness across all apps and would
+// reject per-app documents that legitimately share a slug/email/type. Missing
+// indexes are ignored, so this is safe to run on every boot.
+func dropLegacySingleTenantIndexes(ctx context.Context, database *mongo.Database) error {
+	legacy := map[string][]string{
+		namespaceCollectionName: {"slug_1", "ownerId_1", "kind_1"},
+		"_users":                {"email_1"},
+		resourceCollectionName:  {"type_1_slug_1", "slug_1"},
+	}
+	for collection, names := range legacy {
+		for _, name := range names {
+			if err := database.Collection(collection).Indexes().DropOne(ctx, name); err != nil {
+				if isIndexNotFoundError(err) {
+					continue
+				}
+				return err
+			}
+			log.Printf("🧹 Dropped legacy index %s.%s", collection, name)
+		}
+	}
+	return nil
+}
+
+func isIndexNotFoundError(err error) bool {
+	var commandErr mongo.CommandError
+	if errors.As(err, &commandErr) {
+		return commandErr.Code == 27
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "index not found")
 }
 
 func normalizeNamespaceSlug(value string) string {

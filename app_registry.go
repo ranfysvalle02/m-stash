@@ -151,6 +151,19 @@ func (app *application) ensureDefaultApp(ctx context.Context) (string, error) {
 		return "", err
 	}
 
+	// Adopt any existing app rather than creating a duplicate tenant.
+	err = app.database.Collection(appsCollectionName).FindOne(
+		ctx,
+		bson.M{"active": true},
+		options.FindOne().SetSort(bson.D{{Key: "createdAt", Value: 1}}),
+	).Decode(&existing)
+	if err == nil {
+		return existing.PublishableKey, nil
+	}
+	if !errors.Is(err, mongo.ErrNoDocuments) {
+		return "", err
+	}
+
 	record, _, _, provisionErr := app.provisionApp(ctx, provisionAppInput{
 		Slug:        slug,
 		DisplayName: app.config.DefaultAppName,
