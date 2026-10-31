@@ -128,6 +128,46 @@ func (app *application) lookupApp(ctx context.Context, publishableKey string) (*
 	return &record, nil
 }
 
+// ensureDefaultApp resolves the publishable key the bundled UI ships with, so a
+// fresh deployment works without any manual provisioning. An explicit UI_APP_KEY
+// always wins; otherwise the default tenant is found-or-created on boot.
+func (app *application) ensureDefaultApp(ctx context.Context) (string, error) {
+	if key := strings.TrimSpace(app.config.UIAppKey); key != "" {
+		return key, nil
+	}
+
+	slug := normalizeNamespaceSlug(app.config.DefaultAppSlug)
+	if slug == "" {
+		slug = "m-stash"
+	}
+
+	var existing AppRecord
+	err := app.database.Collection(appsCollectionName).
+		FindOne(ctx, bson.M{"slug": slug}).Decode(&existing)
+	if err == nil {
+		return existing.PublishableKey, nil
+	}
+	if !errors.Is(err, mongo.ErrNoDocuments) {
+		return "", err
+	}
+
+	record, _, _, provisionErr := app.provisionApp(ctx, provisionAppInput{
+		Slug:        slug,
+		DisplayName: app.config.DefaultAppName,
+	})
+	if provisionErr != nil {
+		// Another instance may have won the race; fall back to a lookup.
+		if mongo.IsDuplicateKeyError(provisionErr) {
+			if lookupErr := app.database.Collection(appsCollectionName).
+				FindOne(ctx, bson.M{"slug": slug}).Decode(&existing); lookupErr == nil {
+				return existing.PublishableKey, nil
+			}
+		}
+		return "", provisionErr
+	}
+	return record.PublishableKey, nil
+}
+
 func appKeyFromRequest(r *http.Request) string {
 	if key := strings.TrimSpace(r.Header.Get(appKeyHeader)); key != "" {
 		return key

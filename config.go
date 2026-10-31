@@ -23,6 +23,9 @@ type Config struct {
 	RefreshSessionTTL   time.Duration
 	SessionCookieSecure bool
 	PlatformToken       string
+	UIAppKey            string
+	DefaultAppSlug      string
+	DefaultAppName      string
 	WebhookDelivery     bool
 	WebhookPollInterval time.Duration
 	WebhookMaxAttempts  int
@@ -71,6 +74,9 @@ func loadConfig() (Config, error) {
 		RefreshSessionTTL:   refreshSessionTTL,
 		SessionCookieSecure: sessionCookieSecure,
 		PlatformToken:       getEnv("PLATFORM_TOKEN", ""),
+		UIAppKey:            getEnv("UI_APP_KEY", ""),
+		DefaultAppSlug:      getEnv("DEFAULT_APP_SLUG", "m-stash"),
+		DefaultAppName:      getEnv("DEFAULT_APP_NAME", "m-stash"),
 		WebhookDelivery:     webhookDelivery,
 		WebhookPollInterval: webhookPollInterval,
 		WebhookMaxAttempts:  webhookMaxAttempts,

@@ -17,6 +17,7 @@ type application struct {
 	metrics     *metricsRegistry
 	logger      *slog.Logger
 	appCache    *appKeyCache
+	uiAppKey    string
 }
 
 func newApplication(appConfig Config, database *mongo.Database, client *mongo.Client) *application {

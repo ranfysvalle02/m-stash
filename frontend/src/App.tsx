@@ -259,7 +259,7 @@ function AuthenticationPage({
         </h1>
         <p className="auth-intro">
           {isSignUp
-            ? "Choose a username for your public data URL. Private records stay visible only to you."
+            ? "Pick a username and you’re in — your data space is ready in seconds. Everything you create stays private until you choose to share it."
             : "Sign in to manage your personal records and shared application data."}
         </p>
         <form onSubmit={submit}>
@@ -862,7 +862,7 @@ function NamespaceDashboard({
               ? canWrite
                 ? `Create a shared ${type} record, then choose whether it stays private, serves signed-in users, or publishes at /public/${type}/... .`
                 : "An administrator has not published shared data of this type yet."
-              : `Create a private ${type} first, then make it public when its canonical route is ready to share.`}
+              : `This is your private space — nothing is public until you say so. Create your first ${type} to get started.`}
           </p>
           {canWrite && (
             <Link className="button primary" to={`${routeBase}/${type}/new`}>
