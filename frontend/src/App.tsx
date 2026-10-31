@@ -1660,11 +1660,12 @@ function PublicSharedDataPage() {
           <p className="eyebrow">
             <Globe2 aria-hidden="true" size={15} /> Read-only live demo
           </p>
-          <h1>See app data through the API.</h1>
+          <h1>Your app's backend, out loud.</h1>
           <p>
-            Explore records this sample app has chosen to publish. This is a
-            developer demo of the data API, not an end-user product to sign up
-            for. Builders: start with the <Link to="/guide">Quickstart</Link>.
+            Every record here is a live m-stash API response — the same backend
+            an AI-built app calls for auth and per-user data. A developer demo,
+            not a product to sign up for. Builders start with the{" "}
+            <Link to="/guide">Quickstart</Link>.
           </p>
         </div>
         <section className="public-lookup" aria-labelledby="public-bucket-title">
@@ -1754,12 +1755,18 @@ function PublicSharedResourceCollectionPage() {
     <PublicLayout>
       <main className="discovery-page">
         <Link className="back-link" to="/public">
-          <ArrowLeft aria-hidden="true" size={17} /> Deployment public data
+          <ArrowLeft aria-hidden="true" size={17} /> All public data
         </Link>
         <div className="discover-intro">
-          <p className="eyebrow">Public deployment bucket</p>
+          <p className="eyebrow">
+            <Globe2 aria-hidden="true" size={15} /> Public bucket
+          </p>
           <h1>{type}</h1>
-          <p>Deployment-owned {type} records published for anyone to read.</p>
+          <p>
+            The exact JSON any client reads from{" "}
+            <code>GET /v1/public/shared/resources/{type}</code> — the {type}{" "}
+            records this app chose to make public. No auth, no keys.
+          </p>
         </div>
         {error && (
           <p className="form-error" role="alert">
@@ -1769,9 +1776,10 @@ function PublicSharedResourceCollectionPage() {
         {resources.length === 0 && !error ? (
           <section className="empty-state discovery-empty">
             <Globe2 aria-hidden="true" size={28} />
-            <h2>No public {type} records yet.</h2>
+            <h2>Nothing public in {type} yet.</h2>
             <p>
-              The deployment has not published any records in this bucket yet.
+              When this app publishes a public {type} record, it shows up here
+              — and in the API — for every client, instantly.
             </p>
           </section>
         ) : (
@@ -1792,7 +1800,7 @@ function PublicSharedResourceCollectionPage() {
                   </h2>
                   <p>
                     {resource.summary ||
-                      "Open this deployment-published record to view the details."}
+                      "Open to read the full record."}
                   </p>
                 </div>
                 <Link
