@@ -1801,7 +1801,9 @@ function VibePage() {
           </p>
         </div>
 
-        {available === false ? (
+        {available === null ? (
+          <p className="vibe-checking">Checking the lab…</p>
+        ) : available === false ? (
           <section className="empty-state">
             <Wand2 aria-hidden="true" size={28} />
             <h2>The vibe lab isn’t switched on here.</h2>

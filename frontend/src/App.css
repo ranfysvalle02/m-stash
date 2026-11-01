@@ -184,6 +184,7 @@ input::placeholder, textarea::placeholder { color: #92948f; }
 .vibe-why { align-items: center; color: #227a54; display: flex; font-size: .95rem; font-weight: 700; gap: .5rem; margin-top: 2rem; }
 .vibe-finish { align-items: center; border-top: 1px solid #cfc6b8; display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 2.25rem; padding-top: 1.5rem; }
 .vibe-finish p { color: #8a7f6c; font-size: .82rem; margin: 0; }
+.vibe-checking { color: #8a7f6c; font-size: .9rem; margin-top: 2rem; }
 .live-demo-realize { color: #68747c; font-size: .86rem; font-weight: 700; line-height: 1.45; margin: 0; max-width: 24rem; }
 .live-demo-body .spin { flex: 0 0 auto; }
 @keyframes live-demo-reveal { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
