@@ -182,6 +182,9 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 export const api = {
   publishableKey: () => appKey(),
 
+  // A readable hint that a session exists; the csrf cookie is set (non-HttpOnly) alongside the session.
+  hasSessionHint: () => csrfToken() !== '',
+
   async signUpWithNamespace(email: string, password: string, username: string) {
     return request<{ token: string; user: { id: string; email: string; role: string }; namespace: Namespace }>('/v1/auth/signup', {
       method: 'POST', body: { email, password, username }, retrySession: false,

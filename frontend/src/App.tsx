@@ -111,6 +111,10 @@ function useBrowserSession() {
 
   async function restore() {
     setSession({ kind: "loading" });
+    if (!api.hasSessionHint()) {
+      setSession({ kind: "anonymous" });
+      return undefined;
+    }
     try {
       const claims = await api.verifySession();
       setSession({ kind: "authenticated", claims });
@@ -1639,11 +1643,11 @@ function NamespaceLookupPage() {
           <div className="discover-actions">
             <a
               className="button primary"
-              href="https://github.com/ranfysvalle02/m-stash/blob/main/quickstart.md"
+              href="https://github.com/ranfysvalle02/m-stash/blob/main/quick.md"
               rel="noreferrer"
               target="_blank"
             >
-              <ArrowUpRight aria-hidden="true" size={17} /> Start with the quickstart
+              <ArrowUpRight aria-hidden="true" size={17} /> Build your first app
             </a>
             <Link className="discover-guide-link" to="/public">
               Explore the live demo <ArrowUpRight aria-hidden="true" size={16} />
@@ -1689,11 +1693,11 @@ function NamespaceLookupPage() {
           </div>
           <a
             className="button secondary"
-            href="https://github.com/ranfysvalle02/m-stash/blob/main/quickstart.md"
+            href="https://github.com/ranfysvalle02/m-stash/blob/main/quick.md"
             rel="noreferrer"
             target="_blank"
           >
-            Read the quickstart <ArrowUpRight aria-hidden="true" size={16} />
+            Read the build guide <ArrowUpRight aria-hidden="true" size={16} />
           </a>
         </section>
       </main>
