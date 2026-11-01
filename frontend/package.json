@@ -10,21 +10,21 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "lucide-react": "^1.48.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "lucide-react": "^1.64.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "react-markdown": "^10.1.0",
-    "react-router-dom": "^7.18.4",
+    "react-router-dom": "^7.18.5",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
-    "@types/node": "^24.13.3",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
-    "@vitejs/plugin-react": "^6.1.1",
-    "oxlint": "^1.81.0",
-    "typescript": "~6.0.2",
-    "vite": "^8.3.0"
+    "@vitejs/plugin-react": "^6.1.2",
+    "oxlint": "^1.90.0",
+    "typescript": "~7.0.2",
+    "vite": "^8.3.5"
   }
 }
