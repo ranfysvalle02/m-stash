@@ -195,7 +195,7 @@ func (app *application) handleVibe(w http.ResponseWriter, r *http.Request) {
 	plan, err := app.generateVibePlan(ctx, idea)
 	if err != nil {
 		app.logger.Error("vibe generation failed", "request_id", requestIDFromContext(ctx), "error", err)
-		writeError(w, http.StatusBadGateway, "The vibe lab couldn't dream that one up — try rephrasing")
+		writeError(w, http.StatusBadGateway, "vibe-debug: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": plan})
