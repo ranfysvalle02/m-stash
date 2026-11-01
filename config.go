@@ -30,6 +30,9 @@ type Config struct {
 	WebhookDelivery     bool
 	WebhookPollInterval time.Duration
 	WebhookMaxAttempts  int
+	GeminiAPIKey        string
+	GeminiModel         string
+	VibeDailyLimit      int
 }
 
 func loadConfig() (Config, error) {
@@ -65,6 +68,10 @@ func loadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	vibeDailyLimit, err := getEnvInt("VIBE_DAILY_LIMIT", 500)
+	if err != nil {
+		return Config{}, err
+	}
 	loadedConfig := Config{
 		Port:                getEnv("PORT", "4000"),
 		MongoURI:            getEnv("MONGO_URI", "mongodb://localhost:27017"),
@@ -86,6 +93,9 @@ func loadConfig() (Config, error) {
 		WebhookDelivery:     webhookDelivery,
 		WebhookPollInterval: webhookPollInterval,
 		WebhookMaxAttempts:  webhookMaxAttempts,
+		GeminiAPIKey:        getEnv("GEMINI_API_KEY", ""),
+		GeminiModel:         getEnv("GEMINI_MODEL", "gemini-flash-latest"),
+		VibeDailyLimit:      vibeDailyLimit,
 	}
 
 	if len(loadedConfig.JWTSecret) < 32 {

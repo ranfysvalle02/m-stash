@@ -62,6 +62,27 @@ export interface PublicResource extends PublicResourcePreview {
   data?: Record<string, unknown>
 }
 
+export interface VibeModelPart {
+  name: string
+  scope: string
+  type: string
+  visibility: string
+  purpose: string
+}
+
+export interface VibeSnippet {
+  title: string
+  language: string
+  code: string
+}
+
+export interface VibePlan {
+  summary: string
+  dataModel: VibeModelPart[]
+  snippets: VibeSnippet[]
+  whyMStash: string
+}
+
 export interface BuilderApp {
   id: string
   slug: string
@@ -300,6 +321,11 @@ export const api = {
 
   async getPublicSharedResource(type: string, slug: string) {
     const response = await request<APIEnvelope<PublicResource>>(`/v1/public/shared/resources/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`)
+    return response.data
+  },
+
+  async vibe(idea: string) {
+    const response = await request<APIEnvelope<VibePlan>>('/v1/vibe', { method: 'POST', body: { idea }, retrySession: false })
     return response.data
   },
 

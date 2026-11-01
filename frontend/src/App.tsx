@@ -24,7 +24,9 @@ import {
   Save,
   Settings,
   ShieldCheck,
+  Sparkles,
   Trash2,
+  Wand2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
@@ -55,6 +57,7 @@ import {
   type ResourceInput,
   type ResourcePreview,
   type UserClaims,
+  type VibePlan,
 } from "./api";
 import "./App.css";
 
@@ -146,6 +149,7 @@ function App() {
           <Route path="/" element={<Navigate replace to="/discover" />} />
           <Route path="/discover" element={<NamespaceLookupPage />} />
           <Route path="/guide" element={<GuidePage />} />
+          <Route path="/vibe" element={<VibePage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/faq" element={<FAQPage />} />
           <Route path="/console" element={<ConsolePage />} />
@@ -1731,7 +1735,206 @@ function LiveApiDemo() {
   );
 }
 
+function useVibeAvailable() {
+  const [available, setAvailable] = useState<boolean | null>(null);
+  useEffect(() => {
+    let active = true;
+    void fetch("/.well-known/m-stash.json")
+      .then((response) => response.json())
+      .then((manifest) => {
+        if (active)
+          setAvailable(Boolean(manifest?.capabilities?.vibe?.enabled));
+      })
+      .catch(() => {
+        if (active) setAvailable(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  return available;
+}
+
+const vibeExamples = [
+  "a co-op game with save slots and a public leaderboard",
+  "a habit tracker with private streaks and a public profile",
+  "a recipe app where users keep private recipes and publish some",
+];
+
+function VibePage() {
+  const available = useVibeAvailable();
+  const [idea, setIdea] = useState("");
+  const [state, setState] = useState<"idle" | "loading" | "done" | "error">(
+    "idle",
+  );
+  const [plan, setPlan] = useState<VibePlan | null>(null);
+  const [errorText, setErrorText] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = idea.trim();
+    if (!trimmed) return;
+    setState("loading");
+    setErrorText("");
+    try {
+      const result = await api.vibe(trimmed);
+      setPlan(result);
+      setState("done");
+    } catch (requestError) {
+      setErrorText(messageFromError(requestError));
+      setState("error");
+    }
+  }
+
+  return (
+    <PublicLayout>
+      <main className="discovery-page vibe-page">
+        <div className="discover-intro">
+          <p className="eyebrow">
+            <Sparkles aria-hidden="true" size={15} /> Vibe lab
+          </p>
+          <h1>Describe your app. Get its backend.</h1>
+          <p>
+            Tell us what you're building. m-stash sketches the data model and
+            hands you copy-paste code — grounded in the real API, no account
+            needed.
+          </p>
+        </div>
+
+        {available === false ? (
+          <section className="empty-state">
+            <Wand2 aria-hidden="true" size={28} />
+            <h2>The vibe lab isn’t switched on here.</h2>
+            <p>
+              This deployment hasn’t set a model key yet. In the meantime, the{" "}
+              <Link to="/public">live demo</Link> and the{" "}
+              <a
+                href="https://github.com/ranfysvalle02/m-stash/blob/main/quick.md"
+                rel="noreferrer"
+                target="_blank"
+              >
+                build guide
+              </a>{" "}
+              show m-stash in action.
+            </p>
+          </section>
+        ) : (
+          <>
+            <form className="vibe-form" onSubmit={submit}>
+              <label>
+                Your app idea
+                <textarea
+                  maxLength={600}
+                  onChange={(event) => setIdea(event.target.value)}
+                  placeholder="a co-op game with save slots and a public leaderboard"
+                  rows={3}
+                  value={idea}
+                />
+              </label>
+              <div className="vibe-examples">
+                {vibeExamples.map((example) => (
+                  <button
+                    className="vibe-chip"
+                    key={example}
+                    onClick={() => setIdea(example)}
+                    type="button"
+                  >
+                    {example}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="button primary"
+                disabled={state === "loading" || !idea.trim()}
+                type="submit"
+              >
+                {state === "loading" ? (
+                  <>
+                    <LoaderCircle aria-hidden="true" className="spin" size={17} />{" "}
+                    Vibing…
+                  </>
+                ) : (
+                  <>
+                    <Wand2 aria-hidden="true" size={17} /> Vibe my backend
+                  </>
+                )}
+              </button>
+            </form>
+
+            {state === "error" && (
+              <p className="form-error" role="alert">
+                {errorText}
+              </p>
+            )}
+
+            {state === "done" && plan && (
+              <section className="vibe-result">
+                {plan.summary && <p className="vibe-summary">{plan.summary}</p>}
+                {plan.dataModel.length > 0 && (
+                  <div className="vibe-block">
+                    <h2>Data model</h2>
+                    <div className="vibe-model-grid">
+                      {plan.dataModel.map((part, index) => (
+                        <article className="vibe-model-card" key={index}>
+                          <div className="vibe-model-head">
+                            <strong>{part.name}</strong>
+                            {part.visibility && (
+                              <span className="vibe-badge">
+                                {part.visibility}
+                              </span>
+                            )}
+                          </div>
+                          <p className="vibe-model-meta">
+                            {[part.scope, part.type]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </p>
+                          <p>{part.purpose}</p>
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {plan.snippets.length > 0 && (
+                  <div className="vibe-block">
+                    <h2>Copy-paste it</h2>
+                    {plan.snippets.map((snippet, index) => (
+                      <CopyableSnippet
+                        code={snippet.code}
+                        description={snippet.language}
+                        key={index}
+                        title={snippet.title}
+                      />
+                    ))}
+                  </div>
+                )}
+                {plan.whyMStash && (
+                  <p className="vibe-why">
+                    <ShieldCheck aria-hidden="true" size={16} /> {plan.whyMStash}
+                  </p>
+                )}
+                <div className="vibe-finish">
+                  <a
+                    className="button primary"
+                    href="https://github.com/ranfysvalle02/m-stash/blob/main/quick.md"
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <ArrowUpRight aria-hidden="true" size={17} /> Build it for real
+                  </a>
+                  <p>Generated as a sketch — your code, your call.</p>
+                </div>
+              </section>
+            )}
+          </>
+        )}
+      </main>
+    </PublicLayout>
+  );
+}
+
 function NamespaceLookupPage() {
+  const vibeOn = useVibeAvailable();
   return (
     <PublicLayout>
       <main className="discovery-page">
@@ -1754,9 +1957,17 @@ function NamespaceLookupPage() {
             >
               <ArrowUpRight aria-hidden="true" size={17} /> Build your first app
             </a>
-            <Link className="discover-guide-link" to="/public">
-              Explore the live demo <ArrowUpRight aria-hidden="true" size={16} />
-            </Link>
+            {vibeOn ? (
+              <Link className="discover-guide-link" to="/vibe">
+                <Sparkles aria-hidden="true" size={16} /> Vibe a backend for your
+                idea
+              </Link>
+            ) : (
+              <Link className="discover-guide-link" to="/public">
+                Explore the live demo{" "}
+                <ArrowUpRight aria-hidden="true" size={16} />
+              </Link>
+            )}
           </div>
           <p className="builder-promise">
             Your users sign up in <em>your</em> app. No m-stash user account

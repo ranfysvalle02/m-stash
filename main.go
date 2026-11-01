@@ -86,6 +86,13 @@ func main() {
 	}
 
 	authRateLimiter := newAuthRateLimiter(database, 10, 5*time.Minute)
+	app.vibeLimiter = newAuthRateLimiter(database, 8, time.Minute)
+	app.vibeDailyLimiter = newAuthRateLimiter(database, appConfig.VibeDailyLimit, 24*time.Hour)
+	if app.vibeEnabled() {
+		log.Printf("✨ Vibe lab enabled (model %s, daily cap %d)", appConfig.GeminiModel, appConfig.VibeDailyLimit)
+	} else {
+		log.Print("Vibe lab disabled because GEMINI_API_KEY is not configured")
+	}
 	var deliveryWorker *webhookWorker
 	if appConfig.WebhookDelivery {
 		deliveryWorker = newWebhookWorker(app)

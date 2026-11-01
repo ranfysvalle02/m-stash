@@ -11,13 +11,15 @@ import (
 )
 
 type application struct {
-	config      Config
-	database    *mongo.Database
-	mongoClient *mongo.Client
-	metrics     *metricsRegistry
-	logger      *slog.Logger
-	appCache    *appKeyCache
-	uiAppKey    string
+	config           Config
+	database         *mongo.Database
+	mongoClient      *mongo.Client
+	metrics          *metricsRegistry
+	logger           *slog.Logger
+	appCache         *appKeyCache
+	uiAppKey         string
+	vibeLimiter      *authRateLimiter
+	vibeDailyLimiter *authRateLimiter
 }
 
 func newApplication(appConfig Config, database *mongo.Database, client *mongo.Client) *application {
@@ -53,6 +55,7 @@ func (app *application) Handler(rateLimiter *authRateLimiter) http.Handler {
 	mux.HandleFunc("/v1/shared/webhooks", app.resolveApp(app.corsMiddleware(app.authenticateSharedResource(app.handleSharedWebhooks))))
 	mux.HandleFunc("/v1/shared/webhooks/", app.resolveApp(app.corsMiddleware(app.authenticateSharedResource(app.handleSharedWebhooks))))
 	mux.HandleFunc("/.well-known/m-stash.json", app.corsMiddleware(app.handleServiceManifest))
+	mux.HandleFunc("/v1/vibe", app.corsMiddleware(app.handleVibe))
 	mux.HandleFunc("/v1/public/shared/resources/", app.resolveApp(app.corsMiddleware(app.handlePublicSharedResources)))
 	mux.HandleFunc("/v1/public/", app.resolveApp(app.corsMiddleware(app.handlePublicNamespace)))
 	mux.HandleFunc("/metrics", app.handleMetrics)
@@ -101,6 +104,10 @@ func (app *application) handleServiceManifest(w http.ResponseWriter, r *http.Req
 			"metrics": map[string]any{
 				"enabled":  app.config.MetricsToken != "",
 				"endpoint": "/metrics",
+			},
+			"vibe": map[string]any{
+				"enabled":  app.vibeEnabled(),
+				"endpoint": "/v1/vibe",
 			},
 		},
 	})

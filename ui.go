@@ -56,7 +56,6 @@ func (app *application) serveIndexHTML(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(contents))
 }
 
-
 func serveEmbeddedFrontendFile(w http.ResponseWriter, r *http.Request, filePath string) bool {
 	contents, err := embeddedFrontend.ReadFile("frontend/dist/" + filePath)
 	if err != nil {
