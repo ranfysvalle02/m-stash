@@ -153,6 +153,8 @@ input::placeholder, textarea::placeholder { color: #92948f; }
 .live-demo-bar code { color: #9fe8d6; font-family: 'SFMono-Regular', Consolas, monospace; font-size: .78rem; margin-left: .55rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .live-demo-dot { border-radius: 50%; flex: 0 0 auto; height: 11px; width: 11px; }
 .live-demo-dot:nth-child(1) { background: #ff6b5f; }
+.live-demo-copy { align-items: center; background: rgba(66, 245, 141, .12); border: 1px solid #1f3b44; border-radius: 6px; color: #9fe8d6; cursor: pointer; display: inline-flex; flex: 0 0 auto; font-family: 'SFMono-Regular', Consolas, monospace; font-size: .7rem; font-weight: 700; gap: .3rem; margin-left: auto; padding: .25rem .5rem; }
+.live-demo-copy:hover { color: #42f58d; }
 .live-demo-dot:nth-child(2) { background: #ffcf5c; }
 .live-demo-dot:nth-child(3) { background: #42f58d; }
 .live-demo-body { min-height: 132px; padding: 1.1rem 1.3rem; }

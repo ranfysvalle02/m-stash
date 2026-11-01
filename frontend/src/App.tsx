@@ -1595,6 +1595,19 @@ function LiveApiDemo() {
   const result = results[active.key];
   const activeIndex = demoSteps.findIndex((step) => step.key === active.key);
   const nextStep = demoSteps[activeIndex + 1];
+  const [copied, setCopied] = useState(false);
+
+  async function copyCurl() {
+    const url = `${window.location.origin}/v1/public/shared/resources/${active.type}/${active.slug}`;
+    const command = `curl ${url} -H "X-M-Stash-App: ${api.publishableKey()}"`;
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
 
   async function run() {
     setRunState("loading");
@@ -1674,6 +1687,20 @@ function LiveApiDemo() {
           <code>
             GET /v1/public/shared/resources/{active.type}/{active.slug}
           </code>
+          <button
+            aria-label="Copy as cURL"
+            className="live-demo-copy"
+            onClick={() => void copyCurl()}
+            title={copied ? "Copied" : "Copy as cURL"}
+            type="button"
+          >
+            {copied ? (
+              <Check aria-hidden="true" size={13} />
+            ) : (
+              <Copy aria-hidden="true" size={13} />
+            )}
+            {copied ? "Copied" : "cURL"}
+          </button>
         </div>
         <div className="live-demo-body">
           {runState === "loading" && (

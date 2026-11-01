@@ -71,8 +71,9 @@ func (app *application) handleServiceManifest(w http.ResponseWriter, r *http.Req
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"apiVersion": "v1",
-		"service":    "m-stash",
+		"apiVersion":    "v1",
+		"service":       "m-stash",
+		"documentation": "/llms.txt",
 		"authentication": map[string]any{
 			"scheme":               "Bearer",
 			"applicationKeyHeader": appKeyHeader,

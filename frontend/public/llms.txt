@@ -1,0 +1,49 @@
+# m-stash
+
+> A small, self-hostable API that gives an app authentication plus per-user and app-wide data on MongoDB, with record ownership enforced server-side. Built for AI-built apps: add sign-up, login, and private per-user data without wiring a database or writing security rules.
+
+Every request identifies its app with the header `X-M-Stash-App: <publishableKey>`. The browser never receives database credentials and never chooses an owner; the server derives ownership from the authenticated session.
+
+## Core concepts
+
+- **Personal data**: owned by the signed-in user. The server scopes every record to its owner.
+- **Shared app data**: owned by the deployment/admin. Writes require an admin session or the app secret key (backend only).
+- **type**: a bucket name, e.g. `config`, `save`, `profile`, `leaderboard`.
+- **visibility** (per record): `private` (owner only), `authenticated` (any signed-in user), or `public` (anyone).
+
+## Endpoints
+
+- `POST /v1/apps` — provision an app (needs the platform token). Returns a publishable key (`pk_...`, safe in the browser) and a one-time secret key (`sk_...`, backend only).
+- `POST /v1/auth/signup` — body `{ email, password, username }`. Your users sign up in your app.
+- `POST /v1/auth/login` — body `{ email, password }`. Browser flows also set HttpOnly session cookies.
+- `GET|POST /v1/me/resources/{type}` and `GET|PUT|DELETE /v1/me/resources/{type}/{slug}` — personal data. Body `{ slug, title, data, visibility }`.
+- `GET|POST /v1/shared/resources/{type}` and `/{type}/{slug}` — shared app data; writes require admin or the app secret key.
+- `GET /v1/public/shared/resources/{type}/{slug}` — read one public shared record (no auth).
+- `GET /v1/public/{username}/{type}/{slug}` — read one public personal record (no auth).
+- `GET /.well-known/m-stash.json` — machine-readable service manifest.
+
+## Example
+
+```bash
+# Read a public record — no auth, just the app key header.
+curl "$API_URL/v1/public/shared/resources/config/release" -H "X-M-Stash-App: $APP_KEY"
+
+# Create a private record for the signed-in user.
+curl -X POST "$API_URL/v1/me/resources/save" \
+  -H "X-M-Stash-App: $APP_KEY" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"slug":"current","title":"Save slot","data":{"level":7},"visibility":"private"}'
+```
+
+## Rules for generated code
+
+- Always send `X-M-Stash-App: <publishableKey>` on every request.
+- Never put the secret key (`sk_...`), platform token, or MongoDB credentials in browser code.
+- Never let the browser choose an owner — the server assigns it from the session.
+- Pick `visibility` deliberately: default to `private`; use `public` only for records meant for everyone.
+
+## Docs
+
+- Quick build guide: https://github.com/ranfysvalle02/m-stash/blob/main/quick.md
+- Full integration reference: https://github.com/ranfysvalle02/m-stash/blob/main/integration.md
+- Deploy guide: https://github.com/ranfysvalle02/m-stash/blob/main/quickstart.md

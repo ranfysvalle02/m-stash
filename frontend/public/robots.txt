@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://m-stash.onrender.com/sitemap.xml
