@@ -93,6 +93,22 @@ func demoRecords() []demoRecord {
 				},
 			},
 		},
+		{
+			Type:    "metrics",
+			Slug:    "outcomes",
+			Title:   "m-stash by the numbers",
+			Summary: "The outcomes a buyer actually measures — quantified, and served as live JSON.",
+			Content: "# The metrics that matter\n\n" +
+				"Not a feature list — outcomes. This is the record a decision-maker screenshots.",
+			Data: bson.M{
+				"timeToFirstAuth":              "~12 minutes",
+				"securityRulesWritten":         0,
+				"databaseCredentialsInBrowser": 0,
+				"backendFilesYouMaintain":      0,
+				"tenantsIsolatedByDefault":     true,
+				"escapeHatch":                  "self-host + direct MongoDB access",
+			},
+		},
 	}
 }
 

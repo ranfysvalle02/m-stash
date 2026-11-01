@@ -1533,27 +1533,92 @@ function NamespaceSettings() {
   );
 }
 
+type DemoStep = {
+  key: string;
+  label: string;
+  type: string;
+  slug: string;
+  pain: string;
+  value: string;
+};
+
+const demoSteps: DemoStep[] = [
+  {
+    key: "config",
+    label: "App config",
+    type: "config",
+    slug: "release",
+    pain: "Where does my app read its settings?",
+    value: "No env wiring — clients read config straight from the API.",
+  },
+  {
+    key: "skip",
+    label: "What you skip",
+    type: "catalog",
+    slug: "what-you-get",
+    pain: "What do I still have to build myself?",
+    value: "Auth, per-user ownership, and public buckets — all server-side.",
+  },
+  {
+    key: "metrics",
+    label: "By the numbers",
+    type: "metrics",
+    slug: "outcomes",
+    pain: "So what's the actual payoff?",
+    value: "Zero security rules. Zero database credentials in the browser.",
+  },
+  {
+    key: "chores",
+    label: "Chores gone",
+    type: "leaderboard",
+    slug: "chores-eliminated",
+    pain: "What am I no longer on the hook to maintain?",
+    value: "The security plumbing you'd otherwise own forever.",
+  },
+];
+
 function LiveApiDemo() {
-  const [state, setState] = useState<"idle" | "loading" | "done" | "error">(
+  const [activeKey, setActiveKey] = useState(demoSteps[0].key);
+  const [runState, setRunState] = useState<"idle" | "loading" | "error">(
     "idle",
   );
-  const [payload, setPayload] = useState<Record<string, unknown> | null>(null);
-  const [elapsed, setElapsed] = useState<number | null>(null);
   const [errorText, setErrorText] = useState("");
+  const [results, setResults] = useState<
+    Record<string, { payload: Record<string, unknown>; elapsed: number }>
+  >({});
+
+  const active = demoSteps.find((step) => step.key === activeKey) ?? demoSteps[0];
+  const result = results[active.key];
+  const activeIndex = demoSteps.findIndex((step) => step.key === active.key);
+  const nextStep = demoSteps[activeIndex + 1];
 
   async function run() {
-    setState("loading");
+    setRunState("loading");
     setErrorText("");
     const started = performance.now();
     try {
-      const resource = await api.getPublicSharedResource("config", "release");
-      setPayload(resource.data ?? {});
-      setElapsed(Math.max(1, Math.round(performance.now() - started)));
-      setState("done");
+      const resource = await api.getPublicSharedResource(
+        active.type,
+        active.slug,
+      );
+      setResults((current) => ({
+        ...current,
+        [active.key]: {
+          payload: resource.data ?? {},
+          elapsed: Math.max(1, Math.round(performance.now() - started)),
+        },
+      }));
+      setRunState("idle");
     } catch (requestError) {
       setErrorText(messageFromError(requestError));
-      setState("error");
+      setRunState("error");
     }
+  }
+
+  function selectStep(key: string) {
+    setActiveKey(key);
+    setRunState("idle");
+    setErrorText("");
   }
 
   return (
@@ -1562,61 +1627,101 @@ function LiveApiDemo() {
         <p className="eyebrow">
           <Code2 aria-hidden="true" size={15} /> See for yourself
         </p>
-        <h2 id="live-demo-title">Press run. Watch a real backend answer.</h2>
+        <h2 id="live-demo-title">Run the pitch. One real call at a time.</h2>
         <p>
-          No account, no keys, no setup — this hits the live m-stash API right
-          now. Your app reads its own data the exact same way.
+          No account, no keys, no setup. Each step hits the live m-stash API and
+          answers a question a builder actually asks. Your app reads its data
+          the exact same way.
         </p>
       </div>
+      <div className="live-demo-steps" role="tablist" aria-label="Demo steps">
+        {demoSteps.map((step, index) => (
+          <button
+            aria-selected={step.key === active.key}
+            className={
+              step.key === active.key
+                ? "live-demo-step active"
+                : results[step.key]
+                  ? "live-demo-step done"
+                  : "live-demo-step"
+            }
+            key={step.key}
+            onClick={() => selectStep(step.key)}
+            role="tab"
+            type="button"
+          >
+            <span className="live-demo-step-index">
+              {results[step.key] ? (
+                <Check aria-hidden="true" size={12} />
+              ) : (
+                index + 1
+              )}
+            </span>
+            {step.label}
+          </button>
+        ))}
+      </div>
+      <p className="live-demo-pain">{active.pain}</p>
       <div className="live-demo-terminal">
         <div className="live-demo-bar">
           <span className="live-demo-dot" />
           <span className="live-demo-dot" />
           <span className="live-demo-dot" />
-          <code>GET /v1/public/shared/resources/config/release</code>
+          <code>
+            GET /v1/public/shared/resources/{active.type}/{active.slug}
+          </code>
         </div>
         <div className="live-demo-body">
-          {state === "idle" && (
-            <p className="live-demo-hint">// the response appears here</p>
-          )}
-          {state === "loading" && (
+          {runState === "loading" && (
             <p className="live-demo-hint">
               <LoaderCircle aria-hidden="true" className="spin" size={15} />{" "}
               calling the API…
             </p>
           )}
-          {state === "error" && <p className="live-demo-error">{errorText}</p>}
-          {state === "done" && payload && (
+          {runState === "error" && (
+            <p className="live-demo-error">{errorText}</p>
+          )}
+          {runState === "idle" && !result && (
+            <p className="live-demo-hint">// press run — the JSON appears here</p>
+          )}
+          {runState === "idle" && result && (
             <>
               <p className="live-demo-status">
-                <Check aria-hidden="true" size={14} /> 200 OK
-                {elapsed !== null ? ` · ${elapsed} ms` : ""}
+                <Check aria-hidden="true" size={14} /> 200 OK · {result.elapsed}{" "}
+                ms
               </p>
               <pre>
-                <code>{JSON.stringify(payload, null, 2)}</code>
+                <code>{JSON.stringify(result.payload, null, 2)}</code>
               </pre>
             </>
           )}
         </div>
       </div>
+      {result && (
+        <p className="live-demo-value">
+          <ArrowUpRight aria-hidden="true" size={15} /> {active.value}
+        </p>
+      )}
       <div className="live-demo-actions">
         <button
           className="button primary"
-          disabled={state === "loading"}
+          disabled={runState === "loading"}
           onClick={() => void run()}
           type="button"
         >
-          {state === "done" ? (
-            <>
-              <ArrowUpRight aria-hidden="true" size={17} /> Run it again
-            </>
-          ) : (
-            <>
-              <Code2 aria-hidden="true" size={17} /> Run the request
-            </>
-          )}
+          <Code2 aria-hidden="true" size={17} />{" "}
+          {result ? "Run it again" : "Run the request"}
         </button>
-        {state === "done" && (
+        {result && nextStep && (
+          <button
+            className="button secondary"
+            onClick={() => selectStep(nextStep.key)}
+            type="button"
+          >
+            Next: {nextStep.label} <ChevronRight aria-hidden="true" size={16} />
+          </button>
+        )}
+        {result && !nextStep && (
           <p className="live-demo-realize">
             That’s the whole move — the server owns the data, your app just asks.
           </p>
