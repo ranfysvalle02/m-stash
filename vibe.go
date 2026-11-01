@@ -79,15 +79,15 @@ func buildVibeUserPrompt(idea string) string {
 }
 
 func vibeResponseSchema() map[string]any {
-	stringField := map[string]any{"type": "string"}
+	stringField := map[string]any{"type": "STRING"}
 	return map[string]any{
-		"type": "object",
+		"type": "OBJECT",
 		"properties": map[string]any{
 			"summary": stringField,
 			"dataModel": map[string]any{
-				"type": "array",
+				"type": "ARRAY",
 				"items": map[string]any{
-					"type": "object",
+					"type": "OBJECT",
 					"properties": map[string]any{
 						"name":       stringField,
 						"scope":      stringField,
@@ -98,9 +98,9 @@ func vibeResponseSchema() map[string]any {
 				},
 			},
 			"snippets": map[string]any{
-				"type": "array",
+				"type": "ARRAY",
 				"items": map[string]any{
-					"type": "object",
+					"type": "OBJECT",
 					"properties": map[string]any{
 						"title":    stringField,
 						"language": stringField,
@@ -243,7 +243,7 @@ func (app *application) generateVibePlan(ctx context.Context, idea string) (*vib
 		return nil, err
 	}
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("gemini returned status %d", response.StatusCode)
+		return nil, fmt.Errorf("gemini returned status %d: %s", response.StatusCode, clampString(string(raw), 300))
 	}
 	return parseVibeResponse(raw)
 }
