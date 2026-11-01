@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,9 @@ const (
 
 // vibeHTTPClient is dedicated to the upstream model call so its timeout is independent of the request context.
 var vibeHTTPClient = &http.Client{Timeout: vibeRequestTimeout}
+
+// errVibeUnavailable marks an upstream capacity/billing failure (quota, rate, or credits) the caller can't fix by rephrasing.
+var errVibeUnavailable = errors.New("vibe upstream unavailable")
 
 func (app *application) vibeEnabled() bool {
 	return strings.TrimSpace(app.config.GeminiAPIKey) != ""
@@ -195,7 +199,11 @@ func (app *application) handleVibe(w http.ResponseWriter, r *http.Request) {
 	plan, err := app.generateVibePlan(ctx, idea)
 	if err != nil {
 		app.logger.Error("vibe generation failed", "request_id", requestIDFromContext(ctx), "error", err)
-		writeError(w, http.StatusBadGateway, "vibe-debug: "+err.Error())
+		if errors.Is(err, errVibeUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, "The vibe lab is out of capacity right now — try again later.")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "The vibe lab couldn't dream that one up — try rephrasing")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": plan})
@@ -243,6 +251,9 @@ func (app *application) generateVibePlan(ctx context.Context, idea string) (*vib
 		return nil, err
 	}
 	if response.StatusCode != http.StatusOK {
+		if response.StatusCode == http.StatusPaymentRequired || response.StatusCode == http.StatusTooManyRequests {
+			return nil, fmt.Errorf("%w: status %d", errVibeUnavailable, response.StatusCode)
+		}
 		return nil, fmt.Errorf("gemini returned status %d: %s", response.StatusCode, clampString(string(raw), 300))
 	}
 	return parseVibeResponse(raw)
