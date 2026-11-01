@@ -6,7 +6,7 @@ m-stash is a small, self-hostable API between your app and MongoDB. Your users s
 
 Use it for profiles, preferences, game saves, and app-wide configuration. Personal records belong to users; shared records belong to the app. New records are private by default, with deliberate options for signed-in or public access.
 
-**Start building:** follow the [Quickstart](quickstart.md) to deploy m-stash and provision an app. The hosted site is a demo, not a developer-account portal; app provisioning uses a platform token.
+**Start building:** new here? The [5-minute build guide](quick.md) goes from a new app to per-user data. To run your own instance, follow the [Quickstart](quickstart.md) to deploy m-stash and provision an app. The hosted site is a demo, not a developer-account portal; app provisioning uses a platform token.
 
 ## Applications
 
@@ -91,6 +91,7 @@ See [integration.md](integration.md) for request examples and [quickstart.md](qu
 | `ALLOWED_ORIGINS` | No | Comma-separated default allowed browser origins. Each app may also carry its own `allowedOrigins`. Blank or unset currently permits all origins for early development. |
 | `METRICS_TOKEN` | No | Enables protected Prometheus metrics when at least 32 characters. |
 | `SESSION_COOKIE_SECURE` | No | Set `true` behind HTTPS. |
+| `DEMO_DATA` | No | Seeds a storytelling public demo into `/public` on boot. Default `on`; set `off` for a clean deployment. |
 | `TRUST_PROXY` | No | Set `true` only behind a trusted TLS-terminating proxy. |
 
 The wildcard CORS default is intentionally insecure. Set explicit origins before a production browser client uses cross-origin authentication.
