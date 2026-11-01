@@ -88,7 +88,7 @@ See [integration.md](integration.md) for request examples and [quickstart.md](qu
 | `JWT_SECRET` | Yes | At least 32 characters; signs access and session tokens. |
 | `PLATFORM_TOKEN` | Yes | At least 32 characters; authorizes `POST /v1/apps` to provision applications. |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Per app | Supplied in the `POST /v1/apps` body (not as environment variables) to create that app's administrator. |
-| `ALLOWED_ORIGINS` | No | Comma-separated default allowed browser origins. Each app may also carry its own `allowedOrigins`. Blank or unset currently permits all origins for early development. |
+| `ALLOWED_ORIGINS` | No | Comma-separated default allowed browser origins. Each app may also carry its own `allowedOrigins`. Blank or unset logs a startup warning and currently permits all origins for early development. |
 | `METRICS_TOKEN` | No | Enables protected Prometheus metrics when at least 32 characters. |
 | `SESSION_COOKIE_SECURE` | No | Set `true` behind HTTPS. |
 | `DEMO_DATA` | No | Seeds a storytelling public demo into `/public` on boot. Default `on`; set `off` for a clean deployment. |

@@ -81,6 +81,9 @@ func main() {
 	if appConfig.MetricsToken == "" {
 		log.Print("Metrics endpoint disabled because METRICS_TOKEN is not configured")
 	}
+	if len(appConfig.AllowedOrigins) == 1 && appConfig.AllowedOrigins[0] == "*" {
+		log.Print("⚠️  ALLOWED_ORIGINS is unset — CORS permits all origins. Set explicit origins before production browser use.")
+	}
 
 	authRateLimiter := newAuthRateLimiter(database, 10, 5*time.Minute)
 	var deliveryWorker *webhookWorker
