@@ -1,6 +1,7 @@
 import {
   createContext,
   useEffect,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
@@ -62,6 +63,7 @@ import {
   type ResourceInput,
   type ResourcePreview,
   type UserClaims,
+  type VibeModelPart,
   type VibePlan,
   type VibeShare,
 } from "./api";
@@ -1947,6 +1949,604 @@ function VibePlanDrawer({
   );
 }
 
+type SandboxSession = { token: string; username: string | null };
+type SandboxRecord = { slug: string; title?: string; visibility?: string };
+
+function sandboxRandomHex(bytes: number) {
+  const buffer = new Uint8Array(bytes);
+  crypto.getRandomValues(buffer);
+  return Array.from(buffer, (value) => value.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
+
+function sandboxSlug(title: string) {
+  const base =
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "record";
+  return `${base}-${sandboxRandomHex(2)}`;
+}
+
+// coerceSandboxValue turns a plain text field into the most natural JSON type,
+// so nobody has to hand-write JSON to save a record.
+function coerceSandboxValue(raw: string): unknown {
+  const text = raw.trim();
+  if (text === "") return "";
+  if (text === "true") return true;
+  if (text === "false") return false;
+  if (text === "null") return null;
+  if (/^-?\d+(\.\d+)?$/.test(text) && Number.isFinite(Number(text))) {
+    return Number(text);
+  }
+  if (
+    (text.startsWith("{") && text.endsWith("}")) ||
+    (text.startsWith("[") && text.endsWith("]"))
+  ) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      // Not valid JSON — keep it as a plain string.
+    }
+  }
+  return text;
+}
+
+// sandboxParts keeps only data-model pieces the live API will accept, mirroring
+// the server's starter filter so the sandbox never posts to an invalid route.
+function sandboxParts(plan: VibePlan): VibeModelPart[] {
+  const seen = new Set<string>();
+  const validType = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+  const parts: VibeModelPart[] = [];
+  for (const part of plan.dataModel) {
+    const key = `${part.scope}/${part.type}`;
+    if (!validType.test(part.type) || seen.has(key)) continue;
+    seen.add(key);
+    parts.push(part);
+  }
+  return parts;
+}
+
+// sandboxFetch talks to the real API with a scoped bearer token and
+// credentials "omit", so the throwaway sandbox never reads or writes the
+// visitor's actual m-stash session on the same origin.
+async function sandboxFetch<T>(
+  path: string,
+  appKey: string,
+  token: string | null,
+  init?: { method?: string; body?: unknown },
+): Promise<T> {
+  const headers: Record<string, string> = { "X-M-Stash-App": appKey };
+  if (init?.body !== undefined) headers["Content-Type"] = "application/json";
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(path, {
+    method: init?.method ?? "GET",
+    headers,
+    body: init?.body === undefined ? undefined : JSON.stringify(init.body),
+    credentials: "omit",
+  });
+  if (response.status === 204) return undefined as T;
+  const payload = (await response.json().catch(() => ({}))) as { error?: string };
+  if (!response.ok) {
+    throw new Error(payload.error ?? `Request failed (${response.status})`);
+  }
+  return payload as T;
+}
+
+function SandboxCardHead({ part }: { part: VibeModelPart }) {
+  return (
+    <header className="sandbox-card-head">
+      <div className="sandbox-card-title">
+        <span
+          className={`scope-dot scope-${part.scope === "shared" ? "shared" : "personal"}`}
+        />
+        <h4>{part.name || part.type}</h4>
+      </div>
+      <div className="sandbox-tags">
+        <span className="vibe-badge">{part.scope}</span>
+        <code>{part.type}</code>
+        {part.visibility && <span className="vibe-badge">{part.visibility}</span>}
+      </div>
+    </header>
+  );
+}
+
+function SandboxComposer({
+  part,
+  appKey,
+  token,
+  onCreated,
+}: {
+  part: VibeModelPart;
+  appKey: string;
+  token: string;
+  onCreated: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [visibility, setVisibility] = useState<"private" | "public">(
+    part.visibility === "public" ? "public" : "private",
+  );
+  const [fields, setFields] = useState<
+    { id: number; key: string; value: string }[]
+  >([{ id: 0, key: "", value: "" }]);
+  const nextFieldId = useRef(1);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  function addField() {
+    setFields((current) => [
+      ...current,
+      { id: nextFieldId.current++, key: "", value: "" },
+    ]);
+  }
+
+  function updateField(
+    id: number,
+    patch: Partial<{ key: string; value: string }>,
+  ) {
+    setFields((current) =>
+      current.map((field) => (field.id === id ? { ...field, ...patch } : field)),
+    );
+  }
+
+  function removeField(id: number) {
+    setFields((current) => {
+      const next = current.filter((field) => field.id !== id);
+      return next.length ? next : [{ id: nextFieldId.current++, key: "", value: "" }];
+    });
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const name = title.trim();
+    if (!name) {
+      setError("Give it a title.");
+      return;
+    }
+    const data: Record<string, unknown> = {};
+    for (const field of fields) {
+      const key = field.key.trim();
+      if (key) data[key] = coerceSandboxValue(field.value);
+    }
+    setBusy(true);
+    try {
+      await sandboxFetch(
+        `/v1/me/resources/${encodeURIComponent(part.type)}`,
+        appKey,
+        token,
+        {
+          method: "POST",
+          body: { slug: sandboxSlug(name), title: name, visibility, data },
+        },
+      );
+      setTitle("");
+      setFields([{ id: nextFieldId.current++, key: "", value: "" }]);
+      onCreated();
+    } catch (requestError) {
+      setError(messageFromError(requestError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="sandbox-composer" onSubmit={submit}>
+      <label className="sandbox-field">
+        <span>Title</span>
+        <input
+          maxLength={120}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder={`e.g. ${part.name || part.type}`}
+          value={title}
+        />
+      </label>
+      <div className="sandbox-field">
+        <span>Fields</span>
+        <div className="kv-editor">
+          <div className="kv-rows">
+            {fields.map((field) => (
+              <div className="kv-row" key={field.id}>
+                <input
+                  className="kv-key"
+                  maxLength={40}
+                  onChange={(event) =>
+                    updateField(field.id, { key: event.target.value })
+                  }
+                  placeholder="field"
+                  value={field.key}
+                />
+                <input
+                  className="kv-value"
+                  onChange={(event) =>
+                    updateField(field.id, { value: event.target.value })
+                  }
+                  placeholder="value"
+                  value={field.value}
+                />
+                <button
+                  className="icon-button kv-remove"
+                  onClick={() => removeField(field.id)}
+                  title="Remove field"
+                  type="button"
+                >
+                  <X aria-hidden="true" size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button className="kv-add" onClick={addField} type="button">
+            <Plus aria-hidden="true" size={14} /> Add field
+          </button>
+          <p className="kv-hint">
+            Numbers and true/false become real JSON types — no quotes or braces
+            needed.
+          </p>
+        </div>
+      </div>
+      <div className="sandbox-composer-foot">
+        <div className="sandbox-field">
+          <span>Visibility</span>
+          <div className="segmented" role="group">
+            <button
+              className={visibility === "private" ? "active" : ""}
+              onClick={() => setVisibility("private")}
+              type="button"
+            >
+              Private
+            </button>
+            <button
+              className={visibility === "public" ? "active" : ""}
+              onClick={() => setVisibility("public")}
+              type="button"
+            >
+              Public
+            </button>
+          </div>
+        </div>
+        <button className="button primary" disabled={busy} type="submit">
+          <Plus aria-hidden="true" size={16} /> Add record
+        </button>
+      </div>
+      {error && <p className="form-error small">{error}</p>}
+    </form>
+  );
+}
+
+function SandboxPersonalCard({
+  part,
+  appKey,
+  session,
+}: {
+  part: VibeModelPart;
+  appKey: string;
+  session: SandboxSession;
+}) {
+  const [records, setRecords] = useState<SandboxRecord[] | null>(null);
+  const [error, setError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    sandboxFetch<{ data: SandboxRecord[] }>(
+      `/v1/me/resources/${encodeURIComponent(part.type)}?limit=20`,
+      appKey,
+      session.token,
+    )
+      .then((page) => {
+        if (!active) return;
+        setRecords(page.data);
+        setError("");
+      })
+      .catch((requestError) => {
+        if (active) setError(messageFromError(requestError));
+      });
+    return () => {
+      active = false;
+    };
+  }, [appKey, part.type, session.token, reloadKey]);
+
+  async function remove(slug: string) {
+    try {
+      await sandboxFetch(
+        `/v1/me/resources/${encodeURIComponent(part.type)}/${encodeURIComponent(slug)}`,
+        appKey,
+        session.token,
+        { method: "DELETE" },
+      );
+      setReloadKey((key) => key + 1);
+    } catch {
+      // Leave the row; the next reload reconciles state.
+    }
+  }
+
+  return (
+    <article className="sandbox-card">
+      <SandboxCardHead part={part} />
+      {part.purpose && <p className="sandbox-card-purpose">{part.purpose}</p>}
+      <SandboxComposer
+        appKey={appKey}
+        onCreated={() => setReloadKey((key) => key + 1)}
+        part={part}
+        token={session.token}
+      />
+      <ul className="sandbox-records">
+        {records === null ? (
+          <li className="sandbox-empty">Loading…</li>
+        ) : error ? (
+          <li className="sandbox-empty">{error}</li>
+        ) : records.length === 0 ? (
+          <li className="sandbox-empty">No records yet — add your first above.</li>
+        ) : (
+          records.map((record) => (
+            <li className="sandbox-record" key={record.slug}>
+              <div className="sandbox-record-main">
+                <strong>{record.title || record.slug}</strong>
+                <code>{`${part.type}/${record.slug}`}</code>
+              </div>
+              <div className="sandbox-record-side">
+                {record.visibility && (
+                  <span className="vibe-badge">{record.visibility}</span>
+                )}
+                {record.visibility === "public" && session.username && (
+                  <a
+                    className="icon-button"
+                    href={`/v1/public/${encodeURIComponent(session.username)}/${encodeURIComponent(part.type)}/${encodeURIComponent(record.slug)}?app=${encodeURIComponent(appKey)}`}
+                    rel="noreferrer"
+                    target="_blank"
+                    title="Open public link"
+                  >
+                    <ExternalLink aria-hidden="true" size={14} />
+                  </a>
+                )}
+                <button
+                  className="icon-button danger"
+                  onClick={() => void remove(record.slug)}
+                  title="Delete"
+                  type="button"
+                >
+                  <Trash2 aria-hidden="true" size={14} />
+                </button>
+              </div>
+            </li>
+          ))
+        )}
+      </ul>
+    </article>
+  );
+}
+
+function SandboxSharedCard({
+  part,
+  appKey,
+  token,
+}: {
+  part: VibeModelPart;
+  appKey: string;
+  token: string;
+}) {
+  const [records, setRecords] = useState<SandboxRecord[] | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    sandboxFetch<{ data: SandboxRecord[] }>(
+      `/v1/shared/resources/${encodeURIComponent(part.type)}?limit=20`,
+      appKey,
+      token,
+    )
+      .then((page) => {
+        if (active) setRecords(page.data);
+      })
+      .catch((requestError) => {
+        if (active) setError(messageFromError(requestError));
+      });
+    return () => {
+      active = false;
+    };
+  }, [appKey, part.type, token]);
+
+  return (
+    <article className="sandbox-card">
+      <SandboxCardHead part={part} />
+      {part.purpose && <p className="sandbox-card-purpose">{part.purpose}</p>}
+      <p className="sandbox-note">
+        <Globe2 aria-hidden="true" size={14} /> Read-only here: signed-in users
+        read shared data; your backend writes it with the app’s secret key.
+      </p>
+      <ul className="sandbox-records">
+        {records === null ? (
+          <li className="sandbox-empty">Loading…</li>
+        ) : error ? (
+          <li className="sandbox-empty">{error}</li>
+        ) : records.length === 0 ? (
+          <li className="sandbox-empty">No shared records yet.</li>
+        ) : (
+          records.map((record) => (
+            <li className="sandbox-record" key={record.slug}>
+              <div className="sandbox-record-main">
+                <strong>{record.title || record.slug}</strong>
+                <code>{`${part.type}/${record.slug}`}</code>
+              </div>
+              {record.visibility && (
+                <span className="vibe-badge">{record.visibility}</span>
+              )}
+            </li>
+          ))
+        )}
+      </ul>
+    </article>
+  );
+}
+
+function SandboxAuth({
+  appKey,
+  onSignedIn,
+}: {
+  appKey: string;
+  onSignedIn: (session: SandboxSession) => void;
+}) {
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function usernameFor(token: string): Promise<string | null> {
+    try {
+      const namespace = await sandboxFetch<{ data: { slug: string } }>(
+        "/v1/me/namespace",
+        appKey,
+        token,
+      );
+      return namespace.data.slug;
+    } catch {
+      return null;
+    }
+  }
+
+  async function run(action: () => Promise<void>) {
+    setBusy(true);
+    setError("");
+    try {
+      await action();
+    } catch (requestError) {
+      setError(messageFromError(requestError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function throwaway() {
+    return run(async () => {
+      const handle = `vibe-${sandboxRandomHex(4)}`;
+      const result = await sandboxFetch<{
+        token: string;
+        namespace?: { slug: string };
+      }>("/v1/auth/signup", appKey, null, {
+        method: "POST",
+        body: {
+          email: `${handle}@example.com`,
+          password: sandboxRandomHex(16),
+          username: handle,
+        },
+      });
+      onSignedIn({ token: result.token, username: result.namespace?.slug ?? handle });
+    });
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    return run(async () => {
+      if (mode === "signup") {
+        const result = await sandboxFetch<{
+          token: string;
+          namespace?: { slug: string };
+        }>("/v1/auth/signup", appKey, null, {
+          method: "POST",
+          body: {
+            email: email.trim(),
+            password,
+            username: username.trim().toLowerCase(),
+          },
+        });
+        onSignedIn({
+          token: result.token,
+          username: result.namespace?.slug ?? null,
+        });
+      } else {
+        const result = await sandboxFetch<{ token: string }>(
+          "/v1/auth/login",
+          appKey,
+          null,
+          { method: "POST", body: { email: email.trim(), password } },
+        );
+        onSignedIn({
+          token: result.token,
+          username: await usernameFor(result.token),
+        });
+      }
+    });
+  }
+
+  return (
+    <div className="sandbox-auth">
+      <div className="sandbox-auth-card">
+        <h3>Try this backend live</h3>
+        <p className="muted">
+          Sign in to read and write real records. The sandbox uses a scoped
+          token, so it never touches your m-stash session.
+        </p>
+        <button
+          className="button primary wide"
+          disabled={busy}
+          onClick={() => void throwaway()}
+          type="button"
+        >
+          <Sparkles aria-hidden="true" size={16} /> One-click throwaway account
+        </button>
+        <div className="sandbox-or">or use your own</div>
+        <div className="segmented" role="group">
+          <button
+            className={mode === "login" ? "active" : ""}
+            onClick={() => setMode("login")}
+            type="button"
+          >
+            Log in
+          </button>
+          <button
+            className={mode === "signup" ? "active" : ""}
+            onClick={() => setMode("signup")}
+            type="button"
+          >
+            Sign up
+          </button>
+        </div>
+        <form className="sandbox-auth-form" onSubmit={submit}>
+          <label className="sandbox-field">
+            <span>Email</span>
+            <input
+              autoComplete="email"
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@example.com"
+              type="email"
+              value={email}
+            />
+          </label>
+          <label className="sandbox-field">
+            <span>Password</span>
+            <input
+              autoComplete="current-password"
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="At least 12 characters"
+              type="password"
+              value={password}
+            />
+          </label>
+          {mode === "signup" && (
+            <label className="sandbox-field">
+              <span>Username</span>
+              <input
+                autoComplete="username"
+                onChange={(event) => setUsername(event.target.value)}
+                placeholder="pick-a-handle"
+                value={username}
+              />
+            </label>
+          )}
+          <button className="button primary wide" disabled={busy} type="submit">
+            {mode === "signup" ? "Create account" : "Log in"}
+          </button>
+        </form>
+        {error && <p className="form-error small">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
 function VibeSandbox({
   idea,
   plan,
@@ -1958,10 +2558,38 @@ function VibeSandbox({
   share: VibeShare;
   onNewIdea: () => void;
 }) {
+  const appKey = api.publishableKey();
+  const parts = sandboxParts(plan);
+  const storageKey = `m-stash-vibe:${share.id}`;
+  const [session, setSession] = useState<SandboxSession | null>(() => {
+    try {
+      const raw = sessionStorage.getItem(storageKey);
+      return raw ? (JSON.parse(raw) as SandboxSession) : null;
+    } catch {
+      return null;
+    }
+  });
   const [copied, setCopied] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
-  const previewPath = `/v1/vibe/${share.id}/preview`;
   const link = `${window.location.origin}/vibe/${share.id}`;
+
+  function signIn(next: SandboxSession) {
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify(next));
+    } catch {
+      // Storage is best-effort; the token still lives in component state.
+    }
+    setSession(next);
+  }
+
+  function signOut() {
+    try {
+      sessionStorage.removeItem(storageKey);
+    } catch {
+      // Ignore storage errors.
+    }
+    setSession(null);
+  }
 
   async function copyLink() {
     try {
@@ -2009,33 +2637,52 @@ function VibeSandbox({
         </div>
       </div>
 
-      <div className="sandbox-stage">
-        <div className="sandbox-chrome">
-          <span aria-hidden="true" className="chrome-dots">
-            <i />
-            <i />
-            <i />
-          </span>
-          <span className="chrome-url">
-            <Globe2 aria-hidden="true" size={13} /> live demo ·{" "}
-            {expiresLabel(share.expiresAt).toLowerCase()}
-          </span>
-          <a
-            className="chrome-expand"
-            href={previewPath}
-            rel="noreferrer"
-            target="_blank"
-            title="Open full screen"
-          >
-            <ExternalLink aria-hidden="true" size={14} />
-          </a>
-        </div>
-        <iframe
-          className="sandbox-frame"
-          loading="lazy"
-          src={previewPath}
-          title="Live demo of this backend"
-        />
+      <div className="sandbox-surface">
+        {plan.summary && <p className="sandbox-summary">{plan.summary}</p>}
+        {!appKey ? (
+          <p className="sandbox-empty">
+            The live sandbox isn’t available on this deployment.
+          </p>
+        ) : session ? (
+          <>
+            <div className="sandbox-sessionbar">
+              <span className="sandbox-who">
+                <span className="sandbox-dot" /> Signed in
+                {session.username ? ` as @${session.username}` : ""}
+              </span>
+              <button className="text-button" onClick={signOut} type="button">
+                <LogOut aria-hidden="true" size={14} /> Sign out
+              </button>
+            </div>
+            {parts.length === 0 ? (
+              <p className="sandbox-empty">
+                This plan has no data model to try yet.
+              </p>
+            ) : (
+              <div className="sandbox-grid">
+                {parts.map((part) =>
+                  part.scope === "shared" ? (
+                    <SandboxSharedCard
+                      appKey={appKey}
+                      key={`${part.scope}/${part.type}`}
+                      part={part}
+                      token={session.token}
+                    />
+                  ) : (
+                    <SandboxPersonalCard
+                      appKey={appKey}
+                      key={`${part.scope}/${part.type}`}
+                      part={part}
+                      session={session}
+                    />
+                  ),
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <SandboxAuth appKey={appKey} onSignedIn={signIn} />
+        )}
       </div>
 
       <button
@@ -2128,7 +2775,7 @@ function VibePage() {
     navigate("/vibe");
   }
 
-  if (state === "done" && plan && share?.previewUrl) {
+  if (state === "done" && plan && share && api.publishableKey()) {
     return (
       <PublicLayout>
         <main className="discovery-page vibe-page vibe-sandbox-page">
