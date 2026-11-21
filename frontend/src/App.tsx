@@ -24,7 +24,6 @@ import {
   LogOut,
   Menu,
   PenLine,
-  Play,
   Plus,
   Save,
   Settings,
@@ -32,6 +31,7 @@ import {
   Sparkles,
   Trash2,
   Wand2,
+  X,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
@@ -1834,26 +1834,228 @@ function VibeShareBar({ share }: { share: VibeShare }) {
   );
 }
 
-function VibeLiveDemo({ share }: { share: VibeShare }) {
-  const previewPath = `/v1/vibe/${share.id}/preview`;
+function VibePlanDrawer({
+  idea,
+  plan,
+  share,
+  onClose,
+}: {
+  idea: string;
+  plan: VibePlan;
+  share: VibeShare;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
-    <div className="vibe-block">
-      <div className="vibe-demo-head">
-        <h2>
-          <Play aria-hidden="true" size={18} /> Live demo
-        </h2>
-        <a href={previewPath} rel="noreferrer" target="_blank">
-          Open full screen <ExternalLink aria-hidden="true" size={14} />
-        </a>
-      </div>
-      <p className="vibe-demo-note">
-        A working app for this plan, running against the real m-stash API. Use
-        a throwaway account and save a few records.
-      </p>
-      <div className="vibe-demo-frame">
-        <iframe loading="lazy" src={previewPath} title="Live demo of this backend" />
-      </div>
+    <div className="drawer-overlay" onClick={onClose}>
+      <aside
+        aria-label="The plan behind this sandbox"
+        className="drawer"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="drawer-head">
+          <div>
+            <span className="sandbox-eyebrow">
+              <Code2 aria-hidden="true" size={13} /> The plan
+            </span>
+            <h2>{idea || "Your backend"}</h2>
+          </div>
+          <button
+            className="icon-button"
+            onClick={onClose}
+            title="Close"
+            type="button"
+          >
+            <X aria-hidden="true" size={18} />
+          </button>
+        </div>
+        <div className="drawer-body">
+          {plan.source === "blueprint" && (
+            <p className="drawer-note">
+              The AI model is resting, so this sketch comes from m-stash’s
+              built-in blueprints. Same real API, same rules.
+            </p>
+          )}
+          {plan.summary && <p className="drawer-summary">{plan.summary}</p>}
+          {plan.dataModel.length > 0 && (
+            <section className="drawer-section">
+              <h3>
+                <Database aria-hidden="true" size={15} /> Data model
+              </h3>
+              <div className="drawer-model">
+                {plan.dataModel.map((part, index) => (
+                  <article key={index}>
+                    <div className="drawer-model-head">
+                      <strong>{part.name}</strong>
+                      {part.visibility && (
+                        <span className="vibe-badge">{part.visibility}</span>
+                      )}
+                    </div>
+                    <p className="drawer-model-meta">
+                      {[part.scope, part.type].filter(Boolean).join(" · ")}
+                    </p>
+                    <p>{part.purpose}</p>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+          {plan.snippets.length > 0 && (
+            <section className="drawer-section">
+              <h3>
+                <Code2 aria-hidden="true" size={15} /> Copy-paste it
+              </h3>
+              {plan.snippets.map((snippet, index) => (
+                <CopyableSnippet
+                  code={snippet.code}
+                  description={snippet.language}
+                  key={index}
+                  title={snippet.title}
+                />
+              ))}
+            </section>
+          )}
+          {plan.whyMStash && (
+            <p className="drawer-why">
+              <ShieldCheck aria-hidden="true" size={16} /> {plan.whyMStash}
+            </p>
+          )}
+        </div>
+        <div className="drawer-foot">
+          <a
+            className="button primary"
+            href="https://github.com/ranfysvalle02/m-stash/blob/main/quick.md"
+            rel="noreferrer"
+            target="_blank"
+          >
+            <ArrowUpRight aria-hidden="true" size={17} /> Build it for real
+          </a>
+          <span className="drawer-expiry">
+            <Clock aria-hidden="true" size={13} /> {expiresLabel(share.expiresAt)}
+          </span>
+        </div>
+      </aside>
     </div>
+  );
+}
+
+function VibeSandbox({
+  idea,
+  plan,
+  share,
+  onNewIdea,
+}: {
+  idea: string;
+  plan: VibePlan;
+  share: VibeShare;
+  onNewIdea: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
+  const previewPath = `/v1/vibe/${share.id}/preview`;
+  const link = `${window.location.origin}/vibe/${share.id}`;
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <section className="sandbox">
+      <div className="sandbox-bar">
+        <div className="sandbox-idea">
+          <span className="sandbox-eyebrow">
+            <Sparkles aria-hidden="true" size={13} /> Live sandbox
+          </span>
+          <p title={idea}>{idea || "Your backend, live"}</p>
+        </div>
+        <div className="sandbox-actions">
+          <button
+            className="icon-button"
+            onClick={() => void copyLink()}
+            title="Copy share link"
+            type="button"
+          >
+            {copied ? (
+              <Check aria-hidden="true" size={16} />
+            ) : (
+              <Link2 aria-hidden="true" size={16} />
+            )}
+          </button>
+          <a
+            className="icon-button"
+            download
+            href={`/v1/vibe/${share.id}/zip`}
+            title="Download starter .zip"
+          >
+            <Download aria-hidden="true" size={16} />
+          </a>
+          <button className="button secondary" onClick={onNewIdea} type="button">
+            <PenLine aria-hidden="true" size={15} /> New idea
+          </button>
+        </div>
+      </div>
+
+      <div className="sandbox-stage">
+        <div className="sandbox-chrome">
+          <span aria-hidden="true" className="chrome-dots">
+            <i />
+            <i />
+            <i />
+          </span>
+          <span className="chrome-url">
+            <Globe2 aria-hidden="true" size={13} /> live demo ·{" "}
+            {expiresLabel(share.expiresAt).toLowerCase()}
+          </span>
+          <a
+            className="chrome-expand"
+            href={previewPath}
+            rel="noreferrer"
+            target="_blank"
+            title="Open full screen"
+          >
+            <ExternalLink aria-hidden="true" size={14} />
+          </a>
+        </div>
+        <iframe
+          className="sandbox-frame"
+          loading="lazy"
+          src={previewPath}
+          title="Live demo of this backend"
+        />
+      </div>
+
+      <button
+        className="plan-fab"
+        onClick={() => setPlanOpen(true)}
+        title="See the plan behind this sandbox"
+        type="button"
+      >
+        <Code2 aria-hidden="true" size={18} /> The plan
+      </button>
+
+      {planOpen && (
+        <VibePlanDrawer
+          idea={idea}
+          onClose={() => setPlanOpen(false)}
+          plan={plan}
+          share={share}
+        />
+      )}
+    </section>
   );
 }
 
@@ -1914,6 +2116,31 @@ function VibePage() {
       setErrorText(messageFromError(requestError));
       setState("error");
     }
+  }
+
+  function newIdea() {
+    setPlan(null);
+    setShare(null);
+    setIdea("");
+    setErrorText("");
+    setLoadedShareId(null);
+    setState("idle");
+    navigate("/vibe");
+  }
+
+  if (state === "done" && plan && share?.previewUrl) {
+    return (
+      <PublicLayout>
+        <main className="discovery-page vibe-page vibe-sandbox-page">
+          <VibeSandbox
+            idea={idea}
+            onNewIdea={newIdea}
+            plan={plan}
+            share={share}
+          />
+        </main>
+      </PublicLayout>
+    );
   }
 
   return (
@@ -2034,7 +2261,6 @@ function VibePage() {
                     </div>
                   </div>
                 )}
-                {share?.previewUrl && <VibeLiveDemo share={share} />}
                 {plan.snippets.length > 0 && (
                   <div className="vibe-block">
                     <h2>Copy-paste it</h2>
