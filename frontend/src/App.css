@@ -492,6 +492,45 @@ input, textarea { transition: border-color .2s ease, box-shadow .25s ease, backg
 	.drawer { max-width: 100%; }
 }
 
+/* Live pitch demo — clear answer card + structured live-data readout */
+.live-demo-card { background: rgba(9, 33, 38, .78); border: 1px solid var(--line); border-radius: 12px; margin-top: 1.25rem; padding: 1.2rem 1.35rem; }
+.live-demo-card .live-demo-pain { color: var(--aqua); font-family: var(--font-sans); font-size: .82rem; font-style: normal; font-weight: 800; letter-spacing: .04em; margin: 0 0 .45rem; text-transform: uppercase; }
+.live-demo-answer { color: var(--text); font-size: 1.06rem; font-weight: 600; line-height: 1.5; margin: 0; }
+.live-demo-kv-grid { display: grid; gap: .65rem; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 1rem; }
+.live-demo-kv { background: rgba(3, 17, 23, .65); border: 1px solid rgba(52, 114, 122, .65); border-radius: 8px; display: flex; flex-direction: column; gap: .2rem; padding: .65rem .8rem; }
+.live-demo-kv span { color: var(--muted-quiet); font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.live-demo-kv strong { color: var(--text); font-size: .9rem; font-weight: 600; }
+.live-demo-split { display: grid; gap: .95rem; margin-top: 1rem; }
+.live-demo-you-build { align-items: center; background: rgba(255, 107, 197, .1); border: 1px solid rgba(255, 107, 197, .42); border-radius: 9px; display: flex; flex-wrap: wrap; gap: .6rem; padding: .75rem .9rem; }
+.live-demo-you-build strong { color: var(--text); font-size: .95rem; }
+.live-demo-handled { display: grid; gap: .6rem; }
+.live-demo-pill { border-radius: 999px; font-size: .7rem; font-weight: 800; letter-spacing: .07em; padding: .22rem .6rem; text-transform: uppercase; width: fit-content; }
+.live-demo-pill-you { background: var(--pink); color: var(--ink); }
+.live-demo-pill-stash { background: rgba(66, 245, 141, .16); color: var(--mongo); }
+.live-demo-checklist { display: grid; gap: .55rem; list-style: none; margin: 0; padding: 0; }
+.live-demo-checklist li { align-items: start; color: var(--muted); display: flex; font-size: .88rem; gap: .55rem; line-height: 1.45; }
+.live-demo-checklist li svg { color: var(--mongo); flex: 0 0 auto; margin-top: .18rem; }
+.live-demo-checklist li strong { color: var(--text); }
+.live-demo-stats { display: grid; gap: .65rem; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 1rem; }
+.live-demo-stat { background: rgba(3, 17, 23, .65); border: 1px solid rgba(52, 114, 122, .65); border-radius: 9px; display: flex; flex-direction: column; gap: .2rem; padding: .75rem .8rem; }
+.live-demo-stat strong { color: var(--mongo); font-family: var(--font-display); font-size: 1.35rem; font-weight: 800; line-height: 1.1; }
+.live-demo-stat span { color: var(--muted); font-size: .74rem; line-height: 1.3; }
+.live-demo-chores { display: grid; gap: .5rem; list-style: none; margin: 1rem 0 0; padding: 0; }
+.live-demo-chores li { align-items: center; background: rgba(3, 17, 23, .65); border: 1px solid rgba(52, 114, 122, .65); border-radius: 8px; display: flex; gap: .65rem; padding: .6rem .8rem; }
+.live-demo-chore-rank { color: var(--muted-quiet); font-family: var(--font-mono); font-size: .76rem; font-weight: 700; }
+.live-demo-chore-text { color: var(--text); flex: 1; font-size: .9rem; text-decoration: line-through; text-decoration-color: rgba(255, 107, 197, .65); text-decoration-thickness: 1.5px; }
+.live-demo-chore-badge { background: rgba(66, 245, 141, .14); border-radius: 999px; color: var(--mongo); font-size: .7rem; font-weight: 800; letter-spacing: .04em; padding: .18rem .55rem; white-space: nowrap; }
+.live-demo-latency { color: var(--mongo); font-family: var(--font-mono); font-size: .72rem; font-weight: 700; margin-left: auto; white-space: nowrap; }
+.live-demo-latency + .live-demo-copy { margin-left: .4rem; }
+.live-demo-step.active .live-demo-step-index { background: rgba(4, 20, 26, .16); color: #04141a; }
+
+@media (max-width: 700px) {
+	.live-demo-kv-grid { grid-template-columns: 1fr; }
+	.live-demo-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.live-demo-chores li { flex-wrap: wrap; }
+	.live-demo-latency { display: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
 	.drawer, .drawer-overlay, .vibe-browser { animation: none; }
 }

@@ -1545,12 +1545,13 @@ function NamespaceSettings() {
 }
 
 type DemoStep = {
-  key: string;
+  key: "config" | "skip" | "metrics" | "chores";
   label: string;
   type: string;
   slug: string;
   pain: string;
-  value: string;
+  answer: string;
+  takeaway: string;
 };
 
 const demoSteps: DemoStep[] = [
@@ -1560,7 +1561,9 @@ const demoSteps: DemoStep[] = [
     type: "config",
     slug: "release",
     pain: "Where does my app read its settings?",
-    value: "No env wiring — clients read config straight from the API.",
+    answer:
+      "From one public JSON endpoint. Update settings on the server and every client gets them live — no .env gymnastics or frontend redeploys.",
+    takeaway: "Served straight from m-stash with zero database wiring.",
   },
   {
     key: "skip",
@@ -1568,7 +1571,9 @@ const demoSteps: DemoStep[] = [
     type: "catalog",
     slug: "what-you-get",
     pain: "What do I still have to build myself?",
-    value: "Auth, per-user ownership, and public buckets — all server-side.",
+    answer:
+      "Just your frontend UI and product experience. m-stash already owns sign-up, login, private per-user data, public buckets, and MongoDB.",
+    takeaway: "You ship the product. The server enforces identity and ownership.",
   },
   {
     key: "metrics",
@@ -1576,7 +1581,9 @@ const demoSteps: DemoStep[] = [
     type: "metrics",
     slug: "outcomes",
     pain: "So what's the actual payoff?",
-    value: "Zero security rules. Zero database credentials in the browser.",
+    answer:
+      "Working auth and private user data in ~12 minutes — with zero security rules to write, zero backend files to maintain, and zero DB credentials in the browser.",
+    takeaway: "Self-hostable with direct MongoDB access whenever you outgrow it.",
   },
   {
     key: "chores",
@@ -1584,12 +1591,139 @@ const demoSteps: DemoStep[] = [
     type: "leaderboard",
     slug: "chores-eliminated",
     pain: "What am I no longer on the hook to maintain?",
-    value: "The security plumbing you'd otherwise own forever.",
+    answer:
+      "The risky auth and isolation plumbing that breaks silently when AI-generated code gets it slightly wrong:",
+    takeaway: "All four stay enforced on the server for every request.",
   },
 ];
 
+function LiveDemoAnswerVisual({
+  stepKey,
+  payload,
+}: {
+  stepKey: DemoStep["key"];
+  payload?: Record<string, unknown>;
+}) {
+  if (!payload) return null;
+
+  if (stepKey === "config") {
+    const rows = [
+      { label: "Product", value: String(payload.product ?? "m-stash") },
+      { label: "Database", value: String(payload.database ?? "MongoDB, behind the API") },
+      {
+        label: "Wiring required",
+        value: payload.wiringRequired === false ? "None" : String(payload.wiringRequired ?? "None"),
+      },
+      {
+        label: "Security rules",
+        value:
+          payload.securityRulesRequired === false
+            ? "None"
+            : String(payload.securityRulesRequired ?? "None"),
+      },
+    ];
+    return (
+      <div className="live-demo-kv-grid">
+        {rows.map((row) => (
+          <div className="live-demo-kv" key={row.label}>
+            <span>{row.label}</span>
+            <strong>{row.value}</strong>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (stepKey === "skip") {
+    const youBuild =
+      typeof payload.youBuild === "string"
+        ? payload.youBuild
+        : "Only your frontend UI and product experience.";
+    const items = Array.isArray(payload.items)
+      ? (payload.items as Array<{ name?: string; detail?: string }>)
+      : [];
+    return (
+      <div className="live-demo-split">
+        <div className="live-demo-you-build">
+          <span className="live-demo-pill live-demo-pill-you">You build</span>
+          <strong>{youBuild}</strong>
+        </div>
+        {items.length > 0 && (
+          <div className="live-demo-handled">
+            <span className="live-demo-pill live-demo-pill-stash">
+              m-stash already handles
+            </span>
+            <ul className="live-demo-checklist">
+              {items.map((item, idx) => (
+                <li key={item.name ?? idx}>
+                  <Check aria-hidden="true" size={15} />
+                  <div>
+                    <strong>{item.name}</strong>
+                    {item.detail ? <span> — {item.detail}</span> : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (stepKey === "metrics") {
+    const stats = [
+      {
+        value: String(payload.timeToFirstAuth ?? "~12 min"),
+        label: "Time to first auth",
+      },
+      {
+        value: String(payload.securityRulesWritten ?? 0),
+        label: "Security rules written",
+      },
+      {
+        value: String(payload.databaseCredentialsInBrowser ?? 0),
+        label: "DB creds in browser",
+      },
+      {
+        value: String(payload.backendFilesYouMaintain ?? 0),
+        label: "Backend files to maintain",
+      },
+    ];
+    return (
+      <div className="live-demo-stats">
+        {stats.map((stat) => (
+          <div className="live-demo-stat" key={stat.label}>
+            <strong>{stat.value}</strong>
+            <span>{stat.label}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (stepKey === "chores") {
+    const entries = Array.isArray(payload.entries)
+      ? (payload.entries as Array<{ rank?: number; chore?: string }>)
+      : [];
+    if (entries.length === 0) return null;
+    return (
+      <ol className="live-demo-chores">
+        {entries.map((entry, idx) => (
+          <li key={entry.rank ?? idx}>
+            <span className="live-demo-chore-rank">#{entry.rank ?? idx + 1}</span>
+            <span className="live-demo-chore-text">{entry.chore}</span>
+            <span className="live-demo-chore-badge">Off your plate</span>
+          </li>
+        ))}
+      </ol>
+    );
+  }
+
+  return null;
+}
+
 function LiveApiDemo() {
-  const [activeKey, setActiveKey] = useState(demoSteps[0].key);
+  const [activeKey, setActiveKey] = useState<DemoStep["key"]>(demoSteps[0].key);
   const [runState, setRunState] = useState<"idle" | "loading" | "error">(
     "idle",
   );
@@ -1616,18 +1750,15 @@ function LiveApiDemo() {
     }
   }
 
-  async function run() {
+  async function runStep(step: DemoStep) {
     setRunState("loading");
     setErrorText("");
     const started = performance.now();
     try {
-      const resource = await api.getPublicSharedResource(
-        active.type,
-        active.slug,
-      );
+      const resource = await api.getPublicSharedResource(step.type, step.slug);
       setResults((current) => ({
         ...current,
-        [active.key]: {
+        [step.key]: {
           payload: resource.data ?? {},
           elapsed: Math.max(1, Math.round(performance.now() - started)),
         },
@@ -1639,9 +1770,15 @@ function LiveApiDemo() {
     }
   }
 
-  function selectStep(key: string) {
+  useEffect(() => {
+    if (!results[active.key]) {
+      void runStep(active);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active.key]);
+
+  function selectStep(key: DemoStep["key"]) {
     setActiveKey(key);
-    setRunState("idle");
     setErrorText("");
   }
 
@@ -1653,9 +1790,8 @@ function LiveApiDemo() {
         </p>
         <h2 id="live-demo-title">Run the pitch. One real call at a time.</h2>
         <p>
-          No account, no keys, no setup. Each step hits the live m-stash API and
-          answers a question a builder actually asks. Your app reads its data
-          the exact same way.
+          No account, no keys, no setup. Every tab answers a question builders
+          actually ask — backed by a real live call to the m-stash API.
         </p>
       </div>
       <div className="live-demo-steps" role="tablist" aria-label="Demo steps">
@@ -1685,7 +1821,13 @@ function LiveApiDemo() {
           </button>
         ))}
       </div>
-      <p className="live-demo-pain">{active.pain}</p>
+
+      <div className="live-demo-card">
+        <p className="live-demo-pain">{active.pain}</p>
+        <p className="live-demo-answer">{active.answer}</p>
+        <LiveDemoAnswerVisual stepKey={active.key} payload={result?.payload} />
+      </div>
+
       <div className="live-demo-terminal">
         <div className="live-demo-bar">
           <span className="live-demo-dot" />
@@ -1694,6 +1836,11 @@ function LiveApiDemo() {
           <code>
             GET /v1/public/shared/resources/{active.type}/{active.slug}
           </code>
+          {result && runState === "idle" && (
+            <span className="live-demo-latency">
+              200 OK · {result.elapsed} ms
+            </span>
+          )}
           <button
             aria-label="Copy as cURL"
             className="live-demo-copy"
@@ -1713,44 +1860,35 @@ function LiveApiDemo() {
           {runState === "loading" && (
             <p className="live-demo-hint">
               <LoaderCircle aria-hidden="true" className="spin" size={15} />{" "}
-              calling the API…
+              calling the live API…
             </p>
           )}
           {runState === "error" && (
             <p className="live-demo-error">{errorText}</p>
           )}
-          {runState === "idle" && !result && (
-            <p className="live-demo-hint">// press run — the JSON appears here</p>
-          )}
           {runState === "idle" && result && (
-            <>
-              <p className="live-demo-status">
-                <Check aria-hidden="true" size={14} /> 200 OK · {result.elapsed}{" "}
-                ms
-              </p>
-              <pre>
-                <code>{JSON.stringify(result.payload, null, 2)}</code>
-              </pre>
-            </>
+            <pre>
+              <code>{JSON.stringify(result.payload, null, 2)}</code>
+            </pre>
           )}
         </div>
       </div>
-      {result && (
-        <p className="live-demo-value">
-          <ArrowUpRight aria-hidden="true" size={15} /> {active.value}
-        </p>
-      )}
+
+      <p className="live-demo-value">
+        <ArrowUpRight aria-hidden="true" size={15} /> {active.takeaway}
+      </p>
+
       <div className="live-demo-actions">
         <button
           className="button primary"
           disabled={runState === "loading"}
-          onClick={() => void run()}
+          onClick={() => void runStep(active)}
           type="button"
         >
           <Code2 aria-hidden="true" size={17} />{" "}
-          {result ? "Run it again" : "Run the request"}
+          {result ? "Re-run live call" : "Run the request"}
         </button>
-        {result && nextStep && (
+        {nextStep && (
           <button
             className="button secondary"
             onClick={() => selectStep(nextStep.key)}
@@ -1759,7 +1897,7 @@ function LiveApiDemo() {
             Next: {nextStep.label} <ChevronRight aria-hidden="true" size={16} />
           </button>
         )}
-        {result && !nextStep && (
+        {!nextStep && (
           <p className="live-demo-realize">
             That’s the whole move — the server owns the data, your app just asks.
           </p>

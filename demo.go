@@ -69,6 +69,7 @@ func demoRecords() []demoRecord {
 				"Point an AI-built app at m-stash and this is what shows up for free — " +
 				"the risky, repetitive parts of a backend, handled server-side.",
 			Data: bson.M{
+				"youBuild": "Only your frontend UI and product experience.",
 				"items": bson.A{
 					bson.M{"name": "Auth", "detail": "Sign-up, login, sessions — your UI, our identity."},
 					bson.M{"name": "Per-user data", "detail": "The server scopes every record to its owner, so a browser can't read someone else's."},
