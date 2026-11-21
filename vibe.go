@@ -99,6 +99,7 @@ func vibeResponseSchema() map[string]any {
 						"visibility": stringField,
 						"purpose":    stringField,
 					},
+					"required": []string{"name", "scope", "type", "visibility", "purpose"},
 				},
 			},
 			"snippets": map[string]any{
@@ -110,10 +111,12 @@ func vibeResponseSchema() map[string]any {
 						"language": stringField,
 						"code":     stringField,
 					},
+					"required": []string{"title", "language", "code"},
 				},
 			},
 			"whyMStash": stringField,
 		},
+		"required": []string{"summary", "dataModel", "snippets", "whyMStash"},
 	}
 }
 
@@ -231,7 +234,7 @@ func (app *application) generateVibePlan(ctx context.Context, idea string) (*vib
 
 	model := strings.TrimSpace(app.config.GeminiModel)
 	if model == "" {
-		model = "gemini-flash-latest"
+		model = "gemini-3.5-flash-lite"
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, geminiAPIBase+model+":generateContent", bytes.NewReader(payload))
 	if err != nil {

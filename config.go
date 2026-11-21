@@ -94,7 +94,7 @@ func loadConfig() (Config, error) {
 		WebhookPollInterval: webhookPollInterval,
 		WebhookMaxAttempts:  webhookMaxAttempts,
 		GeminiAPIKey:        getEnv("GEMINI_API_KEY", ""),
-		GeminiModel:         getEnv("GEMINI_MODEL", "gemini-flash-latest"),
+		GeminiModel:         getEnv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
 		VibeDailyLimit:      vibeDailyLimit,
 	}
 

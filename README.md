@@ -93,7 +93,7 @@ See [integration.md](integration.md) for request examples and [quickstart.md](qu
 | `SESSION_COOKIE_SECURE` | No | Set `true` behind HTTPS. |
 | `DEMO_DATA` | No | Seeds a storytelling public demo into `/public` on boot. Default `on`; set `off` for a clean deployment. |
 | `GEMINI_API_KEY` | No | Enables the unauth `/vibe` lab (AI sketches an m-stash backend from an app idea). Blank disables the feature. |
-| `GEMINI_MODEL` | No | Model for the vibe lab. Defaults to `gemini-flash-latest`. |
+| `GEMINI_MODEL` | No | Model for the vibe lab. Defaults to `gemini-3.5-flash-lite`. |
 | `VIBE_DAILY_LIMIT` | No | Global daily cap on vibe-lab generations (plus a per-IP limit). Defaults to `500`. |
 | `TRUST_PROXY` | No | Set `true` only behind a trusted TLS-terminating proxy. |
 
