@@ -1898,6 +1898,12 @@ function VibePage() {
 
             {state === "done" && plan && (
               <section className="vibe-result">
+                {plan.source === "blueprint" && (
+                  <p className="vibe-checking">
+                    The AI model is resting, so this sketch comes from
+                    m-stash’s built-in blueprints. Same real API, same rules.
+                  </p>
+                )}
                 {plan.summary && <p className="vibe-summary">{plan.summary}</p>}
                 {plan.dataModel.length > 0 && (
                   <div className="vibe-block">

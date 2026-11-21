@@ -13,16 +13,28 @@ import (
 )
 
 const (
-	vibeMaxIdeaLength  = 600
-	vibeRequestTimeout = 25 * time.Second
-	geminiAPIBase      = "https://generativelanguage.googleapis.com/v1beta/models/"
+	vibeMaxIdeaLength   = 600
+	vibeRequestTimeout  = 25 * time.Second
+	vibeAttemptTimeout  = 10 * time.Second
+	vibeAccountCooldown = 10 * time.Minute
+
+	vibeSourceModel     = "model"
+	vibeSourceBlueprint = "blueprint"
 )
+
+var geminiAPIBase = "https://generativelanguage.googleapis.com/v1beta/models/"
+
+// vibeFallbackModels are tried, in order, after the configured model when it is rate limited, overloaded, or missing.
+var vibeFallbackModels = []string{"gemini-3.5-flash-lite", "gemini-3.1-flash-lite"}
 
 // vibeHTTPClient is dedicated to the upstream model call so its timeout is independent of the request context.
 var vibeHTTPClient = &http.Client{Timeout: vibeRequestTimeout}
 
 // errVibeUnavailable marks an upstream capacity/billing failure (quota, rate, or credits) the caller can't fix by rephrasing.
 var errVibeUnavailable = errors.New("vibe upstream unavailable")
+
+// errVibeAccount marks a key-level failure (billing, revoked or invalid key) that no other model on the same key can fix.
+var errVibeAccount = errors.New("vibe upstream account unavailable")
 
 func (app *application) vibeEnabled() bool {
 	return strings.TrimSpace(app.config.GeminiAPIKey) != ""
@@ -38,6 +50,7 @@ type vibePlan struct {
 	DataModel []vibeModelPart `json:"dataModel"`
 	Snippets  []vibeSnippet   `json:"snippets"`
 	WhyMStash string          `json:"whyMStash"`
+	Source    string          `json:"source,omitempty"`
 }
 
 type vibeModelPart struct {
@@ -73,7 +86,8 @@ m-stash API facts you must use and must not contradict:
 - Personal data (owned by the signed-in user): POST or GET /v1/me/resources/{type} and /v1/me/resources/{type}/{slug}. Body: { slug, title, data, visibility }.
 - Shared app data (owned by the deployment/admin): GET /v1/shared/resources/{type}; writes require an admin or the app secret key.
 - Public reads (no auth): GET /v1/public/shared/resources/{type}/{slug} and GET /v1/public/{username}/{type}/{slug}.
-- A "type" is a bucket (e.g. config, save, profile, leaderboard). "visibility" is per record: "private" (owner only), "authenticated" (any signed-in user), or "public" (anyone).
+- A "type" is a bucket (e.g. config, save, profile, leaderboard). "visibility" is per record: "private" (owner only) or "public" (anyone). Shared records may also be "authenticated" (any signed-in user); personal records may not.
+- "data" is a JSON object. Public reads also send the X-M-Stash-App header.
 - MongoDB is never exposed to the browser. The browser never chooses an owner.
 
 Given an app idea, design the smallest m-stash backend for it. Be concrete and correct. Keep snippets short, runnable browser fetch() calls against the real endpoints above. Never invent endpoints. Never include secrets. Respond ONLY with JSON matching the provided schema.`
@@ -180,39 +194,100 @@ func (app *application) handleVibe(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), vibeRequestTimeout)
 	defer cancel()
+	requestID := requestIDFromContext(ctx)
 
 	// Reject per-IP abuse before spending from the shared daily budget.
-	if ok, limitErr := app.vibeLimiter.allow(ctx, "vibe-ip", clientIP(r, app.config.TrustProxy)); limitErr != nil {
-		app.logger.Error("vibe per-ip limit check failed", "request_id", requestIDFromContext(ctx), "error", limitErr)
-		writeError(w, http.StatusServiceUnavailable, "The vibe lab is catching its breath")
-		return
-	} else if !ok {
+	ok, limitErr := app.vibeLimiter.allow(ctx, "vibe-ip", clientIP(r, app.config.TrustProxy))
+	if limitErr == nil && !ok {
 		writeError(w, http.StatusTooManyRequests, "Easy, tiger — too many vibes. Try again shortly.")
 		return
 	}
-	if ok, limitErr := app.vibeDailyLimiter.allow(ctx, "vibe-global", "global"); limitErr != nil {
-		app.logger.Error("vibe daily limit check failed", "request_id", requestIDFromContext(ctx), "error", limitErr)
-		writeError(w, http.StatusServiceUnavailable, "The vibe lab is catching its breath")
-		return
-	} else if !ok {
-		writeError(w, http.StatusTooManyRequests, "The vibe lab hit its daily limit — back tomorrow")
-		return
+	useModel := limitErr == nil
+	if limitErr != nil {
+		app.logger.Error("vibe per-ip limit check failed", "request_id", requestID, "error", limitErr)
+	}
+	if useModel {
+		ok, limitErr = app.vibeDailyLimiter.allow(ctx, "vibe-global", "global")
+		if limitErr != nil {
+			app.logger.Error("vibe daily limit check failed", "request_id", requestID, "error", limitErr)
+		}
+		useModel = limitErr == nil && ok
+	}
+	if useModel && app.vibeCoolingDown() {
+		useModel = false
 	}
 
-	plan, err := app.generateVibePlan(ctx, idea)
-	if err != nil {
-		app.logger.Error("vibe generation failed", "request_id", requestIDFromContext(ctx), "error", err)
-		if errors.Is(err, errVibeUnavailable) {
-			writeError(w, http.StatusServiceUnavailable, "The vibe lab is out of capacity right now — try again later.")
+	// The model is best effort: any failure, cap, or cooldown degrades to the built-in blueprint instead of an error.
+	if useModel {
+		plan, err := app.generateVibePlan(ctx, idea)
+		if err == nil {
+			plan.Source = vibeSourceModel
+			writeJSON(w, http.StatusOK, map[string]any{"data": plan})
 			return
 		}
-		writeError(w, http.StatusBadGateway, "The vibe lab couldn't dream that one up — try rephrasing")
-		return
+		app.logger.Error("vibe generation failed; serving blueprint", "request_id", requestID, "error", err)
+		if errors.Is(err, errVibeAccount) {
+			app.startVibeCooldown()
+		}
 	}
+	plan := buildVibeBlueprint(idea, app.publicBaseURL(r))
 	writeJSON(w, http.StatusOK, map[string]any{"data": plan})
 }
 
+func (app *application) vibeCoolingDown() bool {
+	return time.Now().UnixNano() < app.vibeCooldownUntil.Load()
+}
+
+func (app *application) startVibeCooldown() {
+	app.vibeCooldownUntil.Store(time.Now().Add(vibeAccountCooldown).UnixNano())
+}
+
+func (app *application) publicBaseURL(r *http.Request) string {
+	scheme := "http"
+	if app.requestUsesHTTPS(r) {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
+func (app *application) vibeModels() []string {
+	models := []string{}
+	seen := map[string]bool{}
+	for _, model := range append([]string{strings.TrimSpace(app.config.GeminiModel)}, vibeFallbackModels...) {
+		if model == "" || seen[model] {
+			continue
+		}
+		seen[model] = true
+		models = append(models, model)
+	}
+	return models
+}
+
+// generateVibePlan walks the model chain until one returns a usable plan; key-level failures stop the walk immediately.
 func (app *application) generateVibePlan(ctx context.Context, idea string) (*vibePlan, error) {
+	var lastErr error
+	for _, model := range app.vibeModels() {
+		if ctx.Err() != nil {
+			break
+		}
+		attemptCtx, cancel := context.WithTimeout(ctx, vibeAttemptTimeout)
+		plan, err := app.generateVibePlanWithModel(attemptCtx, model, idea)
+		cancel()
+		if err == nil {
+			return plan, nil
+		}
+		lastErr = fmt.Errorf("model %s: %w", model, err)
+		if errors.Is(err, errVibeAccount) {
+			return nil, lastErr
+		}
+	}
+	if lastErr == nil {
+		lastErr = ctx.Err()
+	}
+	return nil, lastErr
+}
+
+func (app *application) generateVibePlanWithModel(ctx context.Context, model, idea string) (*vibePlan, error) {
 	body := map[string]any{
 		"systemInstruction": map[string]any{
 			"parts": []map[string]any{{"text": vibeSystemInstruction}},
@@ -232,10 +307,6 @@ func (app *application) generateVibePlan(ctx context.Context, idea string) (*vib
 		return nil, err
 	}
 
-	model := strings.TrimSpace(app.config.GeminiModel)
-	if model == "" {
-		model = "gemini-3.5-flash-lite"
-	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, geminiAPIBase+model+":generateContent", bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
@@ -254,7 +325,10 @@ func (app *application) generateVibePlan(ctx context.Context, idea string) (*vib
 		return nil, err
 	}
 	if response.StatusCode != http.StatusOK {
-		if response.StatusCode == http.StatusPaymentRequired || response.StatusCode == http.StatusTooManyRequests {
+		switch response.StatusCode {
+		case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden:
+			return nil, fmt.Errorf("%w: status %d", errVibeAccount, response.StatusCode)
+		case http.StatusTooManyRequests:
 			return nil, fmt.Errorf("%w: status %d", errVibeUnavailable, response.StatusCode)
 		}
 		return nil, fmt.Errorf("gemini returned status %d: %s", response.StatusCode, clampString(string(raw), 300))

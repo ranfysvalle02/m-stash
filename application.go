@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -20,6 +21,8 @@ type application struct {
 	uiAppKey         string
 	vibeLimiter      *authRateLimiter
 	vibeDailyLimiter *authRateLimiter
+	// vibeCooldownUntil (unix nanos) skips the model after a key-level failure so requests don't each pay for a doomed call.
+	vibeCooldownUntil atomic.Int64
 }
 
 func newApplication(appConfig Config, database *mongo.Database, client *mongo.Client) *application {

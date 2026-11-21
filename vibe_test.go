@@ -1,6 +1,13 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
 
 func TestValidateVibeIdea(t *testing.T) {
 	if _, err := validateVibeIdea("  "); err == nil {
@@ -67,6 +74,116 @@ func TestParseVibeResponseExtractsPlan(t *testing.T) {
 	}
 	if len(plan.Snippets) != 1 || plan.Snippets[0].Language != "javascript" {
 		t.Fatalf("snippets = %#v", plan.Snippets)
+	}
+}
+
+func TestBuildVibeBlueprintMatchesIdea(t *testing.T) {
+	plan := buildVibeBlueprint("a co-op game with save slots and a public leaderboard", "https://example.test")
+	if plan.Source != vibeSourceBlueprint {
+		t.Fatalf("source = %q", plan.Source)
+	}
+	types := map[string]vibeModelPart{}
+	for _, part := range plan.DataModel {
+		types[part.Type] = part
+	}
+	if types["save"].Scope != "personal" || types["leaderboard"].Scope != "shared" {
+		t.Fatalf("data model = %#v", plan.DataModel)
+	}
+	if len(plan.Snippets) != 3 || plan.Summary == "" || plan.WhyMStash == "" {
+		t.Fatalf("plan incomplete: %#v", plan)
+	}
+	if !strings.Contains(plan.Snippets[0].Code, "https://example.test") {
+		t.Fatalf("snippet missing base URL: %s", plan.Snippets[0].Code)
+	}
+	if !strings.Contains(plan.Snippets[2].Code, "/v1/public/shared/resources/leaderboard/global") {
+		t.Fatalf("public snippet = %s", plan.Snippets[2].Code)
+	}
+}
+
+func TestBuildVibeBlueprintPersonalVisibilityIsValid(t *testing.T) {
+	ideas := []string{"a notes app", "a habit tracker with a public profile", "a recipe app", "something completely unrelated", "a reel of drive videos"}
+	for _, idea := range ideas {
+		plan := buildVibeBlueprint(idea, "http://localhost:4000")
+		if len(plan.DataModel) == 0 || len(plan.Snippets) < 2 {
+			t.Fatalf("%q: plan incomplete: %#v", idea, plan)
+		}
+		for _, part := range plan.DataModel {
+			if part.Scope == "personal" && part.Visibility != "private" && part.Visibility != "public" {
+				t.Fatalf("%q: personal part with visibility %q", idea, part.Visibility)
+			}
+			if err := validateResourceType(part.Type); err != nil {
+				t.Fatalf("%q: invalid type %q: %v", idea, part.Type, err)
+			}
+		}
+	}
+}
+
+func TestVibeModelsDedupesFallbackChain(t *testing.T) {
+	app := &application{config: Config{GeminiModel: "gemini-3.5-flash-lite"}}
+	models := app.vibeModels()
+	if len(models) != len(vibeFallbackModels) || models[0] != "gemini-3.5-flash-lite" {
+		t.Fatalf("models = %v", models)
+	}
+	app.config.GeminiModel = "custom-model"
+	if models := app.vibeModels(); models[0] != "custom-model" || len(models) != len(vibeFallbackModels)+1 {
+		t.Fatalf("models = %v", models)
+	}
+}
+
+func withFakeGemini(t *testing.T, handler http.HandlerFunc) *[]string {
+	t.Helper()
+	var calls []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.URL.Path)
+		handler(w, r)
+	}))
+	t.Cleanup(server.Close)
+	original := geminiAPIBase
+	geminiAPIBase = server.URL + "/"
+	t.Cleanup(func() { geminiAPIBase = original })
+	return &calls
+}
+
+func TestGenerateVibePlanStopsOnAccountFailure(t *testing.T) {
+	calls := withFakeGemini(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusPaymentRequired)
+	})
+	app := &application{config: Config{GeminiAPIKey: "k", GeminiModel: "gemini-3.5-flash-lite"}}
+	_, err := app.generateVibePlan(context.Background(), "a notes app")
+	if !errors.Is(err, errVibeAccount) {
+		t.Fatalf("err = %v, want errVibeAccount", err)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("calls = %v, want a single attempt", *calls)
+	}
+}
+
+func TestGenerateVibePlanFallsBackOnRateLimit(t *testing.T) {
+	calls := withFakeGemini(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "gemini-3.5-flash-lite") {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"{\"summary\":\"ok\"}"}]}}]}`))
+	})
+	app := &application{config: Config{GeminiAPIKey: "k", GeminiModel: "gemini-3.5-flash-lite"}}
+	plan, err := app.generateVibePlan(context.Background(), "a notes app")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if plan.Summary != "ok" || len(*calls) != 2 {
+		t.Fatalf("plan = %#v, calls = %v", plan, *calls)
+	}
+}
+
+func TestVibeCooldown(t *testing.T) {
+	app := &application{}
+	if app.vibeCoolingDown() {
+		t.Fatal("fresh app should not be cooling down")
+	}
+	app.startVibeCooldown()
+	if !app.vibeCoolingDown() {
+		t.Fatal("cooldown not started")
 	}
 }
 

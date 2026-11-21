@@ -81,6 +81,7 @@ export interface VibePlan {
   dataModel: VibeModelPart[]
   snippets: VibeSnippet[]
   whyMStash: string
+  source?: 'model' | 'blueprint'
 }
 
 export interface BuilderApp {
