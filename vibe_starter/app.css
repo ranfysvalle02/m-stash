@@ -261,6 +261,15 @@ textarea.input { line-height: 1.5; resize: vertical; }
 
 .composer-foot { align-items: end; display: flex; flex-wrap: wrap; gap: 0.9rem; justify-content: space-between; }
 
+.kv-editor { display: flex; flex-direction: column; gap: 0.5rem; }
+.kv-rows { display: flex; flex-direction: column; gap: 0.5rem; }
+.kv-row { align-items: center; display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) 2rem; }
+.kv-key { font-family: var(--mono); font-size: 0.84rem; }
+.kv-remove { height: 2.1rem; width: 2rem; }
+.kv-add { align-items: center; align-self: flex-start; background: transparent; border: 1px dashed var(--line); border-radius: 9px; color: var(--muted); cursor: pointer; display: inline-flex; font: inherit; font-size: 0.82rem; font-weight: 600; gap: 0.4rem; padding: 0.4rem 0.75rem; transition: border-color 0.15s, color 0.15s; }
+.kv-add:hover { border-color: var(--aqua); color: var(--aqua); }
+.kv-hint { color: var(--muted-2); font-size: 0.74rem; margin: 0.1rem 0 0; }
+
 .records { display: flex; flex-direction: column; gap: 0.5rem; list-style: none; margin: 0; padding: 0; }
 
 .record {

@@ -9,6 +9,7 @@
   const ICONS = {
     bolt: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
+    minus: '<path d="M5 12h14"/>',
     trash: '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
     external: '<path d="M14 3h7v7M10 14 21 3M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/>',
     logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
@@ -77,6 +78,73 @@
     if (visibility === "public") return "pill pill-public";
     if (visibility === "authenticated") return "pill pill-auth";
     return "pill pill-private";
+  }
+
+  // coerceValue turns a plain text field into the most natural JSON type, so nobody hand-writes JSON.
+  function coerceValue(raw) {
+    const text = raw.trim();
+    if (text === "") return "";
+    if (text === "true") return true;
+    if (text === "false") return false;
+    if (text === "null") return null;
+    if (/^-?\d+(\.\d+)?$/.test(text) && Number.isFinite(Number(text))) return Number(text);
+    if ((text[0] === "{" && text.endsWith("}")) || (text[0] === "[" && text.endsWith("]"))) {
+      try {
+        return JSON.parse(text);
+      } catch {
+        // Not valid JSON — keep it as a plain string.
+      }
+    }
+    return text;
+  }
+
+  // dataEditor is a tiny field builder: each row is a name + value, typed automatically into a JSON object.
+  function dataEditor() {
+    const rows = el("div", { className: "kv-rows" });
+
+    function addRow(key, value) {
+      const keyInput = el("input", { className: "input kv-key", placeholder: "field", maxlength: "40", value: key || "" });
+      const valueInput = el("input", { className: "input kv-value", placeholder: "value", value: value || "" });
+      const remove = el("button", {
+        type: "button",
+        className: "icon-btn kv-remove",
+        title: "Remove field",
+        onclick: () => {
+          row.remove();
+          if (!rows.children.length) addRow();
+        },
+      });
+      remove.append(icon("minus"));
+      const row = el("div", { className: "kv-row" }, keyInput, valueInput, remove);
+      rows.append(row);
+      return keyInput;
+    }
+
+    addRow();
+
+    const node = el(
+      "div",
+      { className: "kv-editor" },
+      rows,
+      el("button", { type: "button", className: "kv-add", onclick: () => addRow().focus() }, icon("plus"), "Add field"),
+      el("p", { className: "kv-hint" }, "Numbers and true/false become real JSON types — no quotes or braces needed."),
+    );
+
+    function value() {
+      const out = {};
+      for (const row of rows.querySelectorAll(".kv-row")) {
+        const key = row.querySelector(".kv-key").value.trim();
+        if (key) out[key] = coerceValue(row.querySelector(".kv-value").value);
+      }
+      return out;
+    }
+
+    function reset() {
+      setChildren(rows, []);
+      addRow();
+    }
+
+    return { node, value, reset };
   }
 
   // Bearer tokens with credentials "omit" keep this sandbox from touching any cookie session on the same origin.
@@ -335,7 +403,7 @@
     const list = el("ul", { className: "records" }, emptyRow("Loading…"));
     const status = el("p", { className: "status", role: "status" });
     const title = el("input", { className: "input", placeholder: "e.g. " + (part.name || part.type), maxlength: "120" });
-    const data = el("textarea", { className: "input mono", rows: "3", spellcheck: "false", placeholder: '{ "example": true }' }, "{}");
+    const data = dataEditor();
     const vis = segmented(
       [
         { value: "private", label: "Private" },
@@ -361,21 +429,13 @@
         status.textContent = "Give it a title.";
         return;
       }
-      let parsed;
-      try {
-        parsed = JSON.parse(data.value.trim() || "{}");
-        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
-      } catch {
-        status.textContent = 'Data must be a JSON object, like {"level": 3}.';
-        return;
-      }
       try {
         await api("/v1/me/resources/" + part.type, {
           method: "POST",
-          body: { slug: slugify(name), title: name, visibility: vis.value(), data: parsed },
+          body: { slug: slugify(name), title: name, visibility: vis.value(), data: data.value() },
         });
         title.value = "";
-        data.value = "{}";
+        data.reset();
         await refresh();
       } catch (error) {
         status.textContent = error.message;
@@ -392,7 +452,12 @@
         "form",
         { className: "composer", onsubmit: create },
         field("Title", title),
-        field("Data (JSON)", data),
+        el(
+          "div",
+          { className: "field" },
+          el("span", { className: "field-label" }, "Fields"),
+          data.node,
+        ),
         el(
           "div",
           { className: "composer-foot" },
