@@ -1,8 +1,6 @@
 module github.com/m-stash/m-stash
 
-go 1.25.0
-
-toolchain go1.27.3
+go 1.27.4
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.2.2
@@ -12,7 +10,7 @@ require (
 
 require (
 	github.com/golang/snappy v1.0.0 // indirect
-	github.com/klauspost/compress v1.16.7 // indirect
+	github.com/klauspost/compress v1.20.2 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
