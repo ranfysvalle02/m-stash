@@ -121,6 +121,24 @@ func TestPublicBaseURLHonorsForwardedProto(t *testing.T) {
 	}
 }
 
+func TestVibeShareTTLCapsAtFiveDays(t *testing.T) {
+	cases := map[time.Duration]time.Duration{
+		0:                   72 * time.Hour,
+		24 * time.Hour:      24 * time.Hour,
+		5 * 24 * time.Hour:  5 * 24 * time.Hour,
+		30 * 24 * time.Hour: vibeShareMaxTTL,
+	}
+	for configured, want := range cases {
+		app := &application{config: Config{VibeShareTTL: configured}}
+		if got := app.vibeShareTTL(); got != want {
+			t.Fatalf("vibeShareTTL(%s) = %s, want %s", configured, got, want)
+		}
+	}
+	if vibeShareMaxTTL != 5*24*time.Hour {
+		t.Fatalf("max ttl = %s, want 120h", vibeShareMaxTTL)
+	}
+}
+
 func TestVibeShareRejectsBadIDWithoutDatabase(t *testing.T) {
 	app := &application{}
 	response := httptest.NewRecorder()

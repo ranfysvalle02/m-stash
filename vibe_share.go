@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	vibeShareCollection   = "_m_stash_vibe_shares"
-	vibeShareIDBytes      = 9
+	vibeShareCollection    = "_m_stash_vibe_shares"
+	vibeShareIDBytes       = 9
 	vibeStarterPlaceholder = "pk_your_publishable_key"
 )
 
@@ -76,11 +76,18 @@ func validVibeShareID(id string) bool {
 	return true
 }
 
+// vibeShareMaxTTL caps how long any shared vibe (link, live demo, and .zip) can live, so the store never accumulates stale data.
+const vibeShareMaxTTL = 5 * 24 * time.Hour
+
 func (app *application) vibeShareTTL() time.Duration {
-	if app.config.VibeShareTTL > 0 {
-		return app.config.VibeShareTTL
+	ttl := app.config.VibeShareTTL
+	if ttl <= 0 {
+		ttl = 72 * time.Hour
 	}
-	return 72 * time.Hour
+	if ttl > vibeShareMaxTTL {
+		return vibeShareMaxTTL
+	}
+	return ttl
 }
 
 func (app *application) describeVibeShare(record vibeShareRecord, baseURL string) vibeShare {

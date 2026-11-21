@@ -1956,7 +1956,7 @@ function VibePage() {
               <label>
                 Your app idea
                 <textarea
-                  maxLength={600}
+                  maxLength={250}
                   onChange={(event) => setIdea(event.target.value)}
                   placeholder="a co-op game with save slots and a public leaderboard"
                   rows={3}

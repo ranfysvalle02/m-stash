@@ -95,7 +95,7 @@ See [integration.md](integration.md) for request examples and [quickstart.md](qu
 | `GEMINI_API_KEY` | No | Enables the unauth `/vibe` lab (AI sketches an m-stash backend from an app idea). Blank disables the feature. |
 | `GEMINI_MODEL` | No | Model for the vibe lab. Defaults to `gemini-3.5-flash-lite`. |
 | `VIBE_DAILY_LIMIT` | No | Global daily cap on model generations (plus a per-IP limit). Past the cap, or whenever the model fails, the lab answers from built-in blueprints. Defaults to `500`. |
-| `VIBE_SHARE_TTL` | No | How long a vibe's share link, live demo, and `.zip` starter stay available before MongoDB expires them. Defaults to `72h`. |
+| `VIBE_SHARE_TTL` | No | How long a vibe's share link, live demo, and `.zip` starter stay available before MongoDB expires them. Defaults to `72h`; capped at `120h` (5 days). |
 | `TRUST_PROXY` | No | Set `true` only behind a trusted TLS-terminating proxy. |
 
 The wildcard CORS default is intentionally insecure. Set explicit origins before a production browser client uses cross-origin authentication.
