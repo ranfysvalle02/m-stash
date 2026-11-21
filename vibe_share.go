@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -21,20 +23,29 @@ import (
 )
 
 const (
-	vibeShareCollection    = "_m_stash_vibe_shares"
-	vibeShareIDBytes       = 9
+	vibeShareCollection = "_m_stash_vibe_shares"
+	vibeShareIDBytes    = 9 // 72 bits of entropy, 12 url-safe characters.
+	// vibeShareVersion marks the current record shape. Older documents read as
+	// expired/not-found so a schema change never serves a half-populated share.
+	vibeShareVersion       = 2
 	vibeStarterPlaceholder = "pk_your_publishable_key"
 )
 
 //go:embed vibe_starter
 var vibeStarterFiles embed.FS
 
+// vibeShareRecord is the stored, expiring record for one generated app. It holds
+// only the validated spec plus the sandbox's publishable key (safe in the clear)
+// — never the owner password, which is returned once at creation and never saved.
 type vibeShareRecord struct {
-	ID        string    `bson:"_id"`
-	Idea      string    `bson:"idea"`
-	Plan      vibePlan  `bson:"plan"`
-	CreatedAt time.Time `bson:"createdAt"`
-	ExpiresAt time.Time `bson:"expiresAt"`
+	ID             string    `bson:"_id"`
+	Idea           string    `bson:"idea"`
+	Spec           vibeSpec  `bson:"spec"`
+	SandboxAppID   string    `bson:"sandboxAppId,omitempty"`
+	PublishableKey string    `bson:"publishableKey,omitempty"`
+	Version        int       `bson:"version"`
+	CreatedAt      time.Time `bson:"createdAt"`
+	ExpiresAt      time.Time `bson:"expiresAt"`
 }
 
 type vibeShare struct {
@@ -97,19 +108,30 @@ func (app *application) describeVibeShare(record vibeShareRecord, baseURL string
 		ZipURL:    baseURL + "/v1/vibe/" + record.ID + "/zip",
 		ExpiresAt: record.ExpiresAt,
 	}
-	if app.uiAppKey != "" {
+	// A live demo only exists when a sandbox was provisioned (its publishable key
+	// is present). Otherwise the share is spec + downloadable starter only.
+	if record.PublishableKey != "" {
 		share.PreviewURL = baseURL + "/v1/vibe/" + record.ID + "/preview"
 	}
 	return share
 }
 
-func (app *application) saveVibeShare(ctx context.Context, idea string, plan *vibePlan, baseURL string) (*vibeShare, error) {
+func (app *application) saveVibeShare(ctx context.Context, idea string, spec vibeSpec, sandboxAppID string, publishableKey string, baseURL string) (*vibeShare, error) {
 	id, err := newVibeShareID()
 	if err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
-	record := vibeShareRecord{ID: id, Idea: idea, Plan: *plan, CreatedAt: now, ExpiresAt: now.Add(app.vibeShareTTL())}
+	record := vibeShareRecord{
+		ID:             id,
+		Idea:           idea,
+		Spec:           spec,
+		SandboxAppID:   sandboxAppID,
+		PublishableKey: publishableKey,
+		Version:        vibeShareVersion,
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(app.vibeShareTTL()),
+	}
 	if _, err := app.database.Collection(vibeShareCollection).InsertOne(ctx, record); err != nil {
 		return nil, err
 	}
@@ -119,14 +141,18 @@ func (app *application) saveVibeShare(ctx context.Context, idea string, plan *vi
 
 func (app *application) loadVibeShare(ctx context.Context, id string) (*vibeShareRecord, error) {
 	var record vibeShareRecord
-	err := app.database.Collection(vibeShareCollection).FindOne(ctx, bson.M{"_id": id, "expiresAt": bson.M{"$gt": time.Now().UTC()}}).Decode(&record)
+	err := app.database.Collection(vibeShareCollection).FindOne(ctx, bson.M{
+		"_id":       id,
+		"version":   vibeShareVersion,
+		"expiresAt": bson.M{"$gt": time.Now().UTC()},
+	}).Decode(&record)
 	if err != nil {
 		return nil, err
 	}
 	return &record, nil
 }
 
-// handleVibeShare serves /v1/vibe/{id}[/preview|/app.js|/app.css|/zip] for a saved, expiring plan.
+// handleVibeShare serves /v1/vibe/{id}[/preview|/app.js|/app.css|/views.js|/zip] for a saved, expiring spec.
 func (app *application) handleVibeShare(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
@@ -136,12 +162,17 @@ func (app *application) handleVibeShare(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "This vibe link doesn't exist or has expired")
 		return
 	}
+	// Static starter assets are identical across shares, so they are served from
+	// the embedded files without a database lookup.
 	switch action {
 	case "app.js":
 		app.serveVibeStarterAsset(w, "app.js", "text/javascript; charset=utf-8")
 		return
 	case "app.css":
 		app.serveVibeStarterAsset(w, "app.css", "text/css; charset=utf-8")
+		return
+	case "views.js":
+		app.serveVibeStarterAsset(w, "views.js", "text/javascript; charset=utf-8")
 		return
 	case "", "preview", "zip":
 	default:
@@ -165,20 +196,29 @@ func (app *application) handleVibeShare(w http.ResponseWriter, r *http.Request) 
 
 	switch action {
 	case "":
-		writeJSON(w, http.StatusOK, map[string]any{"data": record.Plan, "idea": record.Idea, "share": app.describeVibeShare(*record, baseURL)})
+		// Snippets are rendered from the spec plus the live base URL and key at
+		// request time, so a share can never carry a snippet pointed at a stored
+		// (attacker-chosen) host.
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"data":     record.Spec,
+			"idea":     record.Idea,
+			"share":    app.describeVibeShare(*record, baseURL),
+			"snippets": renderVibeSnippets(record.Spec, baseURL, record.PublishableKey),
+		})
 	case "preview":
-		if app.uiAppKey == "" {
-			writeError(w, http.StatusNotFound, "The live demo is not available on this deployment")
+		if record.PublishableKey == "" {
+			writeError(w, http.StatusNotFound, "The live demo is not available for this vibe")
 			return
 		}
 		assetBase := "/v1/vibe/" + record.ID + "/"
-		page, err := renderVibeStarterIndex(record, vibeStarterConfig{API: "", App: app.uiAppKey, Throwaway: true}, assetBase)
+		page, err := renderVibeStarterIndex(record, vibeStarterConfig{API: "", App: record.PublishableKey, Mode: "preview"}, assetBase)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "Could not render the live demo")
 			return
 		}
 		// The preview is framed by the vibe page, so it relaxes only frame-ancestors to same-origin.
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; connect-src 'self'; form-action 'none'; frame-ancestors 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'")
+		w.Header().Set("Content-Security-Policy", vibePreviewCSP(baseURL))
 		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -197,6 +237,32 @@ func (app *application) handleVibeShare(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// vibePreviewHostPattern is deliberately narrow: whatever we splice into the
+// CSP must be a plain host[:port] so a crafted Host header cannot smuggle in
+// extra directives or sources.
+var vibePreviewHostPattern = regexp.MustCompile(`^[A-Za-z0-9.\-]+(:[0-9]{1,5})?$`)
+
+// vibePreviewCSP is the policy for the sandboxed live preview. The preview
+// runs in an iframe without allow-same-origin, so its origin is opaque. Chrome
+// and Firefox still resolve 'self' against the document URL, but Safari
+// (WebKit) resolves it against the opaque origin and blocks the preview's own
+// script, stylesheet, and API calls, leaving a blank page. Listing this
+// server's origin explicitly keeps the policy just as tight while making the
+// preview work everywhere. The scheme is required: WebKit ignores a scheme-less
+// host-source here. (An http:// source also matches https:// resources, so a
+// proxy that misreports the scheme still works.)
+func vibePreviewCSP(baseURL string) string {
+	self := "'self'"
+	if parsed, err := url.Parse(baseURL); err == nil &&
+		(parsed.Scheme == "http" || parsed.Scheme == "https") &&
+		vibePreviewHostPattern.MatchString(parsed.Host) {
+		self += " " + parsed.Scheme + "://" + parsed.Host
+	}
+	return "default-src 'self'; base-uri 'none'; connect-src " + self +
+		"; form-action 'none'; frame-ancestors 'self'; img-src 'self' data:; object-src 'none'; script-src " + self +
+		"; style-src " + self
+}
+
 func (app *application) serveVibeStarterAsset(w http.ResponseWriter, name, contentType string) {
 	contents, err := vibeStarterFiles.ReadFile("vibe_starter/" + name)
 	if err != nil {
@@ -208,27 +274,31 @@ func (app *application) serveVibeStarterAsset(w http.ResponseWriter, name, conte
 	_, _ = w.Write(contents)
 }
 
+// vibeStarterConfig is the JSON handed to the starter runtime through the inline
+// <script id="m-stash-config"> block. It carries the API base, publishable key,
+// render mode, and the spec's presentation — but never samples, so the client
+// only ever renders the live records it reads back from the API.
 type vibeStarterConfig struct {
-	API       string          `json:"api"`
-	App       string          `json:"app"`
-	Throwaway bool            `json:"throwaway"`
-	Idea      string          `json:"idea"`
-	Summary   string          `json:"summary"`
-	Parts     []vibeModelPart `json:"parts"`
+	API      string        `json:"api"`
+	App      string        `json:"app"`
+	Mode     string        `json:"mode"`
+	Name     string        `json:"name"`
+	Tagline  string        `json:"tagline"`
+	Accent   string        `json:"accent"`
+	Icon     string        `json:"icon"`
+	Sections []vibeSection `json:"sections"`
 }
 
-// starterParts keeps only pieces the live API will accept, so the generated app never posts to an invalid route.
-func starterParts(plan vibePlan) []vibeModelPart {
-	parts := []vibeModelPart{}
-	seen := map[string]bool{}
-	for _, part := range plan.DataModel {
-		if validateResourceType(part.Type) != nil || seen[part.Scope+"/"+part.Type] {
-			continue
-		}
-		seen[part.Scope+"/"+part.Type] = true
-		parts = append(parts, part)
+// specSectionsForClient copies the spec's sections with their seeded samples
+// stripped, so the generated app never renders stored sample data; it reads the
+// live sandbox records instead.
+func specSectionsForClient(spec vibeSpec) []vibeSection {
+	sections := make([]vibeSection, 0, len(spec.Sections))
+	for _, section := range spec.Sections {
+		section.Samples = nil
+		sections = append(sections, section)
 	}
-	return parts
+	return sections
 }
 
 func renderVibeStarterIndex(record *vibeShareRecord, config vibeStarterConfig, assetBase string) ([]byte, error) {
@@ -236,16 +306,18 @@ func renderVibeStarterIndex(record *vibeShareRecord, config vibeStarterConfig, a
 	if err != nil {
 		return nil, err
 	}
-	config.Idea = record.Idea
-	config.Summary = record.Plan.Summary
-	config.Parts = starterParts(record.Plan)
+	config.Name = record.Spec.Name
+	config.Tagline = record.Spec.Tagline
+	config.Accent = record.Spec.Accent
+	config.Icon = record.Spec.Icon
+	config.Sections = specSectionsForClient(record.Spec)
 	// json.Marshal escapes <, >, and & so the payload cannot close its <script> block.
 	configJSON, err := json.Marshal(config)
 	if err != nil {
 		return nil, err
 	}
 	replacer := strings.NewReplacer(
-		"{{TITLE}}", html.EscapeString(clampString(record.Idea, 80)),
+		"{{TITLE}}", html.EscapeString(clampString(record.Spec.Name, 60)),
 		"{{ASSET_BASE}}", html.EscapeString(assetBase),
 		"{{CONFIG}}", string(configJSON),
 	)
@@ -253,7 +325,13 @@ func renderVibeStarterIndex(record *vibeShareRecord, config vibeStarterConfig, a
 }
 
 func buildVibeStarterZip(record *vibeShareRecord, baseURL string) ([]byte, error) {
-	index, err := renderVibeStarterIndex(record, vibeStarterConfig{API: baseURL, App: vibeStarterPlaceholder}, "")
+	// The downloaded starter runs against the live sandbox when one exists; if the
+	// playground was full, it ships with the placeholder key for the user to swap.
+	publishableKey := record.PublishableKey
+	if publishableKey == "" {
+		publishableKey = vibeStarterPlaceholder
+	}
+	index, err := renderVibeStarterIndex(record, vibeStarterConfig{API: baseURL, App: publishableKey, Mode: "starter"}, "")
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +343,11 @@ func buildVibeStarterZip(record *vibeShareRecord, baseURL string) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	planJSON, err := json.MarshalIndent(map[string]any{"idea": record.Idea, "plan": record.Plan}, "", "  ")
+	viewsJS, err := vibeStarterFiles.ReadFile("vibe_starter/views.js")
+	if err != nil {
+		return nil, err
+	}
+	specJSON, err := json.MarshalIndent(record.Spec, "", "  ")
 	if err != nil {
 		return nil, err
 	}
@@ -277,10 +359,12 @@ func buildVibeStarterZip(record *vibeShareRecord, baseURL string) ([]byte, error
 		contents []byte
 	}{
 		{"README.md", []byte(vibeStarterReadme(record, baseURL))},
+		{"AGENTS.md", []byte(vibeStarterAgents(record, baseURL))},
 		{"index.html", index},
 		{"app.js", appJS},
 		{"app.css", appCSS},
-		{"plan.json", planJSON},
+		{"views.js", viewsJS},
+		{"mstash.json", specJSON},
 	}
 	for _, file := range files {
 		entry, err := writer.CreateHeader(&zip.FileHeader{Name: "m-stash-starter/" + file.name, Method: zip.Deflate, Modified: record.CreatedAt})
@@ -297,36 +381,136 @@ func buildVibeStarterZip(record *vibeShareRecord, baseURL string) ([]byte, error
 	return buffer.Bytes(), nil
 }
 
+// sectionAudienceSummary explains, in store-owner language, who may write and
+// read a section's records.
+func sectionAudienceSummary(section vibeSection) string {
+	switch section.Audience {
+	case vibeAudienceOwner:
+		return "the shop owner writes these; everyone can read them without signing in"
+	case vibeAudienceMemberPublic:
+		return "each signed-in customer owns these and they are public on their page"
+	default:
+		return "each signed-in customer keeps these privately to themselves"
+	}
+}
+
 func vibeStarterReadme(record *vibeShareRecord, baseURL string) string {
-	var builder strings.Builder
-	fmt.Fprintf(&builder, "# m-stash starter\n\n> %s\n\n", record.Idea)
-	if record.Plan.Summary != "" {
-		fmt.Fprintf(&builder, "%s\n\n", record.Plan.Summary)
+	spec := record.Spec
+	name := spec.Name
+	if name == "" {
+		name = "Your app"
 	}
-	builder.WriteString("## Run it\n\n")
-	fmt.Fprintf(&builder, "1. Get a publishable key (`pk_…`) for your app from %s/console.\n", baseURL)
-	builder.WriteString("2. Open `index.html`, find the `m-stash-config` block, and replace `" + vibeStarterPlaceholder + "` with your key.\n")
-	builder.WriteString("3. Serve the folder (for example `npx serve .`) and open it. Add that origin to your app's allowed origins if you restricted them.\n\n")
-	builder.WriteString("No secrets live in this folder: the publishable key only names your app. Ownership is enforced by m-stash on every request.\n\n")
-	if len(record.Plan.DataModel) > 0 {
-		builder.WriteString("## Data model\n\n| Name | Scope | Type | Visibility | Purpose |\n| --- | --- | --- | --- | --- |\n")
-		for _, part := range record.Plan.DataModel {
-			fmt.Fprintf(&builder, "| %s | %s | `%s` | %s | %s |\n", part.Name, part.Scope, part.Type, part.Visibility, strings.ReplaceAll(part.Purpose, "|", "/"))
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\n\n", name)
+	if spec.Tagline != "" {
+		fmt.Fprintf(&b, "> %s\n\n", spec.Tagline)
+	}
+	fmt.Fprintf(&b, "A ready-to-run starter the m-stash vibe lab generated from this idea:\n\n> %s\n\n", record.Idea)
+	b.WriteString("It's plain HTML, CSS, and JavaScript — no build step, no install. It already points at a **live m-stash sandbox**, so it works the moment you open it: browse the storefront, create a customer account, or sign in as the owner and edit the catalog.\n\n")
+
+	b.WriteString("## Run it\n\n")
+	b.WriteString("Just serve this folder and open `index.html`:\n\n")
+	b.WriteString("```sh\nnpx serve .\n# or\npython3 -m http.server 8000\n```\n\n")
+	b.WriteString("Then visit the printed URL. Opening `index.html` directly from disk works too.\n\n")
+
+	b.WriteString("## What's inside\n\n")
+	for _, section := range spec.Sections {
+		title := section.Title
+		if title == "" {
+			title = section.Type
 		}
-		builder.WriteString("\n")
+		fmt.Fprintf(&b, "- **%s** (`%s`, %s view) — %s.\n", title, section.Type, section.View, sectionAudienceSummary(section))
 	}
-	if len(record.Plan.Snippets) > 0 {
-		builder.WriteString("## Snippets\n\n")
-		for _, snippet := range record.Plan.Snippets {
+	b.WriteString("\n")
+
+	b.WriteString("## Keep it past the sandbox\n\n")
+	if !record.ExpiresAt.IsZero() {
+		fmt.Fprintf(&b, "The live sandbox behind this starter is temporary — it is deleted on **%s**. To keep your app running after that, point it at your own app instead:\n\n", record.ExpiresAt.UTC().Format("Mon, 02 Jan 2006 15:04 MST"))
+	} else {
+		b.WriteString("The live sandbox behind this starter is temporary. To keep your app running, point it at your own app instead:\n\n")
+	}
+	fmt.Fprintf(&b, "1. Open %s/console and create an app to get your own publishable key (`pk_…`).\n", baseURL)
+	b.WriteString("2. In `index.html`, find the `m-stash-config` block and replace the `app` value with your key.\n")
+	b.WriteString("3. Reload. Your data now lives in your own app, under your control.\n\n")
+	b.WriteString("Nothing secret lives in this folder. The publishable key only names an app; m-stash enforces ownership and visibility on the server for every request, so it is safe to ship in frontend code.\n\n")
+
+	b.WriteString("## Data model\n\n| Section | Type | Who writes | Visibility | View |\n| --- | --- | --- | --- | --- |\n")
+	for _, section := range spec.Sections {
+		title := section.Title
+		if title == "" {
+			title = section.Type
+		}
+		writer := "customer"
+		if section.Audience == vibeAudienceOwner {
+			writer = "owner"
+		}
+		fmt.Fprintf(&b, "| %s | `%s` | %s | %s | %s |\n", title, section.Type, writer, section.visibility(), section.View)
+	}
+	b.WriteString("\n")
+
+	if snippets := renderVibeSnippets(spec, baseURL, record.PublishableKey); len(snippets) > 0 {
+		b.WriteString("## Talk to the API\n\nThese call the live sandbox. Copy, paste, and build.\n\n")
+		for _, snippet := range snippets {
 			language := snippet.Language
 			if language == "" {
 				language = "javascript"
 			}
-			fmt.Fprintf(&builder, "### %s\n\n```%s\n%s\n```\n\n", snippet.Title, language, snippet.Code)
+			fmt.Fprintf(&b, "### %s\n\n```%s\n%s\n```\n\n", snippet.Title, language, snippet.Code)
 		}
 	}
-	if record.Plan.WhyMStash != "" {
-		fmt.Fprintf(&builder, "## Why m-stash\n\n%s\n", record.Plan.WhyMStash)
+
+	fmt.Fprintf(&b, "## Keep building\n\nSee `AGENTS.md` for the full set of API rules a coding agent should follow, and the machine-readable reference at %s/llms.txt.\n", baseURL)
+	return b.String()
+}
+
+// vibeStarterAgents gives a coding agent (Cursor, Claude, ...) the rules it needs
+// to keep extending the starter against m-stash without breaking ownership.
+func vibeStarterAgents(record *vibeShareRecord, baseURL string) string {
+	spec := record.Spec
+	var b strings.Builder
+	b.WriteString("# Working on this m-stash app\n\n")
+	b.WriteString("This is a vanilla HTML/CSS/JS app backed by **m-stash**, an API that provides authentication plus per-user and app-wide data, with ownership enforced on the server. Follow these rules so changes stay safe and keep working.\n\n")
+
+	b.WriteString("## The golden rules\n\n")
+	b.WriteString("- Every API request must send the header `X-M-Stash-App: <publishable key>`. This app's key is in the `m-stash-config` block of `index.html`.\n")
+	b.WriteString("- The publishable key (`pk_…`) is safe in frontend code; it only names the app. **Never** put a secret key (`sk_…`), password, or token in frontend/source files.\n")
+	b.WriteString("- Authenticate end users with `Authorization: Bearer <token>` from signup/login. Use `credentials: \"omit\"` on fetch.\n")
+	b.WriteString("- Ownership and visibility are enforced by the server. Don't try to work around a 401/403 on the client — fix the auth or the visibility instead.\n\n")
+
+	b.WriteString("## Endpoints\n\n")
+	fmt.Fprintf(&b, "Base URL: `%s`\n\n", baseURL)
+	b.WriteString("- `POST /v1/auth/signup` — body `{ email, password, username }`; returns `{ token, user, namespace }`. Creates a customer account.\n")
+	b.WriteString("- `POST /v1/auth/login` — body `{ email, password }`; returns `{ token, user }`. The owner (admin) signs in here too.\n")
+	b.WriteString("- `GET|POST /v1/me/resources/{type}` and `GET|PUT|DELETE /v1/me/resources/{type}/{slug}` — the signed-in user's **personal** records. Private by default.\n")
+	b.WriteString("- `GET|POST /v1/shared/resources/{type}` and `GET|PUT|DELETE /v1/shared/resources/{type}/{slug}` — **app-wide** records. Only an admin (or your backend's secret key) may write.\n")
+	b.WriteString("- `GET /v1/public/shared/resources/{type}[/{slug}]` — public app-wide records, no login required.\n")
+	b.WriteString("- `GET /v1/public/{username}/{type}[/{slug}]` — a user's public records on their own page.\n\n")
+
+	b.WriteString("## Visibility\n\n")
+	b.WriteString("- `private` — only the owning user can read it (customer wishlists, saves).\n")
+	b.WriteString("- `authenticated` — any signed-in user can read it (shared resources only).\n")
+	b.WriteString("- `public` — anyone can read it, even logged out (the catalog, announcements).\n\n")
+
+	b.WriteString("## This app's sections\n\n")
+	for _, section := range spec.Sections {
+		title := section.Title
+		if title == "" {
+			title = section.Type
+		}
+		scope := "/v1/me/resources/"
+		if section.Audience == vibeAudienceOwner {
+			scope = "/v1/shared/resources/"
+		}
+		fields := make([]string, 0, len(section.Fields))
+		for _, field := range section.Fields {
+			fields = append(fields, field.Key+":"+field.Kind)
+		}
+		fmt.Fprintf(&b, "- **%s** → `%s%s` (visibility `%s`). Fields: %s.\n", title, scope, section.Type, section.visibility(), strings.Join(fields, ", "))
 	}
-	return builder.String()
+	b.WriteString("\n")
+
+	b.WriteString("## A record body\n\n")
+	b.WriteString("```json\n{\n  \"slug\": \"unique-slug\",\n  \"title\": \"Human title\",\n  \"visibility\": \"public\",\n  \"data\": { \"fieldKey\": \"value\" }\n}\n```\n\n")
+	fmt.Fprintf(&b, "Full machine-readable reference: %s/llms.txt\n", baseURL)
+	return b.String()
 }

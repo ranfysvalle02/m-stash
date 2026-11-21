@@ -158,7 +158,7 @@ func newWelcomeResource(appID, namespaceID, userID bson.ObjectID, username strin
 	}
 }
 
-func (app *application) createAccountWithPersonalNamespace(ctx context.Context, user User, namespace Namespace) error {
+func (app *application) createAccountWithPersonalNamespace(ctx context.Context, user User, namespace Namespace, seedWelcome bool) error {
 	session, err := app.mongoClient.StartSession()
 	if err != nil {
 		return err
@@ -176,9 +176,11 @@ func (app *application) createAccountWithPersonalNamespace(ctx context.Context, 
 		if _, err := app.database.Collection(namespaceMembershipCollection).InsertOne(transactionContext, membership); err != nil {
 			return nil, err
 		}
-		seed := newWelcomeResource(namespace.AppID, namespace.ID, user.ID, namespace.Slug, namespace.CreatedAt)
-		if _, err := app.database.Collection(resourceCollectionName).InsertOne(transactionContext, seed); err != nil {
-			return nil, err
+		if seedWelcome {
+			seed := newWelcomeResource(namespace.AppID, namespace.ID, user.ID, namespace.Slug, namespace.CreatedAt)
+			if _, err := app.database.Collection(resourceCollectionName).InsertOne(transactionContext, seed); err != nil {
+				return nil, err
+			}
 		}
 		return nil, nil
 	}, options.Transaction().SetWriteConcern(writeconcern.Majority()))

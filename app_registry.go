@@ -38,8 +38,18 @@ type AppRecord struct {
 	SecretKeyHash  string        `bson:"secretKeyHash" json:"-"`
 	AllowedOrigins []string      `bson:"allowedOrigins,omitempty" json:"allowedOrigins,omitempty"`
 	Active         bool          `bson:"active" json:"active"`
-	CreatedAt      time.Time     `bson:"createdAt" json:"createdAt"`
-	UpdatedAt      time.Time     `bson:"updatedAt" json:"updatedAt"`
+	// Sandbox marks an ephemeral vibe-lab tenant. It carries tighter quotas and is
+	// purged, with all of its data, once ExpiresAt passes.
+	Sandbox   bool       `bson:"sandbox,omitempty" json:"sandbox,omitempty"`
+	ExpiresAt *time.Time `bson:"expiresAt,omitempty" json:"expiresAt,omitempty"`
+	CreatedAt time.Time  `bson:"createdAt" json:"createdAt"`
+	UpdatedAt time.Time  `bson:"updatedAt" json:"updatedAt"`
+}
+
+// expired reports whether a sandbox tenant has passed its lifetime. Non-sandbox
+// apps never expire.
+func (record *AppRecord) expired(now time.Time) bool {
+	return record.Sandbox && record.ExpiresAt != nil && now.After(*record.ExpiresAt)
 }
 
 func withApp(ctx context.Context, record *AppRecord) context.Context {
@@ -125,6 +135,10 @@ func (cache *appKeyCache) delete(key string) {
 
 func (app *application) lookupApp(ctx context.Context, publishableKey string) (*AppRecord, error) {
 	if record, ok := app.appCache.get(publishableKey); ok {
+		if record.expired(time.Now().UTC()) {
+			app.appCache.delete(publishableKey)
+			return nil, mongo.ErrNoDocuments
+		}
 		return record, nil
 	}
 	var record AppRecord
@@ -134,8 +148,22 @@ func (app *application) lookupApp(ctx context.Context, publishableKey string) (*
 	).Decode(&record); err != nil {
 		return nil, err
 	}
+	// An expired sandbox is unknown until the sweeper removes it, so its live demo
+	// and starter stop working the moment the share link does.
+	if record.expired(time.Now().UTC()) {
+		return nil, mongo.ErrNoDocuments
+	}
 	app.appCache.put(publishableKey, &record)
 	return &record, nil
+}
+
+// countActiveSandboxes bounds how many ephemeral tenants can exist at once.
+func (app *application) countActiveSandboxes(ctx context.Context) (int64, error) {
+	return app.database.Collection(appsCollectionName).CountDocuments(ctx, bson.M{
+		"sandbox":   true,
+		"active":    true,
+		"expiresAt": bson.M{"$gt": time.Now().UTC()},
+	})
 }
 
 // ensureDefaultApp resolves the publishable key the bundled UI ships with, so a
@@ -268,6 +296,8 @@ type provisionAppInput struct {
 	AdminPassword  string        `json:"adminPassword"`
 	AllowedOrigins []string      `json:"allowedOrigins"`
 	OwnerID        bson.ObjectID `json:"-"`
+	Sandbox        bool          `json:"-"`
+	ExpiresAt      *time.Time    `json:"-"`
 }
 
 func (input *provisionAppInput) normalizeAndValidate() error {
@@ -357,6 +387,8 @@ func (app *application) provisionApp(ctx context.Context, input provisionAppInpu
 		SecretKeyHash:  string(secretHash),
 		AllowedOrigins: input.AllowedOrigins,
 		Active:         true,
+		Sandbox:        input.Sandbox,
+		ExpiresAt:      input.ExpiresAt,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}

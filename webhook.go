@@ -126,6 +126,12 @@ func ensureWebhookIndexes(ctx context.Context, database *mongo.Database) error {
 }
 
 func (app *application) handleSharedWebhooks(w http.ResponseWriter, r *http.Request, claims *Claims) {
+	// Sandbox tenants are ephemeral and have no backend to receive deliveries, so
+	// the whole webhook surface is closed for them.
+	if record, ok := appFromContext(r.Context()); ok && record.Sandbox {
+		writeError(w, http.StatusForbidden, "Webhooks are not available in the sandbox")
+		return
+	}
 	if !canWriteSharedNamespace(claims) {
 		writeError(w, http.StatusForbidden, "Only administrators can manage webhooks")
 		return

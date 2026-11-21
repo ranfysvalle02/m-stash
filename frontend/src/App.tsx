@@ -1,7 +1,6 @@
 import {
   createContext,
   useEffect,
-  useRef,
   useState,
   type FormEvent,
 } from "react";
@@ -63,9 +62,11 @@ import {
   type ResourceInput,
   type ResourcePreview,
   type UserClaims,
-  type VibeModelPart,
-  type VibePlan,
+  type VibeOwner,
+  type VibeSection,
   type VibeShare,
+  type VibeSnippet,
+  type VibeSpec,
 } from "./api";
 import "./App.css";
 
@@ -282,8 +283,7 @@ function AuthenticationPage({
   return (
     <main className="auth-page">
       <Link className="wordmark" to="/discover">
-        <MustacheMark />
-        <span className="wordmark-text"><span className="wordmark-m">m</span>-stash</span>
+        <Wordmark />
       </Link>
       <section className="auth-panel" aria-labelledby="auth-title">
         <p className="eyebrow">
@@ -547,8 +547,7 @@ function WorkspaceShell({
           className="wordmark"
           to={claims.role === "admin" || !namespace ? "/app/shared" : "/app/resources/record"}
         >
-          <MustacheMark />
-          <span className="wordmark-text"><span className="wordmark-m">m</span>-stash</span>
+          <Wordmark />
         </Link>
         <nav aria-label="Workspace">
           {claims.role === "admin" && (
@@ -633,8 +632,7 @@ function WorkspaceShell({
             className="wordmark"
             to={claims.role === "admin" || !namespace ? "/app/shared" : "/app/resources/record"}
           >
-            <MustacheMark />
-            <span className="wordmark-text"><span className="wordmark-m">m</span>-stash</span>
+            <Wordmark />
           </Link>
           {claims.role === "admin" ? (
             <Link
@@ -1792,8 +1790,8 @@ function useVibeAvailable() {
 }
 
 const vibeExamples = [
+  "a site for my guitar and vinyl shop with in-store gigs and customer wishlists",
   "a co-op game with save slots and a public leaderboard",
-  "a habit tracker with private streaks and a public profile",
   "a recipe app where users keep private recipes and publish some",
 ];
 
@@ -1806,45 +1804,237 @@ function expiresLabel(expiresAt: string) {
   return `Expires in ${Math.round(hours / 24)} days`;
 }
 
-function VibeShareBar({ share }: { share: VibeShare }) {
+// Owner credentials are returned only once (on the POST create response), so we
+// persist them per share id. A reload or deep link reads them back from here.
+function vibeOwnerStorageKey(shareId: string) {
+  return `m-stash-vibe-owner:${shareId}`;
+}
+
+function loadVibeOwner(shareId: string): VibeOwner | null {
+  try {
+    const raw = localStorage.getItem(vibeOwnerStorageKey(shareId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<VibeOwner>;
+    if (typeof parsed?.email === "string" && typeof parsed?.password === "string") {
+      return { email: parsed.email, password: parsed.password };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function saveVibeOwner(shareId: string, owner: VibeOwner) {
+  try {
+    localStorage.setItem(vibeOwnerStorageKey(shareId), JSON.stringify(owner));
+  } catch {
+    // Storage is best-effort; the credentials still live in component state.
+  }
+}
+
+// A fixed set of accent palettes drives the result theme via a CSS variable.
+const vibeAccentNames = new Set([
+  "teal",
+  "indigo",
+  "rose",
+  "amber",
+  "emerald",
+  "slate",
+]);
+
+function vibeAccentClass(accent: string) {
+  return vibeAccentNames.has(accent)
+    ? `vibe-accent-${accent}`
+    : "vibe-accent-teal";
+}
+
+// storefrontHost renders a live URL as a friendly "address bar" label.
+function storefrontHost(rawUrl: string) {
+  try {
+    const parsed = new URL(rawUrl, window.location.origin);
+    const path = parsed.pathname === "/" ? "" : parsed.pathname;
+    return parsed.host + path;
+  } catch {
+    return rawUrl;
+  }
+}
+
+// The embedded starter reads a `#owner=<emailEnc>:<passwordEnc>` fragment to
+// offer one-click owner sign-in. The fragment never reaches the server.
+function vibePreviewSrc(previewUrl: string, owner: VibeOwner | null) {
+  if (!owner) return previewUrl;
+  const email = encodeURIComponent(owner.email);
+  const password = encodeURIComponent(owner.password);
+  return `${previewUrl}#owner=${email}:${password}`;
+}
+
+function sectionAudienceLabel(audience: VibeSection["audience"]) {
+  if (audience === "owner") return "Owner";
+  if (audience === "member-public") return "Member · public";
+  return "Member";
+}
+
+function VibeCopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
-  const link = `${window.location.origin}/vibe/${share.id}`;
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(link);
+      await navigator.clipboard.writeText(value);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      window.setTimeout(() => setCopied(false), 1600);
     } catch {
       setCopied(false);
     }
   }
 
   return (
-    <div className="vibe-share">
-      <button className="button secondary" onClick={() => void copy()} type="button">
-        {copied ? <Check aria-hidden="true" size={16} /> : <Link2 aria-hidden="true" size={16} />}{" "}
-        {copied ? "Link copied" : "Copy share link"}
-      </button>
-      <a className="button secondary" download href={`/v1/vibe/${share.id}/zip`}>
-        <Download aria-hidden="true" size={16} /> Download .zip
-      </a>
-      <span className="vibe-expiry">
-        <Clock aria-hidden="true" size={14} /> {expiresLabel(share.expiresAt)}
-      </span>
+    <div className="vibe-cred-row">
+      <span className="vibe-cred-label">{label}</span>
+      <div className="vibe-cred-value">
+        <code title={value}>{value}</code>
+        <button
+          aria-label={copied ? `${label} copied` : `Copy ${label.toLowerCase()}`}
+          className="icon-button"
+          onClick={() => void copy()}
+          title={copied ? "Copied" : `Copy ${label.toLowerCase()}`}
+          type="button"
+        >
+          {copied ? (
+            <Check aria-hidden="true" size={15} />
+          ) : (
+            <Copy aria-hidden="true" size={15} />
+          )}
+        </button>
+      </div>
     </div>
   );
 }
 
-function VibePlanDrawer({
-  idea,
-  plan,
-  share,
+function VibeOwnerCard({ owner }: { owner: VibeOwner | null }) {
+  return (
+    <div className="vibe-owner-card">
+      <span className="vibe-owner-badge">
+        <ShieldCheck aria-hidden="true" size={14} /> Owner access
+      </span>
+      {owner ? (
+        <>
+          <p className="vibe-owner-lede">
+            This is your shop sign-in — shown once. Copy it somewhere safe.
+          </p>
+          <VibeCopyField label="Email" value={owner.email} />
+          <VibeCopyField label="Password" value={owner.password} />
+        </>
+      ) : (
+        <p className="vibe-owner-lede">
+          Your one-time shop sign-in isn’t stored on this device. The storefront
+          is still live — sign in from the app, or start a fresh idea to get new
+          owner keys.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function VibeBrowserFrame({
+  title,
+  src,
+  displayUrl,
+}: {
+  title: string;
+  src: string;
+  displayUrl: string;
+}) {
+  return (
+    <div className="vibe-browser">
+      <div className="vibe-browser-bar">
+        <span aria-hidden="true" className="vibe-browser-dots">
+          <i />
+          <i />
+          <i />
+        </span>
+        <span className="vibe-browser-url">
+          <Globe2 aria-hidden="true" size={13} /> {storefrontHost(displayUrl)}
+        </span>
+        <a
+          aria-label="Open the storefront in a new tab"
+          className="icon-button vibe-browser-open"
+          href={src}
+          rel="noreferrer"
+          target="_blank"
+          title="Open in a new tab"
+        >
+          <ExternalLink aria-hidden="true" size={14} />
+        </a>
+      </div>
+      <iframe
+        className="vibe-browser-view"
+        loading="lazy"
+        sandbox="allow-scripts allow-forms allow-popups"
+        src={src}
+        title={title}
+      />
+    </div>
+  );
+}
+
+function VibeSpecSections({ spec }: { spec: VibeSpec }) {
+  return (
+    <div className="vibe-spec-sections">
+      {spec.sections.map((section, index) => (
+        <article className="vibe-spec-card" key={`${section.type}-${index}`}>
+          <div className="vibe-spec-card-head">
+            <strong>{section.title}</strong>
+            <div className="vibe-spec-badges">
+              <span className="vibe-badge">
+                {sectionAudienceLabel(section.audience)}
+              </span>
+              <span className="vibe-badge">{section.view}</span>
+            </div>
+          </div>
+          <code className="vibe-spec-type">{section.type}</code>
+          <ul className="vibe-field-list">
+            {section.fields.map((field) => (
+              <li key={field.key}>
+                <span className="vibe-field-label">{field.label}</span>
+                <span className="vibe-field-kind">{field.kind}</span>
+                {field.options && field.options.length > 0 && (
+                  <span className="vibe-field-options">
+                    {field.options.join(" · ")}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function VibeSnippetList({ snippets }: { snippets: VibeSnippet[] }) {
+  if (snippets.length === 0) return null;
+  return (
+    <div className="vibe-block">
+      <h2>Copy-paste it</h2>
+      {snippets.map((snippet, index) => (
+        <CopyableSnippet
+          code={snippet.code}
+          description={snippet.language}
+          key={index}
+          title={snippet.title}
+        />
+      ))}
+    </div>
+  );
+}
+
+function VibeUnderTheHood({
+  spec,
+  snippets,
   onClose,
 }: {
-  idea: string;
-  plan: VibePlan;
-  share: VibeShare;
+  spec: VibeSpec;
+  snippets: VibeSnippet[];
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -1858,7 +2048,7 @@ function VibePlanDrawer({
   return (
     <div className="drawer-overlay" onClick={onClose}>
       <aside
-        aria-label="The plan behind this sandbox"
+        aria-label="Under the hood"
         className="drawer"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
@@ -1866,9 +2056,9 @@ function VibePlanDrawer({
         <div className="drawer-head">
           <div>
             <span className="sandbox-eyebrow">
-              <Code2 aria-hidden="true" size={13} /> The plan
+              <Code2 aria-hidden="true" size={13} /> Under the hood
             </span>
-            <h2>{idea || "Your backend"}</h2>
+            <h2>{spec.name}</h2>
           </div>
           <button
             className="icon-button"
@@ -1880,42 +2070,25 @@ function VibePlanDrawer({
           </button>
         </div>
         <div className="drawer-body">
-          {plan.source === "blueprint" && (
+          {spec.source === "blueprint" && (
             <p className="drawer-note">
-              The AI model is resting, so this sketch comes from m-stash’s
-              built-in blueprints. Same real API, same rules.
+              The AI model is resting, so this spec comes from m-stash’s built-in
+              blueprints. Same real API, same rules.
             </p>
           )}
-          {plan.summary && <p className="drawer-summary">{plan.summary}</p>}
-          {plan.dataModel.length > 0 && (
-            <section className="drawer-section">
-              <h3>
-                <Database aria-hidden="true" size={15} /> Data model
-              </h3>
-              <div className="drawer-model">
-                {plan.dataModel.map((part, index) => (
-                  <article key={index}>
-                    <div className="drawer-model-head">
-                      <strong>{part.name}</strong>
-                      {part.visibility && (
-                        <span className="vibe-badge">{part.visibility}</span>
-                      )}
-                    </div>
-                    <p className="drawer-model-meta">
-                      {[part.scope, part.type].filter(Boolean).join(" · ")}
-                    </p>
-                    <p>{part.purpose}</p>
-                  </article>
-                ))}
-              </div>
-            </section>
-          )}
-          {plan.snippets.length > 0 && (
+          <p className="drawer-summary">{spec.tagline}</p>
+          <section className="drawer-section">
+            <h3>
+              <Database aria-hidden="true" size={15} /> App spec
+            </h3>
+            <VibeSpecSections spec={spec} />
+          </section>
+          {snippets.length > 0 && (
             <section className="drawer-section">
               <h3>
                 <Code2 aria-hidden="true" size={15} /> Copy-paste it
               </h3>
-              {plan.snippets.map((snippet, index) => (
+              {snippets.map((snippet, index) => (
                 <CopyableSnippet
                   code={snippet.code}
                   description={snippet.language}
@@ -1924,11 +2097,6 @@ function VibePlanDrawer({
                 />
               ))}
             </section>
-          )}
-          {plan.whyMStash && (
-            <p className="drawer-why">
-              <ShieldCheck aria-hidden="true" size={16} /> {plan.whyMStash}
-            </p>
           )}
         </div>
         <div className="drawer-foot">
@@ -1941,7 +2109,7 @@ function VibePlanDrawer({
             <ArrowUpRight aria-hidden="true" size={17} /> Build it for real
           </a>
           <span className="drawer-expiry">
-            <Clock aria-hidden="true" size={13} /> {expiresLabel(share.expiresAt)}
+            <Clock aria-hidden="true" size={13} /> Temporary sandbox
           </span>
         </div>
       </aside>
@@ -1949,759 +2117,181 @@ function VibePlanDrawer({
   );
 }
 
-type SandboxSession = { token: string; username: string | null };
-type SandboxRecord = { slug: string; title?: string; visibility?: string };
-
-function sandboxRandomHex(bytes: number) {
-  const buffer = new Uint8Array(bytes);
-  crypto.getRandomValues(buffer);
-  return Array.from(buffer, (value) => value.toString(16).padStart(2, "0")).join(
-    "",
-  );
-}
-
-function sandboxSlug(title: string) {
-  const base =
-    title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 48) || "record";
-  return `${base}-${sandboxRandomHex(2)}`;
-}
-
-// coerceSandboxValue turns a plain text field into the most natural JSON type,
-// so nobody has to hand-write JSON to save a record.
-function coerceSandboxValue(raw: string): unknown {
-  const text = raw.trim();
-  if (text === "") return "";
-  if (text === "true") return true;
-  if (text === "false") return false;
-  if (text === "null") return null;
-  if (/^-?\d+(\.\d+)?$/.test(text) && Number.isFinite(Number(text))) {
-    return Number(text);
-  }
-  if (
-    (text.startsWith("{") && text.endsWith("}")) ||
-    (text.startsWith("[") && text.endsWith("]"))
-  ) {
-    try {
-      return JSON.parse(text);
-    } catch {
-      // Not valid JSON — keep it as a plain string.
-    }
-  }
-  return text;
-}
-
-// sandboxParts keeps only data-model pieces the live API will accept, mirroring
-// the server's starter filter so the sandbox never posts to an invalid route.
-function sandboxParts(plan: VibePlan): VibeModelPart[] {
-  const seen = new Set<string>();
-  const validType = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-  const parts: VibeModelPart[] = [];
-  for (const part of plan.dataModel) {
-    const key = `${part.scope}/${part.type}`;
-    if (!validType.test(part.type) || seen.has(key)) continue;
-    seen.add(key);
-    parts.push(part);
-  }
-  return parts;
-}
-
-// sandboxFetch talks to the real API with a scoped bearer token and
-// credentials "omit", so the throwaway sandbox never reads or writes the
-// visitor's actual m-stash session on the same origin.
-async function sandboxFetch<T>(
-  path: string,
-  appKey: string,
-  token: string | null,
-  init?: { method?: string; body?: unknown },
-): Promise<T> {
-  const headers: Record<string, string> = { "X-M-Stash-App": appKey };
-  if (init?.body !== undefined) headers["Content-Type"] = "application/json";
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(path, {
-    method: init?.method ?? "GET",
-    headers,
-    body: init?.body === undefined ? undefined : JSON.stringify(init.body),
-    credentials: "omit",
-  });
-  if (response.status === 204) return undefined as T;
-  const payload = (await response.json().catch(() => ({}))) as { error?: string };
-  if (!response.ok) {
-    throw new Error(payload.error ?? `Request failed (${response.status})`);
-  }
-  return payload as T;
-}
-
-function SandboxCardHead({ part }: { part: VibeModelPart }) {
-  return (
-    <header className="sandbox-card-head">
-      <div className="sandbox-card-title">
-        <span
-          className={`scope-dot scope-${part.scope === "shared" ? "shared" : "personal"}`}
-        />
-        <h4>{part.name || part.type}</h4>
-      </div>
-      <div className="sandbox-tags">
-        <span className="vibe-badge">{part.scope}</span>
-        <code>{part.type}</code>
-        {part.visibility && <span className="vibe-badge">{part.visibility}</span>}
-      </div>
-    </header>
-  );
-}
-
-function SandboxComposer({
-  part,
-  appKey,
-  token,
-  onCreated,
-}: {
-  part: VibeModelPart;
-  appKey: string;
-  token: string;
-  onCreated: () => void;
-}) {
-  const [title, setTitle] = useState("");
-  const [visibility, setVisibility] = useState<"private" | "public">(
-    part.visibility === "public" ? "public" : "private",
-  );
-  const [fields, setFields] = useState<
-    { id: number; key: string; value: string }[]
-  >([{ id: 0, key: "", value: "" }]);
-  const nextFieldId = useRef(1);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  function addField() {
-    setFields((current) => [
-      ...current,
-      { id: nextFieldId.current++, key: "", value: "" },
-    ]);
-  }
-
-  function updateField(
-    id: number,
-    patch: Partial<{ key: string; value: string }>,
-  ) {
-    setFields((current) =>
-      current.map((field) => (field.id === id ? { ...field, ...patch } : field)),
-    );
-  }
-
-  function removeField(id: number) {
-    setFields((current) => {
-      const next = current.filter((field) => field.id !== id);
-      return next.length ? next : [{ id: nextFieldId.current++, key: "", value: "" }];
-    });
-  }
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    const name = title.trim();
-    if (!name) {
-      setError("Give it a title.");
-      return;
-    }
-    const data: Record<string, unknown> = {};
-    for (const field of fields) {
-      const key = field.key.trim();
-      if (key) data[key] = coerceSandboxValue(field.value);
-    }
-    setBusy(true);
-    try {
-      await sandboxFetch(
-        `/v1/me/resources/${encodeURIComponent(part.type)}`,
-        appKey,
-        token,
-        {
-          method: "POST",
-          body: { slug: sandboxSlug(name), title: name, visibility, data },
-        },
-      );
-      setTitle("");
-      setFields([{ id: nextFieldId.current++, key: "", value: "" }]);
-      onCreated();
-    } catch (requestError) {
-      setError(messageFromError(requestError));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <form className="sandbox-composer" onSubmit={submit}>
-      <label className="sandbox-field">
-        <span>Title</span>
-        <input
-          maxLength={120}
-          onChange={(event) => setTitle(event.target.value)}
-          placeholder={`e.g. ${part.name || part.type}`}
-          value={title}
-        />
-      </label>
-      <div className="sandbox-field">
-        <span>Fields</span>
-        <div className="kv-editor">
-          <div className="kv-rows">
-            {fields.map((field) => (
-              <div className="kv-row" key={field.id}>
-                <input
-                  className="kv-key"
-                  maxLength={40}
-                  onChange={(event) =>
-                    updateField(field.id, { key: event.target.value })
-                  }
-                  placeholder="field"
-                  value={field.key}
-                />
-                <input
-                  className="kv-value"
-                  onChange={(event) =>
-                    updateField(field.id, { value: event.target.value })
-                  }
-                  placeholder="value"
-                  value={field.value}
-                />
-                <button
-                  className="icon-button kv-remove"
-                  onClick={() => removeField(field.id)}
-                  title="Remove field"
-                  type="button"
-                >
-                  <X aria-hidden="true" size={15} />
-                </button>
-              </div>
-            ))}
-          </div>
-          <button className="kv-add" onClick={addField} type="button">
-            <Plus aria-hidden="true" size={14} /> Add field
-          </button>
-          <p className="kv-hint">
-            Numbers and true/false become real JSON types — no quotes or braces
-            needed.
-          </p>
-        </div>
-      </div>
-      <div className="sandbox-composer-foot">
-        <div className="sandbox-field">
-          <span>Visibility</span>
-          <div className="segmented" role="group">
-            <button
-              className={visibility === "private" ? "active" : ""}
-              onClick={() => setVisibility("private")}
-              type="button"
-            >
-              Private
-            </button>
-            <button
-              className={visibility === "public" ? "active" : ""}
-              onClick={() => setVisibility("public")}
-              type="button"
-            >
-              Public
-            </button>
-          </div>
-        </div>
-        <button className="button primary" disabled={busy} type="submit">
-          <Plus aria-hidden="true" size={16} /> Add record
-        </button>
-      </div>
-      {error && <p className="form-error small">{error}</p>}
-    </form>
-  );
-}
-
-function SandboxPersonalCard({
-  part,
-  appKey,
-  session,
-}: {
-  part: VibeModelPart;
-  appKey: string;
-  session: SandboxSession;
-}) {
-  const [records, setRecords] = useState<SandboxRecord[] | null>(null);
-  const [error, setError] = useState("");
-  const [reloadKey, setReloadKey] = useState(0);
-
-  useEffect(() => {
-    let active = true;
-    sandboxFetch<{ data: SandboxRecord[] }>(
-      `/v1/me/resources/${encodeURIComponent(part.type)}?limit=20`,
-      appKey,
-      session.token,
-    )
-      .then((page) => {
-        if (!active) return;
-        setRecords(page.data);
-        setError("");
-      })
-      .catch((requestError) => {
-        if (active) setError(messageFromError(requestError));
-      });
-    return () => {
-      active = false;
-    };
-  }, [appKey, part.type, session.token, reloadKey]);
-
-  async function remove(slug: string) {
-    try {
-      await sandboxFetch(
-        `/v1/me/resources/${encodeURIComponent(part.type)}/${encodeURIComponent(slug)}`,
-        appKey,
-        session.token,
-        { method: "DELETE" },
-      );
-      setReloadKey((key) => key + 1);
-    } catch {
-      // Leave the row; the next reload reconciles state.
-    }
-  }
-
-  return (
-    <article className="sandbox-card">
-      <SandboxCardHead part={part} />
-      {part.purpose && <p className="sandbox-card-purpose">{part.purpose}</p>}
-      <SandboxComposer
-        appKey={appKey}
-        onCreated={() => setReloadKey((key) => key + 1)}
-        part={part}
-        token={session.token}
-      />
-      <ul className="sandbox-records">
-        {records === null ? (
-          <li className="sandbox-empty">Loading…</li>
-        ) : error ? (
-          <li className="sandbox-empty">{error}</li>
-        ) : records.length === 0 ? (
-          <li className="sandbox-empty">No records yet — add your first above.</li>
-        ) : (
-          records.map((record) => (
-            <li className="sandbox-record" key={record.slug}>
-              <div className="sandbox-record-main">
-                <strong>{record.title || record.slug}</strong>
-                <code>{`${part.type}/${record.slug}`}</code>
-              </div>
-              <div className="sandbox-record-side">
-                {record.visibility && (
-                  <span className="vibe-badge">{record.visibility}</span>
-                )}
-                {record.visibility === "public" && session.username && (
-                  <a
-                    className="icon-button"
-                    href={`/v1/public/${encodeURIComponent(session.username)}/${encodeURIComponent(part.type)}/${encodeURIComponent(record.slug)}?app=${encodeURIComponent(appKey)}`}
-                    rel="noreferrer"
-                    target="_blank"
-                    title="Open public link"
-                  >
-                    <ExternalLink aria-hidden="true" size={14} />
-                  </a>
-                )}
-                <button
-                  className="icon-button danger"
-                  onClick={() => void remove(record.slug)}
-                  title="Delete"
-                  type="button"
-                >
-                  <Trash2 aria-hidden="true" size={14} />
-                </button>
-              </div>
-            </li>
-          ))
-        )}
-      </ul>
-    </article>
-  );
-}
-
-function SandboxSharedCard({
-  part,
-  appKey,
-  token,
-}: {
-  part: VibeModelPart;
-  appKey: string;
-  token: string;
-}) {
-  const [records, setRecords] = useState<SandboxRecord[] | null>(null);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let active = true;
-    sandboxFetch<{ data: SandboxRecord[] }>(
-      `/v1/shared/resources/${encodeURIComponent(part.type)}?limit=20`,
-      appKey,
-      token,
-    )
-      .then((page) => {
-        if (active) setRecords(page.data);
-      })
-      .catch((requestError) => {
-        if (active) setError(messageFromError(requestError));
-      });
-    return () => {
-      active = false;
-    };
-  }, [appKey, part.type, token]);
-
-  return (
-    <article className="sandbox-card">
-      <SandboxCardHead part={part} />
-      {part.purpose && <p className="sandbox-card-purpose">{part.purpose}</p>}
-      <p className="sandbox-note">
-        <Globe2 aria-hidden="true" size={14} /> Read-only here: signed-in users
-        read shared data; your backend writes it with the app’s secret key.
-      </p>
-      <ul className="sandbox-records">
-        {records === null ? (
-          <li className="sandbox-empty">Loading…</li>
-        ) : error ? (
-          <li className="sandbox-empty">{error}</li>
-        ) : records.length === 0 ? (
-          <li className="sandbox-empty">No shared records yet.</li>
-        ) : (
-          records.map((record) => (
-            <li className="sandbox-record" key={record.slug}>
-              <div className="sandbox-record-main">
-                <strong>{record.title || record.slug}</strong>
-                <code>{`${part.type}/${record.slug}`}</code>
-              </div>
-              {record.visibility && (
-                <span className="vibe-badge">{record.visibility}</span>
-              )}
-            </li>
-          ))
-        )}
-      </ul>
-    </article>
-  );
-}
-
-function SandboxAuth({
-  appKey,
-  onSignedIn,
-}: {
-  appKey: string;
-  onSignedIn: (session: SandboxSession) => void;
-}) {
-  const [mode, setMode] = useState<"login" | "signup">("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [username, setUsername] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function usernameFor(token: string): Promise<string | null> {
-    try {
-      const namespace = await sandboxFetch<{ data: { slug: string } }>(
-        "/v1/me/namespace",
-        appKey,
-        token,
-      );
-      return namespace.data.slug;
-    } catch {
-      return null;
-    }
-  }
-
-  async function run(action: () => Promise<void>) {
-    setBusy(true);
-    setError("");
-    try {
-      await action();
-    } catch (requestError) {
-      setError(messageFromError(requestError));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function throwaway() {
-    return run(async () => {
-      const handle = `vibe-${sandboxRandomHex(4)}`;
-      const result = await sandboxFetch<{
-        token: string;
-        namespace?: { slug: string };
-      }>("/v1/auth/signup", appKey, null, {
-        method: "POST",
-        body: {
-          email: `${handle}@example.com`,
-          password: sandboxRandomHex(16),
-          username: handle,
-        },
-      });
-      onSignedIn({ token: result.token, username: result.namespace?.slug ?? handle });
-    });
-  }
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    return run(async () => {
-      if (mode === "signup") {
-        const result = await sandboxFetch<{
-          token: string;
-          namespace?: { slug: string };
-        }>("/v1/auth/signup", appKey, null, {
-          method: "POST",
-          body: {
-            email: email.trim(),
-            password,
-            username: username.trim().toLowerCase(),
-          },
-        });
-        onSignedIn({
-          token: result.token,
-          username: result.namespace?.slug ?? null,
-        });
-      } else {
-        const result = await sandboxFetch<{ token: string }>(
-          "/v1/auth/login",
-          appKey,
-          null,
-          { method: "POST", body: { email: email.trim(), password } },
-        );
-        onSignedIn({
-          token: result.token,
-          username: await usernameFor(result.token),
-        });
-      }
-    });
-  }
-
-  return (
-    <div className="sandbox-auth">
-      <div className="sandbox-auth-card">
-        <h3>Try this backend live</h3>
-        <p className="muted">
-          Sign in to read and write real records. The sandbox uses a scoped
-          token, so it never touches your m-stash session.
-        </p>
-        <button
-          className="button primary wide"
-          disabled={busy}
-          onClick={() => void throwaway()}
-          type="button"
-        >
-          <Sparkles aria-hidden="true" size={16} /> One-click throwaway account
-        </button>
-        <div className="sandbox-or">or use your own</div>
-        <div className="segmented" role="group">
-          <button
-            className={mode === "login" ? "active" : ""}
-            onClick={() => setMode("login")}
-            type="button"
-          >
-            Log in
-          </button>
-          <button
-            className={mode === "signup" ? "active" : ""}
-            onClick={() => setMode("signup")}
-            type="button"
-          >
-            Sign up
-          </button>
-        </div>
-        <form className="sandbox-auth-form" onSubmit={submit}>
-          <label className="sandbox-field">
-            <span>Email</span>
-            <input
-              autoComplete="email"
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@example.com"
-              type="email"
-              value={email}
-            />
-          </label>
-          <label className="sandbox-field">
-            <span>Password</span>
-            <input
-              autoComplete="current-password"
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="At least 12 characters"
-              type="password"
-              value={password}
-            />
-          </label>
-          {mode === "signup" && (
-            <label className="sandbox-field">
-              <span>Username</span>
-              <input
-                autoComplete="username"
-                onChange={(event) => setUsername(event.target.value)}
-                placeholder="pick-a-handle"
-                value={username}
-              />
-            </label>
-          )}
-          <button className="button primary wide" disabled={busy} type="submit">
-            {mode === "signup" ? "Create account" : "Log in"}
-          </button>
-        </form>
-        {error && <p className="form-error small">{error}</p>}
-      </div>
-    </div>
-  );
-}
-
-function VibeSandbox({
-  idea,
-  plan,
+function VibeSidePanel({
+  spec,
   share,
-  onNewIdea,
+  owner,
+  snippets,
 }: {
-  idea: string;
-  plan: VibePlan;
+  spec: VibeSpec;
   share: VibeShare;
-  onNewIdea: () => void;
+  owner: VibeOwner | null;
+  snippets: VibeSnippet[];
 }) {
-  const appKey = api.publishableKey();
-  const parts = sandboxParts(plan);
-  const storageKey = `m-stash-vibe:${share.id}`;
-  const [session, setSession] = useState<SandboxSession | null>(() => {
-    try {
-      const raw = sessionStorage.getItem(storageKey);
-      return raw ? (JSON.parse(raw) as SandboxSession) : null;
-    } catch {
-      return null;
-    }
-  });
   const [copied, setCopied] = useState(false);
-  const [planOpen, setPlanOpen] = useState(false);
-  const link = `${window.location.origin}/vibe/${share.id}`;
+  const [hoodOpen, setHoodOpen] = useState(false);
+  const shareLink = share.url || window.location.href;
 
-  function signIn(next: SandboxSession) {
+  async function copyShareLink() {
     try {
-      sessionStorage.setItem(storageKey, JSON.stringify(next));
-    } catch {
-      // Storage is best-effort; the token still lives in component state.
-    }
-    setSession(next);
-  }
-
-  function signOut() {
-    try {
-      sessionStorage.removeItem(storageKey);
-    } catch {
-      // Ignore storage errors.
-    }
-    setSession(null);
-  }
-
-  async function copyLink() {
-    try {
-      await navigator.clipboard.writeText(link);
+      await navigator.clipboard.writeText(shareLink);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      window.setTimeout(() => setCopied(false), 1600);
     } catch {
       setCopied(false);
     }
   }
 
   return (
-    <section className="sandbox">
-      <div className="sandbox-bar">
-        <div className="sandbox-idea">
-          <span className="sandbox-eyebrow">
-            <Sparkles aria-hidden="true" size={13} /> Live sandbox
-          </span>
-          <p title={idea}>{idea || "Your backend, live"}</p>
-        </div>
-        <div className="sandbox-actions">
-          <button
-            className="icon-button"
-            onClick={() => void copyLink()}
-            title="Copy share link"
-            type="button"
-          >
-            {copied ? (
-              <Check aria-hidden="true" size={16} />
-            ) : (
-              <Link2 aria-hidden="true" size={16} />
-            )}
-          </button>
-          <a
-            className="icon-button"
-            download
-            href={`/v1/vibe/${share.id}/zip`}
-            title="Download starter .zip"
-          >
-            <Download aria-hidden="true" size={16} />
-          </a>
-          <button className="button secondary" onClick={onNewIdea} type="button">
-            <PenLine aria-hidden="true" size={15} /> New idea
-          </button>
-        </div>
+    <aside className="vibe-live-side">
+      <VibeOwnerCard owner={owner} />
+
+      <div className="vibe-side-actions">
+        <a className="button primary full-width" download href={share.zipUrl}>
+          <Download aria-hidden="true" size={16} /> Download starter
+        </a>
+        <button
+          className="button secondary full-width"
+          onClick={() => void copyShareLink()}
+          type="button"
+        >
+          {copied ? (
+            <Check aria-hidden="true" size={16} />
+          ) : (
+            <Link2 aria-hidden="true" size={16} />
+          )}{" "}
+          {copied ? "Link copied" : "Copy share link"}
+        </button>
+        <button
+          className="button secondary full-width"
+          onClick={() => setHoodOpen(true)}
+          type="button"
+        >
+          <Code2 aria-hidden="true" size={16} /> Under the hood
+        </button>
       </div>
 
-      <div className="sandbox-surface">
-        {plan.summary && <p className="sandbox-summary">{plan.summary}</p>}
-        {!appKey ? (
-          <p className="sandbox-empty">
-            The live sandbox isn’t available on this deployment.
-          </p>
-        ) : session ? (
-          <>
-            <div className="sandbox-sessionbar">
-              <span className="sandbox-who">
-                <span className="sandbox-dot" /> Signed in
-                {session.username ? ` as @${session.username}` : ""}
-              </span>
-              <button className="text-button" onClick={signOut} type="button">
-                <LogOut aria-hidden="true" size={14} /> Sign out
-              </button>
-            </div>
-            {parts.length === 0 ? (
-              <p className="sandbox-empty">
-                This plan has no data model to try yet.
-              </p>
-            ) : (
-              <div className="sandbox-grid">
-                {parts.map((part) =>
-                  part.scope === "shared" ? (
-                    <SandboxSharedCard
-                      appKey={appKey}
-                      key={`${part.scope}/${part.type}`}
-                      part={part}
-                      token={session.token}
-                    />
-                  ) : (
-                    <SandboxPersonalCard
-                      appKey={appKey}
-                      key={`${part.scope}/${part.type}`}
-                      part={part}
-                      session={session}
-                    />
-                  ),
-                )}
-              </div>
-            )}
-          </>
-        ) : (
-          <SandboxAuth appKey={appKey} onSignedIn={signIn} />
-        )}
+      <div className="vibe-side-meta">
+        <span className="vibe-expiry">
+          <Clock aria-hidden="true" size={14} /> {expiresLabel(share.expiresAt)}
+        </span>
+        <p className="vibe-side-note">
+          This sandbox is temporary — it clears itself when the timer runs out.
+        </p>
       </div>
 
-      <button
-        className="plan-fab"
-        onClick={() => setPlanOpen(true)}
-        title="See the plan behind this sandbox"
-        type="button"
-      >
-        <Code2 aria-hidden="true" size={18} /> The plan
-      </button>
-
-      {planOpen && (
-        <VibePlanDrawer
-          idea={idea}
-          onClose={() => setPlanOpen(false)}
-          plan={plan}
-          share={share}
+      {hoodOpen && (
+        <VibeUnderTheHood
+          onClose={() => setHoodOpen(false)}
+          snippets={snippets}
+          spec={spec}
         />
       )}
+    </aside>
+  );
+}
+
+function VibeStorefront({
+  spec,
+  share,
+  owner,
+  snippets,
+  onNewIdea,
+}: {
+  spec: VibeSpec;
+  share: VibeShare;
+  owner: VibeOwner | null;
+  snippets: VibeSnippet[];
+  onNewIdea: () => void;
+}) {
+  const previewUrl = share.previewUrl ?? "";
+  const previewSrc = vibePreviewSrc(previewUrl, owner);
+
+  return (
+    <section className={`vibe-live ${vibeAccentClass(spec.accent)}`}>
+      <header className="vibe-live-head">
+        <div className="vibe-live-title">
+          <span className="sandbox-eyebrow">
+            <Sparkles aria-hidden="true" size={13} /> Live app
+          </span>
+          <h1>{spec.name}</h1>
+          <p>{spec.tagline}</p>
+        </div>
+        <button className="button secondary" onClick={onNewIdea} type="button">
+          <PenLine aria-hidden="true" size={15} /> New idea
+        </button>
+      </header>
+
+      <div className="vibe-live-grid">
+        <div className="vibe-live-main">
+          <VibeBrowserFrame
+            displayUrl={previewUrl}
+            src={previewSrc}
+            title={spec.name}
+          />
+        </div>
+        <VibeSidePanel
+          owner={owner}
+          share={share}
+          snippets={snippets}
+          spec={spec}
+        />
+      </div>
+    </section>
+  );
+}
+
+function VibeCapacity({
+  spec,
+  share,
+  snippets,
+  onNewIdea,
+}: {
+  spec: VibeSpec;
+  share: VibeShare;
+  snippets: VibeSnippet[];
+  onNewIdea: () => void;
+}) {
+  return (
+    <section className={`vibe-live vibe-capacity ${vibeAccentClass(spec.accent)}`}>
+      <header className="vibe-live-head">
+        <div className="vibe-live-title">
+          <span className="sandbox-eyebrow">
+            <Sparkles aria-hidden="true" size={13} /> Blueprint ready
+          </span>
+          <h1>{spec.name}</h1>
+          <p>{spec.tagline}</p>
+        </div>
+        <button className="button secondary" onClick={onNewIdea} type="button">
+          <PenLine aria-hidden="true" size={15} /> New idea
+        </button>
+      </header>
+
+      <div className="vibe-capacity-notice">
+        <Clock aria-hidden="true" size={18} />
+        <div>
+          <strong>The live playground is at capacity right now.</strong>
+          <p>
+            Here’s your blueprint, and the download still works — open{" "}
+            <code>index.html</code> after you drop in your own publishable key.
+          </p>
+        </div>
+      </div>
+
+      <div className="vibe-capacity-actions">
+        <a className="button primary" download href={share.zipUrl}>
+          <Download aria-hidden="true" size={16} /> Download starter
+        </a>
+        <span className="vibe-expiry">
+          <Clock aria-hidden="true" size={14} /> {expiresLabel(share.expiresAt)}
+        </span>
+      </div>
+
+      <div className="vibe-block vibe-spec-summary">
+        <h2>App spec</h2>
+        <VibeSpecSections spec={spec} />
+      </div>
+      <VibeSnippetList snippets={snippets} />
     </section>
   );
 }
@@ -2716,8 +2306,10 @@ function VibePage() {
   const [state, setState] = useState<"idle" | "loading" | "done" | "error">(
     shareId ? "loading" : "idle",
   );
-  const [plan, setPlan] = useState<VibePlan | null>(null);
+  const [spec, setSpec] = useState<VibeSpec | null>(null);
   const [share, setShare] = useState<VibeShare | null>(null);
+  const [snippets, setSnippets] = useState<VibeSnippet[]>([]);
+  const [owner, setOwner] = useState<VibeOwner | null>(null);
   const [errorText, setErrorText] = useState("");
   const [loadedShareId, setLoadedShareId] = useState<string | null>(null);
 
@@ -2728,9 +2320,14 @@ function VibePage() {
       .getVibeShare(shareId)
       .then((result) => {
         if (!active) return;
-        setPlan(result.plan);
+        setSpec(result.spec);
         setShare(result.share ?? null);
+        setSnippets(result.snippets ?? []);
         setIdea(result.idea ?? "");
+        // Owner creds are never returned on GET. Read back the once-shown copy
+        // the create response saved; absent on a fresh device, which is fine —
+        // the storefront stays live and the visitor can sign in manually.
+        setOwner(loadVibeOwner(shareId));
         setLoadedShareId(shareId);
         setState("done");
       })
@@ -2752,10 +2349,15 @@ function VibePage() {
     setErrorText("");
     try {
       const result = await api.vibe(trimmed);
-      setPlan(result.plan);
+      setSpec(result.spec);
       setShare(result.share ?? null);
+      setSnippets(result.snippets ?? []);
+      setOwner(result.owner ?? null);
       setState("done");
       if (result.share) {
+        // Owner creds arrive only once, on create — persist them so a reload or
+        // deep link on this device keeps one-click owner sign-in available.
+        if (result.owner) saveVibeOwner(result.share.id, result.owner);
         setLoadedShareId(result.share.id);
         navigate(`/vibe/${result.share.id}`);
       }
@@ -2766,8 +2368,10 @@ function VibePage() {
   }
 
   function newIdea() {
-    setPlan(null);
+    setSpec(null);
     setShare(null);
+    setSnippets([]);
+    setOwner(null);
     setIdea("");
     setErrorText("");
     setLoadedShareId(null);
@@ -2775,16 +2379,29 @@ function VibePage() {
     navigate("/vibe");
   }
 
-  if (state === "done" && plan && share && api.publishableKey()) {
+  // The result experience renders once a validated spec and share exist.
+  // previewUrl decides whether we frame the live app or fall back to a
+  // blueprint-only view when the playground is at capacity.
+  if (state === "done" && spec && share) {
     return (
       <PublicLayout>
-        <main className="discovery-page vibe-page vibe-sandbox-page">
-          <VibeSandbox
-            idea={idea}
-            onNewIdea={newIdea}
-            plan={plan}
-            share={share}
-          />
+        <main className="discovery-page vibe-page vibe-live-page">
+          {share.previewUrl ? (
+            <VibeStorefront
+              onNewIdea={newIdea}
+              owner={owner}
+              share={share}
+              snippets={snippets}
+              spec={spec}
+            />
+          ) : (
+            <VibeCapacity
+              onNewIdea={newIdea}
+              share={share}
+              snippets={snippets}
+              spec={spec}
+            />
+          )}
         </main>
       </PublicLayout>
     );
@@ -2797,12 +2414,12 @@ function VibePage() {
           <p className="eyebrow">
             <Sparkles aria-hidden="true" size={15} /> Vibe lab
           </p>
-          <h1>Describe your app. Try its backend live.</h1>
+          <h1>Describe your app. Watch it go live.</h1>
           <p>
-            Tell us what you're building. m-stash spins up a working sandbox on
-            the real API — sign in, save records, watch ownership get enforced —
-            with the data model and copy-paste code right behind it. No account
-            needed.
+            Tell us what you're building. m-stash spins up a real, working app on
+            a short-lived sandbox — a storefront you can click through, with your
+            owner sign-in, a downloadable starter, and the spec right behind it.
+            No account needed.
           </p>
         </div>
 
@@ -2833,7 +2450,7 @@ function VibePage() {
                 <textarea
                   maxLength={250}
                   onChange={(event) => setIdea(event.target.value)}
-                  placeholder="a co-op game with save slots and a public leaderboard"
+                  placeholder="a site for my guitar and vinyl shop with in-store gigs and customer wishlists"
                   rows={3}
                   value={idea}
                 />
@@ -2862,7 +2479,7 @@ function VibePage() {
                   </>
                 ) : (
                   <>
-                    <Wand2 aria-hidden="true" size={17} /> Vibe my backend
+                    <Wand2 aria-hidden="true" size={17} /> Vibe my app
                   </>
                 )}
               </button>
@@ -2872,73 +2489,6 @@ function VibePage() {
               <p className="form-error" role="alert">
                 {errorText}
               </p>
-            )}
-
-            {state === "done" && plan && (
-              <section className="vibe-result">
-                {plan.source === "blueprint" && (
-                  <p className="vibe-checking">
-                    The AI model is resting, so this sketch comes from
-                    m-stash’s built-in blueprints. Same real API, same rules.
-                  </p>
-                )}
-                {share && <VibeShareBar share={share} />}
-                {plan.summary && <p className="vibe-summary">{plan.summary}</p>}
-                {plan.dataModel.length > 0 && (
-                  <div className="vibe-block">
-                    <h2>Data model</h2>
-                    <div className="vibe-model-grid">
-                      {plan.dataModel.map((part, index) => (
-                        <article className="vibe-model-card" key={index}>
-                          <div className="vibe-model-head">
-                            <strong>{part.name}</strong>
-                            {part.visibility && (
-                              <span className="vibe-badge">
-                                {part.visibility}
-                              </span>
-                            )}
-                          </div>
-                          <p className="vibe-model-meta">
-                            {[part.scope, part.type]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </p>
-                          <p>{part.purpose}</p>
-                        </article>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {plan.snippets.length > 0 && (
-                  <div className="vibe-block">
-                    <h2>Copy-paste it</h2>
-                    {plan.snippets.map((snippet, index) => (
-                      <CopyableSnippet
-                        code={snippet.code}
-                        description={snippet.language}
-                        key={index}
-                        title={snippet.title}
-                      />
-                    ))}
-                  </div>
-                )}
-                {plan.whyMStash && (
-                  <p className="vibe-why">
-                    <ShieldCheck aria-hidden="true" size={16} /> {plan.whyMStash}
-                  </p>
-                )}
-                <div className="vibe-finish">
-                  <a
-                    className="button primary"
-                    href="https://github.com/ranfysvalle02/m-stash/blob/main/quick.md"
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    <ArrowUpRight aria-hidden="true" size={17} /> Build it for real
-                  </a>
-                  <p>Generated as a sketch — your code, your call.</p>
-                </div>
-              </section>
             )}
           </>
         )}
@@ -4427,19 +3977,9 @@ function ConsoleAppRow({
   );
 }
 
-function MustacheMark() {
+function Wordmark() {
   return (
-    <svg
-      aria-hidden="true"
-      className="wordmark-mark"
-      focusable="false"
-      viewBox="8 26 104 32"
-    >
-      <path
-        fill="currentColor"
-        d="M60 40C66 32 70 28 76 28 84 28 88 31 92 34 98 36 100 37 102 38 107 40 110 34 108 28 106 32 103 40 100 46 94 53 88 56 82 55 74 53 68 50 60 52 52 50 46 53 38 55 32 56 26 53 20 46 17 40 14 32 12 28 10 34 13 40 18 38 20 37 22 36 28 34 32 31 36 28 44 28 50 28 54 32 60 40Z"
-      />
-    </svg>
+    <img src="/m-stash-logo.jpg" alt="m-stash logo" className="wordmark-img" />
   );
 }
 
@@ -4448,8 +3988,7 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
     <div className="public-shell">
       <header className="public-header">
         <Link className="wordmark" to="/discover">
-          <MustacheMark />
-          <span className="wordmark-text"><span className="wordmark-m">m</span>-stash</span>
+          <Wordmark />
         </Link>
         <nav>
           <Link to="/guide">For builders</Link>
@@ -4468,8 +4007,7 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
       {children}
       <footer className="public-footer">
         <Link className="wordmark" to="/discover">
-          <MustacheMark />
-          <span className="wordmark-text"><span className="wordmark-m">m</span>-stash</span>
+          <Wordmark />
         </Link>
         <nav aria-label="Help and policies">
           <Link to="/guide">How it works</Link>

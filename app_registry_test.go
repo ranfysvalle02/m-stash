@@ -1,13 +1,33 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 	"golang.org/x/crypto/bcrypt"
 )
+
+func TestLookupAppTreatsExpiredSandboxAsUnknown(t *testing.T) {
+	app := newApplication(Config{}, nil, nil)
+	past := time.Now().UTC().Add(-time.Hour)
+	record := &AppRecord{ID: bson.NewObjectID(), PublishableKey: "pk_expired", Active: true, Sandbox: true, ExpiresAt: &past}
+	app.appCache.put(record.PublishableKey, record)
+
+	// The cache hit short-circuits before any database call, so a nil database is
+	// fine here: an expired sandbox must read as not-found and be evicted.
+	if _, err := app.lookupApp(context.Background(), record.PublishableKey); !errors.Is(err, mongo.ErrNoDocuments) {
+		t.Fatalf("expired sandbox lookup err = %v, want ErrNoDocuments", err)
+	}
+	if _, ok := app.appCache.get(record.PublishableKey); ok {
+		t.Fatal("expired sandbox should be evicted from the cache")
+	}
+}
 
 func TestAppKeyFromRequestPrefersHeaderThenQuery(t *testing.T) {
 	headerRequest := httptest.NewRequest(http.MethodGet, "/v1/public/ada?app=pk_query", nil)

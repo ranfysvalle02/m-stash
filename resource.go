@@ -119,6 +119,38 @@ func validateResourceVisibilityForNamespace(namespace Namespace, visibility stri
 	return nil
 }
 
+// enforceSandboxResourceWrite applies the ephemeral-tenant quotas to a resource
+// write. It returns a non-zero HTTP status and message when the write must be
+// rejected, or (0, "") when the request is within bounds or the app is not a
+// sandbox. The per-namespace count cap applies only to inserts; the record size
+// cap (content plus marshaled data) applies to both inserts and updates so a
+// sandbox link can never be turned into unbounded storage on the deployment.
+func (app *application) enforceSandboxResourceWrite(ctx context.Context, namespace Namespace, input *resourceInput, isCreate bool) (int, string) {
+	record, ok := appFromContext(ctx)
+	if !ok || !record.Sandbox {
+		return 0, ""
+	}
+	if isCreate {
+		count, err := app.database.Collection(resourceCollectionName).CountDocuments(ctx, bson.M{"namespaceId": namespace.ID})
+		if err != nil {
+			return http.StatusServiceUnavailable, "Could not verify sandbox capacity"
+		}
+		if count >= vibeSandboxMaxResources {
+			return http.StatusTooManyRequests, "This sandbox is full. Start a fresh vibe to keep adding records."
+		}
+	}
+	size := len(input.Content)
+	if len(input.Data) > 0 {
+		if encoded, err := json.Marshal(input.Data); err == nil {
+			size += len(encoded)
+		}
+	}
+	if size > vibeSandboxMaxRecordBytes {
+		return http.StatusRequestEntityTooLarge, "This record is too large for the sandbox."
+	}
+	return 0, ""
+}
+
 type resourceIncrementInput struct {
 	Op    string      `json:"op"`
 	Field string      `json:"field"`
@@ -488,6 +520,10 @@ func (app *application) handleResourceCollection(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if status, message := app.enforceSandboxResourceWrite(r.Context(), namespace, &input, true); status != 0 {
+			writeError(w, status, message)
+			return
+		}
 		creatorID, err := creatorIDForClaims(claims)
 		if err != nil {
 			writeError(w, http.StatusForbidden, "Invalid authenticated user")
@@ -568,6 +604,10 @@ func (app *application) handleResourceDocument(w http.ResponseWriter, r *http.Re
 		}
 		if err := validateResourceVisibilityForNamespace(namespace, input.Visibility); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if status, message := app.enforceSandboxResourceWrite(r.Context(), namespace, &input, false); status != 0 {
+			writeError(w, status, message)
 			return
 		}
 		payload := bson.M{

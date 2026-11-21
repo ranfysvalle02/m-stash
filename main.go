@@ -91,8 +91,12 @@ func main() {
 	authRateLimiter := newAuthRateLimiter(database, 10, 5*time.Minute)
 	app.vibeLimiter = newAuthRateLimiter(database, 8, time.Minute)
 	app.vibeDailyLimiter = newAuthRateLimiter(database, appConfig.VibeDailyLimit, 24*time.Hour)
+	var sweeper *sandboxSweeper
 	if app.vibeEnabled() {
 		log.Printf("✨ Vibe lab enabled (model %s, daily cap %d)", appConfig.GeminiModel, appConfig.VibeDailyLimit)
+		sweeper = newSandboxSweeper(app)
+		sweeper.Start()
+		log.Printf("🧹 Sandbox sweeper started (every %s)", vibeSandboxSweepInterval)
 	} else {
 		log.Print("Vibe lab disabled because GEMINI_API_KEY is not configured")
 	}
@@ -120,6 +124,9 @@ func main() {
 		defer cancel()
 		if deliveryWorker != nil {
 			deliveryWorker.Stop(ctx)
+		}
+		if sweeper != nil {
+			sweeper.Stop(ctx)
 		}
 		if err := server.Shutdown(ctx); err != nil {
 			log.Printf("Graceful shutdown failed: %v", err)

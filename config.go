@@ -34,6 +34,8 @@ type Config struct {
 	GeminiModel         string
 	VibeDailyLimit      int
 	VibeShareTTL        time.Duration
+	VibeMaxSandboxes    int
+	PublicBaseURL       string
 }
 
 func loadConfig() (Config, error) {
@@ -77,6 +79,10 @@ func loadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	vibeMaxSandboxes, err := getEnvInt("VIBE_MAX_SANDBOXES", 1000)
+	if err != nil {
+		return Config{}, err
+	}
 	loadedConfig := Config{
 		Port:                getEnv("PORT", "4000"),
 		MongoURI:            getEnv("MONGO_URI", "mongodb://localhost:27017"),
@@ -102,6 +108,8 @@ func loadConfig() (Config, error) {
 		GeminiModel:         getEnv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
 		VibeDailyLimit:      vibeDailyLimit,
 		VibeShareTTL:        vibeShareTTL,
+		VibeMaxSandboxes:    vibeMaxSandboxes,
+		PublicBaseURL:       getEnv("PUBLIC_BASE_URL", ""),
 	}
 
 	if len(loadedConfig.JWTSecret) < 32 {

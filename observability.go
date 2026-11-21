@@ -31,12 +31,13 @@ type httpMetricValue struct {
 }
 
 type metricsRegistry struct {
-	mu          sync.Mutex
-	startedAt   time.Time
-	inFlight    int
-	requests    map[httpMetricKey]httpMetricValue
-	outboxEvent map[string]uint64
-	rateLimited uint64
+	mu            sync.Mutex
+	startedAt     time.Time
+	inFlight      int
+	requests      map[httpMetricKey]httpMetricValue
+	outboxEvent   map[string]uint64
+	rateLimited   uint64
+	sandboxPurged uint64
 }
 
 func newMetricsRegistry() *metricsRegistry {
@@ -73,6 +74,12 @@ func (registry *metricsRegistry) recordOutboxEvent(eventType string) {
 func (registry *metricsRegistry) recordRateLimitRejection() {
 	registry.mu.Lock()
 	registry.rateLimited++
+	registry.mu.Unlock()
+}
+
+func (registry *metricsRegistry) recordSandboxPurge() {
+	registry.mu.Lock()
+	registry.sandboxPurged++
 	registry.mu.Unlock()
 }
 
@@ -219,6 +226,9 @@ func (registry *metricsRegistry) prometheus() []byte {
 	builder.WriteString("# HELP m_stash_auth_rate_limit_rejections_total Authentication attempts rejected by the shared limiter.\n")
 	builder.WriteString("# TYPE m_stash_auth_rate_limit_rejections_total counter\n")
 	fmt.Fprintf(&builder, "m_stash_auth_rate_limit_rejections_total %d\n", registry.rateLimited)
+	builder.WriteString("# HELP m_stash_vibe_sandboxes_purged_total Expired vibe sandbox tenants purged with all their data.\n")
+	builder.WriteString("# TYPE m_stash_vibe_sandboxes_purged_total counter\n")
+	fmt.Fprintf(&builder, "m_stash_vibe_sandboxes_purged_total %d\n", registry.sandboxPurged)
 	fmt.Fprintf(&builder, "# TYPE m_stash_process_start_time_seconds gauge\nm_stash_process_start_time_seconds %d\n", registry.startedAt.Unix())
 	return []byte(builder.String())
 }

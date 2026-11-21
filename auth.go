@@ -149,10 +149,25 @@ func (app *application) handleSignUp(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	appID, ok := appIDFromContext(ctx)
+	record, ok := appFromContext(ctx)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "Missing application context")
 		return
+	}
+	appID := record.ID
+
+	// Sandbox tenants cap their user count so a share link can't be turned into a
+	// free account factory on the shared deployment.
+	if record.Sandbox {
+		count, countErr := app.database.Collection("_users").CountDocuments(ctx, bson.M{"appId": appID})
+		if countErr != nil {
+			writeError(w, http.StatusServiceUnavailable, "Could not create user")
+			return
+		}
+		if count >= vibeSandboxMaxUsers {
+			writeError(w, http.StatusTooManyRequests, "This sandbox is full. Start a fresh vibe to try again.")
+			return
+		}
 	}
 
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(request.Password), bcryptCost)
@@ -170,7 +185,8 @@ func (app *application) handleSignUp(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    now,
 	}
 	namespace := newPersonalNamespace(appID, user.ID, request.Username, now)
-	if err := app.createAccountWithPersonalNamespace(ctx, user, namespace); err != nil {
+	// A sandbox customer is throwaway, so skip the seeded public welcome record.
+	if err := app.createAccountWithPersonalNamespace(ctx, user, namespace, !record.Sandbox); err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			writeError(w, http.StatusConflict, "Email or username is already claimed")
 			return

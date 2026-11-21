@@ -62,26 +62,34 @@ export interface PublicResource extends PublicResourcePreview {
   data?: Record<string, unknown>
 }
 
-export interface VibeModelPart {
-  name: string
-  scope: string
+export interface VibeField {
+  key: string
+  label: string
+  kind: 'text' | 'longtext' | 'number' | 'price' | 'toggle' | 'date' | 'tag'
+  options?: string[]
+}
+
+export interface VibeSection {
   type: string
-  visibility: string
-  purpose: string
+  title: string
+  audience: 'owner' | 'member' | 'member-public'
+  view: 'grid' | 'list' | 'checklist' | 'timeline' | 'ranked'
+  fields: VibeField[]
+}
+
+export interface VibeSpec {
+  name: string
+  tagline: string
+  accent: 'teal' | 'indigo' | 'rose' | 'amber' | 'emerald' | 'slate'
+  icon: string
+  sections: VibeSection[]
+  source?: 'model' | 'blueprint'
 }
 
 export interface VibeSnippet {
   title: string
   language: string
   code: string
-}
-
-export interface VibePlan {
-  summary: string
-  dataModel: VibeModelPart[]
-  snippets: VibeSnippet[]
-  whyMStash: string
-  source?: 'model' | 'blueprint'
 }
 
 export interface VibeShare {
@@ -92,10 +100,17 @@ export interface VibeShare {
   expiresAt: string
 }
 
+export interface VibeOwner {
+  email: string
+  password: string
+}
+
 export interface VibeResult {
-  plan: VibePlan
+  spec: VibeSpec
   share?: VibeShare
   idea?: string
+  snippets?: VibeSnippet[]
+  owner?: VibeOwner
 }
 
 export interface BuilderApp {
@@ -340,13 +355,13 @@ export const api = {
   },
 
   async vibe(idea: string): Promise<VibeResult> {
-    const response = await request<APIEnvelope<VibePlan> & { share?: VibeShare }>('/v1/vibe', { method: 'POST', body: { idea }, retrySession: false })
-    return { plan: response.data, share: response.share }
+    const response = await request<APIEnvelope<VibeSpec> & { share?: VibeShare; snippets?: VibeSnippet[]; owner?: VibeOwner }>('/v1/vibe', { method: 'POST', body: { idea }, retrySession: false })
+    return { spec: response.data, share: response.share, snippets: response.snippets, owner: response.owner }
   },
 
   async getVibeShare(id: string): Promise<VibeResult> {
-    const response = await request<APIEnvelope<VibePlan> & { share: VibeShare; idea: string }>(`/v1/vibe/${encodeURIComponent(id)}`, { retrySession: false })
-    return { plan: response.data, share: response.share, idea: response.idea }
+    const response = await request<APIEnvelope<VibeSpec> & { share: VibeShare; idea: string; snippets?: VibeSnippet[] }>(`/v1/vibe/${encodeURIComponent(id)}`, { retrySession: false })
+    return { spec: response.data, share: response.share, idea: response.idea, snippets: response.snippets }
   },
 
   async builderLogin(email: string, password: string) {
