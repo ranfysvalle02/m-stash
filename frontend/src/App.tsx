@@ -283,7 +283,7 @@ function AuthenticationPage({
     <main className="auth-page">
       <Link className="wordmark" to="/discover">
         <MustacheMark />
-        <span>m</span>stash
+        <span className="wordmark-text"><span className="wordmark-m">m</span>-stash</span>
       </Link>
       <section className="auth-panel" aria-labelledby="auth-title">
         <p className="eyebrow">
@@ -548,7 +548,7 @@ function WorkspaceShell({
           to={claims.role === "admin" || !namespace ? "/app/shared" : "/app/resources/record"}
         >
           <MustacheMark />
-          <span>m</span>stash
+          <span className="wordmark-text"><span className="wordmark-m">m</span>-stash</span>
         </Link>
         <nav aria-label="Workspace">
           {claims.role === "admin" && (
@@ -634,7 +634,7 @@ function WorkspaceShell({
             to={claims.role === "admin" || !namespace ? "/app/shared" : "/app/resources/record"}
           >
             <MustacheMark />
-            <span>m</span>stash
+            <span className="wordmark-text"><span className="wordmark-m">m</span>-stash</span>
           </Link>
           {claims.role === "admin" ? (
             <Link
@@ -4449,7 +4449,7 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
       <header className="public-header">
         <Link className="wordmark" to="/discover">
           <MustacheMark />
-          <span>m</span>stash
+          <span className="wordmark-text"><span className="wordmark-m">m</span>-stash</span>
         </Link>
         <nav>
           <Link to="/guide">For builders</Link>
@@ -4469,7 +4469,7 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
       <footer className="public-footer">
         <Link className="wordmark" to="/discover">
           <MustacheMark />
-          <span>m</span>stash
+          <span className="wordmark-text"><span className="wordmark-m">m</span>-stash</span>
         </Link>
         <nav aria-label="Help and policies">
           <Link to="/guide">How it works</Link>
