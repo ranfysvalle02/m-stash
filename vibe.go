@@ -142,6 +142,46 @@ func clampString(value string, max int) string {
 	return value
 }
 
+func normalizeVibeScope(scope string) string {
+	if strings.EqualFold(strings.TrimSpace(scope), "shared") {
+		return "shared"
+	}
+	return "personal"
+}
+
+// normalizeVibeType turns a model-chosen bucket name into a slug the resource routes accept.
+func normalizeVibeType(value string) string {
+	var builder strings.Builder
+	lastHyphen := true
+	for _, character := range strings.ToLower(strings.TrimSpace(value)) {
+		if character >= 'a' && character <= 'z' || character >= '0' && character <= '9' {
+			builder.WriteRune(character)
+			lastHyphen = false
+		} else if !lastHyphen {
+			builder.WriteByte('-')
+			lastHyphen = true
+		}
+	}
+	slug := strings.Trim(builder.String(), "-")
+	if len(slug) > 32 {
+		slug = strings.Trim(slug[:32], "-")
+	}
+	return slug
+}
+
+// normalizeVibeVisibility enforces the real API rule: personal records are private or public; shared may also be authenticated.
+func normalizeVibeVisibility(scope, visibility string) string {
+	switch value := strings.ToLower(strings.TrimSpace(visibility)); value {
+	case "public":
+		return value
+	case "authenticated":
+		if scope == "shared" {
+			return value
+		}
+	}
+	return "private"
+}
+
 // sanitizeVibePlan bounds every field so a misbehaving model response can never bloat the payload.
 func sanitizeVibePlan(plan vibePlan) vibePlan {
 	cleaned := vibePlan{
@@ -152,11 +192,12 @@ func sanitizeVibePlan(plan vibePlan) vibePlan {
 		if index >= 8 {
 			break
 		}
+		scope := normalizeVibeScope(part.Scope)
 		cleaned.DataModel = append(cleaned.DataModel, vibeModelPart{
 			Name:       clampString(part.Name, 80),
-			Scope:      clampString(part.Scope, 20),
-			Type:       clampString(part.Type, 40),
-			Visibility: clampString(part.Visibility, 20),
+			Scope:      scope,
+			Type:       normalizeVibeType(part.Type),
+			Visibility: normalizeVibeVisibility(scope, part.Visibility),
 			Purpose:    clampString(part.Purpose, 200),
 		})
 	}
@@ -222,7 +263,7 @@ func (app *application) handleVibe(w http.ResponseWriter, r *http.Request) {
 		plan, err := app.generateVibePlan(ctx, idea)
 		if err == nil {
 			plan.Source = vibeSourceModel
-			writeJSON(w, http.StatusOK, map[string]any{"data": plan})
+			app.writeVibePlan(w, r, idea, plan)
 			return
 		}
 		app.logger.Error("vibe generation failed; serving blueprint", "request_id", requestID, "error", err)
@@ -230,8 +271,20 @@ func (app *application) handleVibe(w http.ResponseWriter, r *http.Request) {
 			app.startVibeCooldown()
 		}
 	}
-	plan := buildVibeBlueprint(idea, app.publicBaseURL(r))
-	writeJSON(w, http.StatusOK, map[string]any{"data": plan})
+	app.writeVibePlan(w, r, idea, buildVibeBlueprint(idea, app.publicBaseURL(r)))
+}
+
+// writeVibePlan attaches an expiring share link when storage cooperates; the plan itself is never withheld.
+func (app *application) writeVibePlan(w http.ResponseWriter, r *http.Request, idea string, plan *vibePlan) {
+	response := map[string]any{"data": plan}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 3*time.Second)
+	defer cancel()
+	if share, err := app.saveVibeShare(ctx, idea, plan, app.publicBaseURL(r)); err != nil {
+		app.logger.Error("vibe share save failed", "request_id", requestIDFromContext(r.Context()), "error", err)
+	} else {
+		response["share"] = share
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (app *application) vibeCoolingDown() bool {
@@ -242,9 +295,11 @@ func (app *application) startVibeCooldown() {
 	app.vibeCooldownUntil.Store(time.Now().Add(vibeAccountCooldown).UnixNano())
 }
 
+// publicBaseURL is only echoed back as display text and link targets, so it may trust X-Forwarded-Proto without TRUST_PROXY.
 func (app *application) publicBaseURL(r *http.Request) string {
 	scheme := "http"
-	if app.requestUsesHTTPS(r) {
+	forwardedProtocol, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
+	if r.TLS != nil || strings.EqualFold(strings.TrimSpace(forwardedProtocol), "https") {
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host

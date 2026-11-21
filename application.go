@@ -59,6 +59,7 @@ func (app *application) Handler(rateLimiter *authRateLimiter) http.Handler {
 	mux.HandleFunc("/v1/shared/webhooks/", app.resolveApp(app.corsMiddleware(app.authenticateSharedResource(app.handleSharedWebhooks))))
 	mux.HandleFunc("/.well-known/m-stash.json", app.corsMiddleware(app.handleServiceManifest))
 	mux.HandleFunc("/v1/vibe", app.corsMiddleware(app.handleVibe))
+	mux.HandleFunc("/v1/vibe/", app.corsMiddleware(app.handleVibeShare))
 	mux.HandleFunc("/v1/public/shared/resources/", app.resolveApp(app.corsMiddleware(app.handlePublicSharedResources)))
 	mux.HandleFunc("/v1/public/", app.resolveApp(app.corsMiddleware(app.handlePublicNamespace)))
 	mux.HandleFunc("/metrics", app.handleMetrics)

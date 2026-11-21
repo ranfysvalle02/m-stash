@@ -167,7 +167,7 @@ const { token } = await res.json(); // use /v1/auth/login next time`,
 
 	if rule, ok := firstPublicRule(matched); ok {
 		path := "`${API}/v1/public/${username}/" + rule.part.Type + "/" + rule.slug + "`"
-		title := "Read a public " + strings.ToLower(rule.part.Name) + " with no login"
+		title := "Read the " + strings.ToLower(strings.TrimPrefix(rule.part.Name, "Public ")) + " with no login"
 		if rule.part.Scope == "shared" {
 			path = "`${API}/v1/public/shared/resources/" + rule.part.Type + "/" + rule.slug + "`"
 		}

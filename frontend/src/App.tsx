@@ -10,16 +10,21 @@ import {
   BookOpen,
   Check,
   ChevronRight,
+  Clock,
   Code2,
   Compass,
   Copy,
   Database,
+  Download,
+  ExternalLink,
   FilePenLine,
   Globe2,
+  Link2,
   LoaderCircle,
   LogOut,
   Menu,
   PenLine,
+  Play,
   Plus,
   Save,
   Settings,
@@ -58,6 +63,7 @@ import {
   type ResourcePreview,
   type UserClaims,
   type VibePlan,
+  type VibeShare,
 } from "./api";
 import "./App.css";
 
@@ -150,6 +156,7 @@ function App() {
           <Route path="/discover" element={<NamespaceLookupPage />} />
           <Route path="/guide" element={<GuidePage />} />
           <Route path="/vibe" element={<VibePage />} />
+          <Route path="/vibe/:shareId" element={<VibePage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/faq" element={<FAQPage />} />
           <Route path="/console" element={<ConsolePage />} />
@@ -1788,14 +1795,105 @@ const vibeExamples = [
   "a recipe app where users keep private recipes and publish some",
 ];
 
+function expiresLabel(expiresAt: string) {
+  const remaining = new Date(expiresAt).getTime() - Date.now();
+  if (remaining <= 0) return "Expired";
+  const hours = Math.round(remaining / 3_600_000);
+  if (hours < 1) return "Expires in under an hour";
+  if (hours < 48) return `Expires in ${hours} hour${hours === 1 ? "" : "s"}`;
+  return `Expires in ${Math.round(hours / 24)} days`;
+}
+
+function VibeShareBar({ share }: { share: VibeShare }) {
+  const [copied, setCopied] = useState(false);
+  const link = `${window.location.origin}/vibe/${share.id}`;
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className="vibe-share">
+      <button className="button secondary" onClick={() => void copy()} type="button">
+        {copied ? <Check aria-hidden="true" size={16} /> : <Link2 aria-hidden="true" size={16} />}{" "}
+        {copied ? "Link copied" : "Copy share link"}
+      </button>
+      <a className="button secondary" download href={`/v1/vibe/${share.id}/zip`}>
+        <Download aria-hidden="true" size={16} /> Download .zip
+      </a>
+      <span className="vibe-expiry">
+        <Clock aria-hidden="true" size={14} /> {expiresLabel(share.expiresAt)}
+      </span>
+    </div>
+  );
+}
+
+function VibeLiveDemo({ share }: { share: VibeShare }) {
+  const previewPath = `/v1/vibe/${share.id}/preview`;
+  return (
+    <div className="vibe-block">
+      <div className="vibe-demo-head">
+        <h2>
+          <Play aria-hidden="true" size={18} /> Live demo
+        </h2>
+        <a href={previewPath} rel="noreferrer" target="_blank">
+          Open full screen <ExternalLink aria-hidden="true" size={14} />
+        </a>
+      </div>
+      <p className="vibe-demo-note">
+        A working app for this plan, running against the real m-stash API. Use
+        a throwaway account and save a few records.
+      </p>
+      <div className="vibe-demo-frame">
+        <iframe loading="lazy" src={previewPath} title="Live demo of this backend" />
+      </div>
+    </div>
+  );
+}
+
 function VibePage() {
+  const { shareId } = useParams();
+  const navigate = useNavigate();
   const available = useVibeAvailable();
   const [idea, setIdea] = useState("");
   const [state, setState] = useState<"idle" | "loading" | "done" | "error">(
     "idle",
   );
   const [plan, setPlan] = useState<VibePlan | null>(null);
+  const [share, setShare] = useState<VibeShare | null>(null);
   const [errorText, setErrorText] = useState("");
+  const [loadedShareId, setLoadedShareId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!shareId || shareId === loadedShareId) return;
+    let active = true;
+    setState("loading");
+    setErrorText("");
+    api
+      .getVibeShare(shareId)
+      .then((result) => {
+        if (!active) return;
+        setPlan(result.plan);
+        setShare(result.share ?? null);
+        setIdea(result.idea ?? "");
+        setLoadedShareId(shareId);
+        setState("done");
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setErrorText(messageFromError(requestError));
+        setState("error");
+      });
+    return () => {
+      active = false;
+    };
+  }, [shareId, loadedShareId]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1805,8 +1903,13 @@ function VibePage() {
     setErrorText("");
     try {
       const result = await api.vibe(trimmed);
-      setPlan(result);
+      setPlan(result.plan);
+      setShare(result.share ?? null);
       setState("done");
+      if (result.share) {
+        setLoadedShareId(result.share.id);
+        navigate(`/vibe/${result.share.id}`);
+      }
     } catch (requestError) {
       setErrorText(messageFromError(requestError));
       setState("error");
@@ -1828,9 +1931,9 @@ function VibePage() {
           </p>
         </div>
 
-        {available === null ? (
+        {available === null && !shareId ? (
           <p className="vibe-checking">Checking the lab…</p>
-        ) : available === false ? (
+        ) : available === false && !shareId ? (
           <section className="empty-state">
             <Wand2 aria-hidden="true" size={28} />
             <h2>The vibe lab isn’t switched on here.</h2>
@@ -1904,6 +2007,7 @@ function VibePage() {
                     m-stash’s built-in blueprints. Same real API, same rules.
                   </p>
                 )}
+                {share && <VibeShareBar share={share} />}
                 {plan.summary && <p className="vibe-summary">{plan.summary}</p>}
                 {plan.dataModel.length > 0 && (
                   <div className="vibe-block">
@@ -1930,6 +2034,7 @@ function VibePage() {
                     </div>
                   </div>
                 )}
+                {share?.previewUrl && <VibeLiveDemo share={share} />}
                 {plan.snippets.length > 0 && (
                   <div className="vibe-block">
                     <h2>Copy-paste it</h2>

@@ -239,9 +239,11 @@ func dropLegacySingleTenantIndexes(ctx context.Context, database *mongo.Database
 func isIndexNotFoundError(err error) bool {
 	var commandErr mongo.CommandError
 	if errors.As(err, &commandErr) {
-		return commandErr.Code == 27
+		// 27 IndexNotFound; 26 NamespaceNotFound when a fresh database has no collection yet.
+		return commandErr.Code == 27 || commandErr.Code == 26
 	}
-	return strings.Contains(strings.ToLower(err.Error()), "index not found")
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "index not found") || strings.Contains(message, "ns not found")
 }
 
 func normalizeNamespaceSlug(value string) string {

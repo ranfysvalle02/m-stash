@@ -61,6 +61,9 @@ func main() {
 	if err := ensureWebhookIndexes(ctx, database); err != nil {
 		log.Fatalf("Failed to create webhook indexes: %v", err)
 	}
+	if err := ensureVibeShareIndexes(ctx, database); err != nil {
+		log.Fatalf("Failed to create vibe share index: %v", err)
+	}
 	app := newApplication(appConfig, database, client)
 	log.Printf("✅ Connected to Mongo database: '%s'", appConfig.Database)
 	if uiAppKey, err := app.ensureDefaultApp(ctx); err != nil {

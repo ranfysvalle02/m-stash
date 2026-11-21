@@ -84,6 +84,20 @@ export interface VibePlan {
   source?: 'model' | 'blueprint'
 }
 
+export interface VibeShare {
+  id: string
+  url: string
+  previewUrl?: string
+  zipUrl: string
+  expiresAt: string
+}
+
+export interface VibeResult {
+  plan: VibePlan
+  share?: VibeShare
+  idea?: string
+}
+
 export interface BuilderApp {
   id: string
   slug: string
@@ -325,9 +339,14 @@ export const api = {
     return response.data
   },
 
-  async vibe(idea: string) {
-    const response = await request<APIEnvelope<VibePlan>>('/v1/vibe', { method: 'POST', body: { idea }, retrySession: false })
-    return response.data
+  async vibe(idea: string): Promise<VibeResult> {
+    const response = await request<APIEnvelope<VibePlan> & { share?: VibeShare }>('/v1/vibe', { method: 'POST', body: { idea }, retrySession: false })
+    return { plan: response.data, share: response.share }
+  },
+
+  async getVibeShare(id: string): Promise<VibeResult> {
+    const response = await request<APIEnvelope<VibePlan> & { share: VibeShare; idea: string }>(`/v1/vibe/${encodeURIComponent(id)}`, { retrySession: false })
+    return { plan: response.data, share: response.share, idea: response.idea }
   },
 
   async builderLogin(email: string, password: string) {
