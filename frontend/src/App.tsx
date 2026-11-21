@@ -3979,7 +3979,13 @@ function ConsoleAppRow({
 
 function Wordmark() {
   return (
-    <img src="/m-stash-logo.jpg" alt="m-stash logo" className="wordmark-img" />
+    <img
+      src="/m-stash-logo.png"
+      alt="m-stash"
+      width={1015}
+      height={226}
+      className="wordmark-img"
+    />
   );
 }
 
