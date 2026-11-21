@@ -428,7 +428,7 @@ function WorkspaceGate({
     return () => {
       active = false;
     };
-  }, []);
+  }, [claims.role]);
 
   if (error)
     return <StatePage title="Could not load your workspace" detail={error} />;
@@ -2064,8 +2064,10 @@ function VibePage() {
   const navigate = useNavigate();
   const available = useVibeAvailable();
   const [idea, setIdea] = useState("");
+  // A deep link (/vibe/:shareId) starts in the loading state so the effect only
+  // kicks off the fetch — no synchronous setState inside the effect.
   const [state, setState] = useState<"idle" | "loading" | "done" | "error">(
-    "idle",
+    shareId ? "loading" : "idle",
   );
   const [plan, setPlan] = useState<VibePlan | null>(null);
   const [share, setShare] = useState<VibeShare | null>(null);
@@ -2075,8 +2077,6 @@ function VibePage() {
   useEffect(() => {
     if (!shareId || shareId === loadedShareId) return;
     let active = true;
-    setState("loading");
-    setErrorText("");
     api
       .getVibeShare(shareId)
       .then((result) => {
@@ -2150,10 +2150,11 @@ function VibePage() {
           <p className="eyebrow">
             <Sparkles aria-hidden="true" size={15} /> Vibe lab
           </p>
-          <h1>Describe your app. Get its backend.</h1>
+          <h1>Describe your app. Try its backend live.</h1>
           <p>
-            Tell us what you're building. m-stash sketches the data model and
-            hands you copy-paste code — grounded in the real API, no account
+            Tell us what you're building. m-stash spins up a working sandbox on
+            the real API — sign in, save records, watch ownership get enforced —
+            with the data model and copy-paste code right behind it. No account
             needed.
           </p>
         </div>

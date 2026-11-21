@@ -79,6 +79,12 @@ A per-app `secretKey` can be supplied to a trusted backend for shared resource m
 
 See [integration.md](integration.md) for request examples and [quickstart.md](quickstart.md) to deploy the service.
 
+## Vibe lab
+
+Set `GEMINI_API_KEY` to turn on `/vibe`, an unauthenticated playground for feeling out m-stash before you write any code. Describe an app — say, "a habit tracker with private streaks and a public profile" — and m-stash sketches a data model, hands back copy-paste snippets, and spins up a **live sandbox** that runs against the real API: sign in with a throwaway account, save records, and watch ownership get enforced on every request.
+
+Everything is URL-powered. Share the link, download a `.zip` starter, or open the plan behind the floating `</>` button. Shares (link, live demo, and starter) expire on their own — `72h` by default, capped at 5 days — and MongoDB reclaims them with a TTL index. The app idea is length-limited and sanitized, and the model is told to treat it as untrusted input, so the prompt-injection surface stays small. If the model is unavailable or past the daily cap, the lab answers from built-in blueprints instead of erroring out.
+
 ## Configuration
 
 | Variable | Required | Purpose |
