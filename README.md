@@ -2,7 +2,7 @@
 
 **Give your AI-built app sign-up, login, and private per-user data—without wiring a database or writing security rules.**
 
-m-stash is a small, self-hostable API between your app and MongoDB. Your users sign up in your product; m-stash derives record ownership from their authenticated identity and enforces access on every request. MongoDB stays off the client.
+m-stash is a small, self-hostable, multi-tenant API between your app and MongoDB. One deployment hosts many isolated apps, plus ephemeral sandboxes a visitor can try and then keep. Your users sign up in your product with email and password, or with GitHub and Google when you configure those providers. m-stash derives record ownership from their authenticated identity and enforces access on every request. MongoDB stays off the client.
 
 Use it for profiles, preferences, game saves, and app-wide configuration. Personal records belong to users; shared records belong to the app. New records are private by default, with deliberate options for signed-in or public access.
 
@@ -32,7 +32,7 @@ m-stash has two deliberately separate scopes:
 
 | Plane | Provisioning | What it controls |
 | --- | --- | --- |
-| **Personal scope** | Open `POST /v1/auth/signup` | A user claims one immutable username (unique within the app) and owns the records in their scope. |
+| **Personal scope** | Open `POST /v1/auth/signup`, or OAuth when a provider is configured | A user claims one immutable username (unique within the app) and owns the records in their scope. |
 | **Shared app scope** | Created per app during provisioning (`POST /v1/apps`) | The app's administrator manages app records for every user without claiming a public username. |
 
 A signup creates a user, personal namespace, and owner membership in one MongoDB transaction, all scoped to the request's app. The caller never supplies an owner ID, namespace ID, or app ID. An administrator is an authentication principal with an `admin` role in its app; it may also be a normal registered user, but m-stash never invents a personal namespace for it.
@@ -67,6 +67,10 @@ A per-app `secretKey` can be supplied to a trusted backend for shared resource m
 | `POST /v1/apps` | Platform-only: provision an app and return its publishable + secret keys. Requires `PLATFORM_TOKEN`. |
 | `POST /v1/auth/signup` | Open registration: account + immutable personal namespace. |
 | `POST /v1/auth/login` | Email/password login with bearer token and browser session. |
+| `GET /v1/auth/providers` | Lists configured social-login providers (`github`, `google`). Empty when none are set. |
+| `GET /v1/auth/oauth/{provider}/start` | Begins OAuth2 + PKCE. Full-page navigation, not `fetch`. Query: `app` (publishable key) and `redirect_uri`. |
+| `POST /v1/auth/oauth/exchange` | Trades the one-time `oauth_code` from the callback for a bearer token and browser session. |
+| `GET` / `POST` / `DELETE /v1/me/identities…` | Authenticated: list, link, and unlink social providers. Unlinking the last sign-in method is refused. |
 | `GET` / `PUT /v1/me/namespace` | Read or present the caller's personal namespace. |
 | `GET` / `POST /v1/me/resources/{type}` | List or create personal resources. List supports `?filter=`, `?q=`, and `?count=1`. |
 | `GET` / `PUT` / `PATCH` / `DELETE /v1/me/resources/{type}/{slug}` | Work with a personal resource (`PATCH` atomically increments a numeric `data.*` field). |
@@ -79,6 +83,8 @@ A per-app `secretKey` can be supplied to a trusted backend for shared resource m
 | `POST /v1/try` | Start a blank live sandbox (when `TRY_SANDBOX=on`). Returns a publishable key, an expiry, and a one-time claim token. |
 | `POST /v1/builder/auth/signup` | Self-serve builder account (when `BUILDER_SIGNUP=open`). Returns a session on the free plan. |
 | `POST /v1/builder/apps/claim` | Keep a sandbox as a live app. Needs a builder session and the sandbox's claim token; the `pk_` and all data stay, and a new secret key is returned once. |
+
+Social login is optional. When GitHub or Google credentials are set, `/login` and `/signup` offer those providers. Send the browser to `/v1/auth/oauth/{provider}/start`; the user comes back to `redirect_uri?oauth_code=otc_…`, and the app exchanges that code within 60 seconds. The code is single-use, the JWT never travels in a URL, and `redirect_uri` must be this deployment's origin or an allowed origin. Client secrets stay in environment variables. The security model is written up in [blog-auth.md](blog-auth.md).
 
 See [integration.md](integration.md) for request examples and [quickstart.md](quickstart.md) to deploy the service.
 
@@ -105,6 +111,9 @@ Every m-stash app is either a **sandbox** (no owner, expires, tight limits, carr
 | `MONGO_URI` | Yes | Replica-set or sharded MongoDB URI. |
 | `MONGO_DB` | Yes | Database name. |
 | `JWT_SECRET` | Yes | At least 32 characters; signs access and session tokens. |
+| `PUBLIC_BASE_URL` | No | Canonical public origin, such as `https://m-stash.example`. Used for OAuth callbacks and shared links. Register `{PUBLIC_BASE_URL}/v1/auth/oauth/github/callback` and `…/google/callback` with each provider. |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | No | Enables GitHub sign-in. Set both or neither; a half-set pair fails boot. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | No | Enables Google sign-in. Set both or neither; a half-set pair fails boot. |
 | `PLATFORM_TOKEN` | Yes | At least 32 characters; authorizes `POST /v1/apps` to provision applications. |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Per app | Supplied in the `POST /v1/apps` body (not as environment variables) to create that app's administrator. |
 | `ALLOWED_ORIGINS` | No | Comma-separated default allowed browser origins. Each app may also carry its own `allowedOrigins`. Blank or unset logs a startup warning and currently permits all origins for early development. |
