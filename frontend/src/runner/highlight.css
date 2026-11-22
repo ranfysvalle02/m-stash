@@ -1,0 +1,35 @@
+/* Syntax highlight tokens, tuned to the product's neon-on-deep-teal palette. */
+.tok-key {
+  color: var(--aqua);
+}
+.tok-str {
+  color: var(--mongo);
+}
+.tok-num {
+  color: var(--yellow);
+}
+.tok-bool {
+  color: var(--pink);
+}
+.tok-punc {
+  color: var(--muted-quiet);
+}
+.tok-comment {
+  color: #6f8f99;
+  font-style: italic;
+}
+.tok-url {
+  color: var(--aqua);
+  text-decoration: underline;
+  text-decoration-color: rgba(104, 242, 255, 0.4);
+}
+.tok-var {
+  color: var(--coral);
+}
+.tok-flag {
+  color: var(--pink);
+}
+.tok-plain,
+.tok-ws {
+  color: var(--text);
+}

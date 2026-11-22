@@ -1,5 +1,8 @@
 import {
   createContext,
+  lazy,
+  Suspense,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -35,9 +38,6 @@ import {
   Wand2,
   X,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import rehypeSanitize from "rehype-sanitize";
-import remarkGfm from "remark-gfm";
 import {
   BrowserRouter,
   Link,
@@ -46,6 +46,7 @@ import {
   Outlet,
   Route,
   Routes,
+  useLocation,
   useNavigate,
   useOutletContext,
   useParams,
@@ -67,7 +68,6 @@ import {
   type ResourceInput,
   type ResourcePreview,
   type ServiceCapabilities,
-  type TrySandboxResult,
   type UserClaims,
   type VibeOwner,
   type VibeSection,
@@ -76,6 +76,12 @@ import {
   type VibeSpec,
 } from "./api";
 import { ApiLoopRunner } from "./runner/ApiLoopRunner";
+import { TryItLiveSection } from "./runner/TryItLiveSection";
+import { claimStorageKey, loadClaimToken, saveClaimToken } from "./runner/claimStorage";
+import { ToastProvider } from "./console/Toast";
+import { AiPromptPanel } from "./console/AiPromptPanel";
+import { AppInspector } from "./console/AppInspector";
+import { ConfirmButton } from "./console/ConfirmButton";
 import "./App.css";
 
 type SessionState =
@@ -151,8 +157,12 @@ function useBrowserSession() {
     }
   }
 
+  // Defer the initial restore to a macrotask so the mount effect doesn't call
+  // setState synchronously (state already starts as "loading"); the session
+  // resolves a tick later with no visible difference.
   useEffect(() => {
-    void restore();
+    const handle = window.setTimeout(() => void restore(), 0);
+    return () => window.clearTimeout(handle);
   }, []);
   return { session, restore, setSession };
 }
@@ -161,6 +171,7 @@ function App() {
   const browserSession = useBrowserSession();
   return (
     <BrowserRouter>
+      <ToastProvider>
       <SessionContext.Provider value={browserSession.session}>
         <Routes>
           <Route path="/" element={<Navigate replace to="/discover" />} />
@@ -240,6 +251,7 @@ function App() {
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </SessionContext.Provider>
+      </ToastProvider>
     </BrowserRouter>
   );
 }
@@ -976,23 +988,15 @@ function NamespaceDashboard({
                   >
                     <FilePenLine aria-hidden="true" size={18} />
                   </Link>
-                  <button
-                    aria-label={`Delete ${resource.title}`}
-                    className="icon-button danger"
+                  <ConfirmButton
+                    variant="icon"
+                    confirmLabel="Delete resource"
+                    ariaLabel={`Delete ${resource.title}`}
                     disabled={deleting === resource.slug}
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `Delete “${resource.title}”? This cannot be undone.`,
-                        )
-                      )
-                        void removeResource(resource.slug);
-                    }}
-                    title="Delete resource"
-                    type="button"
+                    onConfirm={() => void removeResource(resource.slug)}
                   >
                     <Trash2 aria-hidden="true" size={18} />
-                  </button>
+                  </ConfirmButton>
                 </div>
               )}
             </article>
@@ -1978,29 +1982,6 @@ function saveVibeOwner(shareId: string, owner: VibeOwner) {
   }
 }
 
-// A sandbox's claim token is returned only once, when the sandbox is created, so
-// it is persisted per publishable key. The claim flow in the console reads it
-// back to promote the sandbox into a live app.
-function claimStorageKey(publishableKey: string) {
-  return `m-stash-claim:${publishableKey}`;
-}
-
-function saveClaimToken(publishableKey: string, token: string) {
-  try {
-    localStorage.setItem(claimStorageKey(publishableKey), token);
-  } catch {
-    // Best-effort; the token also lives in component state for this session.
-  }
-}
-
-function loadClaimToken(publishableKey: string): string | null {
-  try {
-    return localStorage.getItem(claimStorageKey(publishableKey));
-  } catch {
-    return null;
-  }
-}
-
 // A fixed set of accent palettes drives the result theme via a CSS variable.
 const vibeAccentNames = new Set([
   "teal",
@@ -2766,8 +2747,11 @@ function NamespaceLookupPage() {
             ownership behind a small API. MongoDB stays behind the curtain.
           </p>
           <div className="discover-actions">
+            <a className="button primary" href="#try-live">
+              <Sparkles aria-hidden="true" size={17} /> Try it live now
+            </a>
             <a
-              className="button primary"
+              className="button secondary"
               href="https://github.com/ranfysvalle02/m-stash/blob/main/quick.md"
               rel="noreferrer"
               target="_blank"
@@ -2776,7 +2760,7 @@ function NamespaceLookupPage() {
             </a>
             {vibeOn ? (
               <Link className="discover-guide-link" to="/vibe">
-                <Sparkles aria-hidden="true" size={16} /> Vibe a backend for your
+                <Wand2 aria-hidden="true" size={16} /> Vibe a backend for your
                 idea
               </Link>
             ) : (
@@ -2791,6 +2775,7 @@ function NamespaceLookupPage() {
             required.
           </p>
         </div>
+        <TryItLiveSection />
         <LiveApiDemo />
         <section className="scope-model" aria-labelledby="scope-model-title">
           <header>
@@ -3338,113 +3323,6 @@ function GuidePage() {
     </PublicLayout>
   );
 }
-// TryItLiveSection lets a visitor run the full API loop against a real backend
-// without any setup. When TRY_SANDBOX is on it provisions a disposable sandbox
-// and offers a one-click "Keep this app". When it is off (or full), it falls back
-// to running the loop against a publishable key the visitor pastes from /console.
-function TryItLiveSection() {
-  const [capabilities, setCapabilities] = useState<ServiceCapabilities | null>(null);
-  const [sandbox, setSandbox] = useState<TrySandboxResult | null>(null);
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState("");
-  const [pastedKey, setPastedKey] = useState("");
-  const [manualKey, setManualKey] = useState("");
-
-  useEffect(() => {
-    let active = true;
-    api
-      .getServiceManifest()
-      .then((caps) => {
-        if (active) setCapabilities(caps);
-      })
-      .catch(() => {
-        if (active) setCapabilities({ trySandbox: false, builderSignup: false });
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  async function startSandbox() {
-    setStarting(true);
-    setError("");
-    try {
-      const result = await api.startTrySandbox();
-      // The claim token is shown once; persist it so the console can claim later.
-      saveClaimToken(result.publishableKey, result.claim.token);
-      setSandbox(result);
-    } catch (err) {
-      if (err instanceof APIError && err.status === 503) {
-        setError("The playground is full right now. Please try again in a few minutes.");
-      } else {
-        setError(err instanceof APIError ? err.message : "Could not start a sandbox right now.");
-      }
-    } finally {
-      setStarting(false);
-    }
-  }
-
-  return (
-    <section className="guide-section try-live-section">
-      <div className="guide-section-heading">
-        <p className="eyebrow">
-          <Sparkles aria-hidden="true" size={15} /> Try it live
-        </p>
-        <h2>Register, save, publish in 60 seconds.</h2>
-        <p>
-          Run the whole auth-to-public API loop against a real backend, right
-          here — no install, no signup. Watch ownership get enforced on every
-          request, then keep the app you just tried.
-        </p>
-      </div>
-
-      {sandbox ? (
-        <ApiLoopRunner
-          base={sandbox.apiBase || window.location.origin}
-          pk={sandbox.publishableKey}
-          mode="sandbox"
-          appName="your sandbox"
-          expiresAt={sandbox.expiresAt}
-          onKeep={
-            <Link className="button primary" to={`/console?claim=${encodeURIComponent(sandbox.publishableKey)}`}>
-              Keep this app <ArrowUpRight aria-hidden="true" size={16} />
-            </Link>
-          }
-        />
-      ) : capabilities?.trySandbox ? (
-        <div className="try-live-start">
-          <button type="button" className="button primary" onClick={startSandbox} disabled={starting}>
-            {starting ? "Starting…" : "Start a live sandbox"}
-          </button>
-          <p>
-            Spins up a real, isolated app that expires on its own. The{" "}
-            <code>pk_</code> key it hands you is safe in the browser — it only
-            names the app; the server enforces ownership.
-          </p>
-          {error ? <p className="form-error">{error}</p> : null}
-        </div>
-      ) : capabilities ? (
-        <div className="try-live-fallback">
-          <p>
-            Live try-it isn’t enabled on this deployment. Paste a publishable key
-            from your <Link to="/console">console</Link> to run the same loop
-            against your own app:
-          </p>
-          <div className="try-live-key">
-            <input value={pastedKey} onChange={(event) => setPastedKey(event.target.value.trim())} placeholder="pk_…" aria-label="Publishable key" />
-            <button type="button" className="button secondary" onClick={() => setManualKey(pastedKey)} disabled={!pastedKey.startsWith("pk_")}>
-              Load runner
-            </button>
-          </div>
-          {manualKey ? <ApiLoopRunner base={window.location.origin} pk={manualKey} mode="app" appName="your app" /> : null}
-        </div>
-      ) : (
-        <p className="quiet">Checking availability…</p>
-      )}
-    </section>
-  );
-}
-
 function GuideContent() {
   return (
     <>
@@ -4084,6 +3962,28 @@ function ConsoleDashboard({
     }
   }
 
+  // The secret key is shown exactly once, so the reveal card offers a .env with
+  // everything an app needs — the one place the plaintext secret is available.
+  function downloadEnv(app: BuilderApp, secretKey: string) {
+    const env = [
+      `# m-stash configuration for ${app.displayName}`,
+      `M_STASH_URL=${window.location.origin}`,
+      `# Publishable key — safe to expose in frontend builds.`,
+      `M_STASH_PUBLISHABLE_KEY=${app.publishableKey}`,
+      `# Secret key — server-only. Keep it out of the browser and out of git.`,
+      `M_STASH_SECRET_KEY=${secretKey}`,
+      ``,
+    ].join("\n");
+    const url = URL.createObjectURL(new Blob([env], { type: "text/plain;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = ".env";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
   async function createApp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -4124,6 +4024,11 @@ function ConsoleDashboard({
 
   function handleRotated(app: BuilderApp, secretKey: string) {
     setReveal({ app, secretKey, rotated: true });
+  }
+
+  function handleDeleted(deleted: BuilderApp) {
+    setApps((current) => (current ?? []).filter((item) => item.id !== deleted.id));
+    setMe((current) => (current ? { ...current, appCount: Math.max(0, (current.appCount ?? 1) - 1) } : current));
   }
 
   return (
@@ -4202,13 +4107,22 @@ function ConsoleDashboard({
               )}
             </button>
           </div>
-          <button
-            className="button secondary"
-            onClick={() => setReveal(undefined)}
-            type="button"
-          >
-            I saved the secret key
-          </button>
+          <div className="console-secret-actions">
+            <button
+              className="button secondary"
+              onClick={() => downloadEnv(reveal.app, reveal.secretKey)}
+              type="button"
+            >
+              <Download aria-hidden="true" size={15} /> Download .env
+            </button>
+            <button
+              className="button secondary"
+              onClick={() => setReveal(undefined)}
+              type="button"
+            >
+              I saved the secret key
+            </button>
+          </div>
         </section>
       )}
 
@@ -4303,6 +4217,7 @@ function ConsoleDashboard({
                 onError={setError}
                 onRotated={handleRotated}
                 onUpdated={handleUpdated}
+                onDeleted={handleDeleted}
               />
             ))}
           </ul>
@@ -4318,6 +4233,7 @@ function ConsoleAppRow({
   highlight,
   onRotated,
   onUpdated,
+  onDeleted,
   onError,
 }: {
   app: BuilderApp;
@@ -4325,30 +4241,30 @@ function ConsoleAppRow({
   highlight: boolean;
   onRotated: (app: BuilderApp, secretKey: string) => void;
   onUpdated: (app: BuilderApp) => void;
+  onDeleted: (app: BuilderApp) => void;
   onError: (message: string) => void;
 }) {
   const [origins, setOrigins] = useState((app.allowedOrigins ?? []).join("\n"));
-  const [busy, setBusy] = useState<"" | "save" | "rotate" | "active">("");
+  const [busy, setBusy] = useState<"" | "save" | "rotate" | "active" | "delete">("");
   const [copied, setCopied] = useState(false);
   const [savedOrigins, setSavedOrigins] = useState(false);
   const [usage, setUsage] = useState<BuilderAppUsage>();
-  const [connectTab, setConnectTab] = useState<"" | "run" | "code">("");
+  const [connectTab, setConnectTab] = useState<"" | "run" | "code" | "ai">("");
+  const [showInspector, setShowInspector] = useState(false);
   const cardRef = useRef<HTMLLIElement>(null);
 
-  useEffect(() => {
-    let active = true;
+  const loadUsage = useCallback(() => {
     void api
       .builderAppUsage(app.id)
-      .then((value) => {
-        if (active) setUsage(value);
-      })
+      .then((value) => setUsage(value))
       .catch(() => {
         // Usage is best-effort; a failure should not block management.
       });
-    return () => {
-      active = false;
-    };
   }, [app.id]);
+
+  useEffect(() => {
+    loadUsage();
+  }, [loadUsage]);
 
   // A freshly-claimed app scrolls into view and flashes so the builder sees it.
   useEffect(() => {
@@ -4423,14 +4339,22 @@ function ConsoleAppRow({
     }
   }
 
-  async function rotate() {
-    if (
-      !window.confirm(
-        `Rotate the secret key for ${app.displayName}? The current key stops working immediately.`,
-      )
-    ) {
-      return;
+  // Lets the AI handoff panel allow-list a dev origin with one click.
+  async function addAllowedOrigin(origin: string) {
+    const current = (app.allowedOrigins ?? []).filter(Boolean);
+    if (current.includes(origin)) return;
+    const list = [...current, origin];
+    onError("");
+    try {
+      const updated = await api.updateBuilderApp(app.id, { allowedOrigins: list });
+      onUpdated(updated);
+      setOrigins((updated.allowedOrigins ?? []).join("\n"));
+    } catch (requestError) {
+      onError(messageFromError(requestError));
     }
+  }
+
+  async function rotate() {
     setBusy("rotate");
     onError("");
     try {
@@ -4444,16 +4368,7 @@ function ConsoleAppRow({
     }
   }
 
-  async function toggleActive() {
-    const next = !app.active;
-    if (
-      !next &&
-      !window.confirm(
-        `Disable ${app.displayName}? Its publishable key stops working until you re-enable it.`,
-      )
-    ) {
-      return;
-    }
+  async function setActive(next: boolean) {
     setBusy("active");
     onError("");
     try {
@@ -4462,6 +4377,18 @@ function ConsoleAppRow({
     } catch (requestError) {
       onError(messageFromError(requestError));
     } finally {
+      setBusy("");
+    }
+  }
+
+  async function remove() {
+    setBusy("delete");
+    onError("");
+    try {
+      await api.deleteBuilderApp(app.id);
+      onDeleted(app);
+    } catch (requestError) {
+      onError(messageFromError(requestError));
       setBusy("");
     }
   }
@@ -4479,12 +4406,20 @@ function ConsoleAppRow({
             {!app.active && <span className="status">Disabled</span>}
           </div>
           <p className="console-slug">/{app.slug}</p>
-          <p className="console-usage">
-            {usage
-              ? `${usage.users} user${usage.users === 1 ? "" : "s"} · ${usage.records} record${usage.records === 1 ? "" : "s"}`
-              : "…"}
-          </p>
-          {usage?.limits ? <UsageBars usage={usage} limits={usage.limits} /> : null}
+          <button
+            type="button"
+            className="console-usage-trigger"
+            onClick={() => setShowInspector((value) => !value)}
+            title="Inspect this app's users and records"
+          >
+            <span className="console-usage">
+              {usage
+                ? `${usage.users} user${usage.users === 1 ? "" : "s"} · ${usage.records} record${usage.records === 1 ? "" : "s"}`
+                : "…"}
+              <span className="console-usage-inspect">{showInspector ? "Hide data" : "Inspect data"}</span>
+            </span>
+            {usage?.limits ? <UsageBars usage={usage} limits={usage.limits} /> : null}
+          </button>
           {allowsAnyOrigin && (
             <p className="console-origin-warn">
               <AlertTriangle aria-hidden="true" size={13} /> Any origin can use this key in a browser. Add your site below to lock it down.
@@ -4543,10 +4478,17 @@ function ConsoleAppRow({
             <Code2 aria-hidden="true" size={15} /> {connectTab === "" ? "Test and connect" : "Hide"}
           </button>
           <button
+            className="button secondary"
+            onClick={() => setShowInspector((value) => !value)}
+            type="button"
+          >
+            <Database aria-hidden="true" size={15} /> {showInspector ? "Hide data" : "Inspect data"}
+          </button>
+          <ConfirmButton
             className="button secondary danger-button"
             disabled={busy !== ""}
-            onClick={() => void rotate()}
-            type="button"
+            confirmLabel="Rotate secret"
+            onConfirm={() => void rotate()}
           >
             {busy === "rotate" ? (
               <LoaderCircle aria-hidden="true" className="spin" size={15} />
@@ -4554,26 +4496,63 @@ function ConsoleAppRow({
               <ShieldCheck aria-hidden="true" size={15} />
             )}{" "}
             Rotate secret
-          </button>
-          <button
+          </ConfirmButton>
+          {app.active ? (
+            <ConfirmButton
+              className="button secondary danger-button"
+              disabled={busy !== ""}
+              confirmLabel="Disable app"
+              onConfirm={() => void setActive(false)}
+            >
+              {busy === "active" ? (
+                <LoaderCircle aria-hidden="true" className="spin" size={15} />
+              ) : (
+                <X aria-hidden="true" size={15} />
+              )}{" "}
+              Disable
+            </ConfirmButton>
+          ) : (
+            <button
+              className="button secondary"
+              disabled={busy !== ""}
+              onClick={() => void setActive(true)}
+              type="button"
+            >
+              {busy === "active" ? (
+                <LoaderCircle aria-hidden="true" className="spin" size={15} />
+              ) : (
+                <Check aria-hidden="true" size={15} />
+              )}{" "}
+              Enable
+            </button>
+          )}
+          <ConfirmButton
             className="button secondary danger-button"
             disabled={busy !== ""}
-            onClick={() => void toggleActive()}
-            type="button"
+            confirmLabel="Delete permanently"
+            onConfirm={() => void remove()}
           >
-            {busy === "active" ? (
+            {busy === "delete" ? (
               <LoaderCircle aria-hidden="true" className="spin" size={15} />
             ) : (
               <Trash2 aria-hidden="true" size={15} />
             )}{" "}
-            {app.active ? "Disable" : "Enable"}
-          </button>
+            Delete app
+          </ConfirmButton>
         </div>
+        {showInspector && (
+          <div className="console-inspector-wrap">
+            <AppInspector appId={app.id} appName={app.displayName} onChanged={loadUsage} />
+          </div>
+        )}
         {connectTab !== "" && (
           <div className="console-connect">
             <div className="console-connect-tabs" role="tablist">
               <button type="button" role="tab" aria-selected={connectTab === "run"} className={connectTab === "run" ? "active" : ""} onClick={() => setConnectTab("run")}>
                 Run the loop
+              </button>
+              <button type="button" role="tab" aria-selected={connectTab === "ai"} className={connectTab === "ai" ? "active" : ""} onClick={() => setConnectTab("ai")}>
+                Build with AI
               </button>
               <button type="button" role="tab" aria-selected={connectTab === "code"} className={connectTab === "code" ? "active" : ""} onClick={() => setConnectTab("code")}>
                 Client code
@@ -4581,6 +4560,8 @@ function ConsoleAppRow({
             </div>
             {connectTab === "run" ? (
               <ApiLoopRunner base={window.location.origin} pk={app.publishableKey} mode="app" appName={app.displayName} />
+            ) : connectTab === "ai" ? (
+              <AiPromptPanel app={app} apiBase={window.location.origin} onAddOrigin={(origin) => void addAllowedOrigin(origin)} />
             ) : (
               <CopyableSnippet
                 title="Starter client"
@@ -4634,6 +4615,19 @@ function Wordmark() {
 }
 
 function PublicLayout({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
+
+  // React Router doesn't scroll to #hash targets on its own; do it here so the
+  // "Try it live" nav link lands on the runner on any public page.
+  useEffect(() => {
+    if (!location.hash) return;
+    const id = location.hash.slice(1);
+    const target = document.getElementById(id);
+    if (target) {
+      requestAnimationFrame(() => target.scrollIntoView({ behavior: "smooth", block: "start" }));
+    }
+  }, [location.pathname, location.hash]);
+
   return (
     <div className="public-shell">
       <header className="public-header">
@@ -4641,6 +4635,10 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
           <Wordmark />
         </Link>
         <nav>
+          <Link className="nav-accent" to="/discover#try-live">
+            Try it live
+          </Link>
+          <Link to="/vibe">Vibe</Link>
           <Link to="/guide">For builders</Link>
           <Link to="/public">Live demo</Link>
           <Link to="/console">Console</Link>
@@ -4670,11 +4668,12 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
+const LazyMarkdown = lazy(() => import("./Markdown"));
 function Markdown({ content }: { content: string }) {
   return (
-    <ReactMarkdown rehypePlugins={[rehypeSanitize]} remarkPlugins={[remarkGfm]}>
-      {content}
-    </ReactMarkdown>
+    <Suspense fallback={<div className="markdown-loading" aria-hidden="true" />}>
+      <LazyMarkdown content={content} />
+    </Suspense>
   );
 }
 function Avatar({ name, url }: { name: string; url?: string }) {

@@ -336,8 +336,27 @@ func (app *application) purgeSandboxApp(ctx context.Context, record AppRecord) e
 	}
 	app.appCache.delete(record.PublishableKey)
 
+	if err := app.purgeAppTenantData(ctx, record.ID); err != nil {
+		return err
+	}
+
+	if _, err := app.database.Collection(appsCollectionName).DeleteOne(ctx, bson.M{"_id": record.ID, "sandbox": true}); err != nil {
+		return err
+	}
+	app.logger.Info("sandbox purged", "app", record.ID.Hex(), "slug", record.Slug)
+	app.metrics.recordSandboxPurge()
+	return nil
+}
+
+// purgeAppTenantData deletes every document an app owns across all tenant
+// collections: sessions (keyed by userId), resources, namespaces, namespace
+// memberships, webhooks, users, and outbox entries (which store appId as a hex
+// string). It leaves the app record itself untouched, so it is shared by the
+// sandbox sweeper and owner-initiated app deletion, which each apply their own
+// guard (sandbox:true vs ownerId) when removing the app document.
+func (app *application) purgeAppTenantData(ctx context.Context, appID bson.ObjectID) error {
 	// Sessions key on userId, so collect this tenant's users first.
-	userIDs, err := app.sandboxUserIDs(ctx, record.ID)
+	userIDs, err := app.appUserIDs(ctx, appID)
 	if err != nil {
 		return err
 	}
@@ -347,25 +366,20 @@ func (app *application) purgeSandboxApp(ctx context.Context, record AppRecord) e
 		}
 	}
 
-	byAppID := bson.M{"appId": record.ID}
+	byAppID := bson.M{"appId": appID}
 	for _, collection := range []string{resourceCollectionName, namespaceCollectionName, namespaceMembershipCollection, webhookCollectionName, "_users"} {
 		if _, err := app.database.Collection(collection).DeleteMany(ctx, byAppID); err != nil {
 			return err
 		}
 	}
 	// The outbox stores appId as a hex string.
-	if _, err := app.database.Collection(outboxCollectionName).DeleteMany(ctx, bson.M{"appId": record.ID.Hex()}); err != nil {
+	if _, err := app.database.Collection(outboxCollectionName).DeleteMany(ctx, bson.M{"appId": appID.Hex()}); err != nil {
 		return err
 	}
-	if _, err := app.database.Collection(appsCollectionName).DeleteOne(ctx, bson.M{"_id": record.ID, "sandbox": true}); err != nil {
-		return err
-	}
-	app.logger.Info("sandbox purged", "app", record.ID.Hex(), "slug", record.Slug)
-	app.metrics.recordSandboxPurge()
 	return nil
 }
 
-func (app *application) sandboxUserIDs(ctx context.Context, appID bson.ObjectID) ([]bson.ObjectID, error) {
+func (app *application) appUserIDs(ctx context.Context, appID bson.ObjectID) ([]bson.ObjectID, error) {
 	cursor, err := app.database.Collection("_users").Find(ctx, bson.M{"appId": appID})
 	if err != nil {
 		return nil, err

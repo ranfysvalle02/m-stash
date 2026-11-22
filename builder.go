@@ -570,8 +570,28 @@ func (app *application) handleBuilderApp(w http.ResponseWriter, r *http.Request,
 		app.rotateBuilderAppSecret(w, r, ownerID, appID)
 	case len(segments) == 2 && segments[1] == "usage":
 		app.builderAppUsage(w, r, ownerID, appID)
+	case len(segments) == 2 && segments[1] == "users":
+		app.listBuilderAppUsers(w, r, ownerID, appID)
+	case len(segments) == 3 && segments[1] == "users":
+		userID, err := bson.ObjectIDFromHex(segments[2])
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid user id")
+			return
+		}
+		app.deleteBuilderAppUser(w, r, ownerID, appID, userID)
+	case len(segments) == 2 && segments[1] == "resources":
+		app.listBuilderAppResources(w, r, ownerID, appID)
+	case len(segments) == 3 && segments[1] == "resources":
+		resourceID, err := bson.ObjectIDFromHex(segments[2])
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid record id")
+			return
+		}
+		app.deleteBuilderAppResource(w, r, ownerID, appID, resourceID)
 	case len(segments) == 1 && r.Method == http.MethodPatch:
 		app.updateBuilderApp(w, r, ownerID, appID)
+	case len(segments) == 1 && r.Method == http.MethodDelete:
+		app.deleteBuilderApp(w, r, ownerID, appID)
 	default:
 		writeError(w, http.StatusNotFound, "Not found")
 	}

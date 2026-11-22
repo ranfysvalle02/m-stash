@@ -321,3 +321,207 @@
   display: flex;
   justify-content: center;
 }
+
+/* --- v2: header side, token pill --- */
+.runner-head-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.runner-token-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted-quiet);
+  white-space: nowrap;
+}
+
+.runner-token-pill.live {
+  border-color: rgba(66, 245, 141, 0.55);
+  color: var(--mongo);
+  animation: runner-pill-pulse 2.4s ease-in-out infinite;
+}
+
+.runner-token-pill svg {
+  flex: 0 0 auto;
+}
+
+@keyframes runner-pill-pulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(66, 245, 141, 0); }
+  50% { box-shadow: 0 0 14px rgba(66, 245, 141, 0.28); }
+}
+
+/* --- v2: compact identity + payload summary --- */
+.runner-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(3, 17, 23, 0.5);
+  padding: 0.6rem 0.85rem;
+}
+
+.runner-summary-text {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.runner-summary-text strong {
+  color: var(--text);
+}
+
+.runner-summary-dot {
+  color: var(--muted-quiet);
+}
+
+.runner-vis {
+  font-weight: 700;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+}
+
+.runner-vis-private { color: var(--coral); background: rgba(255, 154, 117, 0.14); }
+.runner-vis-authenticated { color: var(--aqua); background: rgba(104, 242, 255, 0.12); }
+.runner-vis-public { color: var(--mongo); background: rgba(66, 245, 141, 0.14); }
+
+.runner-summary-actions {
+  display: flex;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.runner-shortcut {
+  color: var(--muted-quiet);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.runner-provision-error {
+  margin: 0;
+}
+
+/* --- v2: per-step auth badge --- */
+.runner-auth-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-quiet);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.14rem 0.5rem;
+}
+
+.runner-auth-badge.authed {
+  color: var(--aqua);
+  border-color: rgba(104, 242, 255, 0.4);
+}
+
+/* --- v2: copyable code blocks --- */
+.runner-code-wrap {
+  position: relative;
+}
+
+.runner-copy {
+  position: absolute;
+  top: 0.9rem;
+  right: 0.5rem;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(6, 24, 28, 0.9);
+  color: var(--muted);
+}
+
+.runner-copy:hover {
+  color: var(--aqua);
+  border-color: var(--aqua);
+}
+
+/* --- v2: ownership isolation proof --- */
+.runner-isolation {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.1rem 1.15rem;
+  background: rgba(3, 17, 23, 0.5);
+  display: grid;
+  gap: 0.9rem;
+}
+
+.runner-isolation.proven {
+  border-color: rgba(66, 245, 141, 0.5);
+  background: rgba(66, 245, 141, 0.06);
+}
+
+.runner-isolation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.runner-isolation-head .eyebrow {
+  margin: 0 0 0.3rem;
+}
+
+.runner-isolation-sub {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 52ch;
+}
+
+.runner-isolation-results {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.runner-verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  border-radius: 8px;
+  padding: 0.45rem 0.7rem;
+  width: fit-content;
+}
+
+.runner-verdict.ok {
+  color: var(--mongo);
+  background: rgba(66, 245, 141, 0.12);
+}
+
+.runner-verdict.warn {
+  color: var(--yellow);
+  background: rgba(255, 225, 107, 0.12);
+}

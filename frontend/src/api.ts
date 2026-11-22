@@ -147,6 +147,33 @@ export interface BuilderAppUsage {
   limits?: AppLimits
 }
 
+// InspectedUser is a single end user of an app as shown in the console data
+// inspector. The password is never sent by the server.
+export interface InspectedUser {
+  id: string
+  email: string
+  role: string
+  username?: string
+  createdAt: string
+}
+
+// InspectedResource is a single record of an app as shown in the console data
+// inspector, including its decoded data/content and owning namespace.
+export interface InspectedResource {
+  id: string
+  type: string
+  slug: string
+  title: string
+  summary?: string
+  visibility: 'private' | 'authenticated' | 'public'
+  namespaceSlug?: string
+  namespaceKind?: 'personal' | 'shared'
+  data?: Record<string, unknown>
+  content?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface BuilderMe {
   id: string
   email: string
@@ -477,5 +504,34 @@ export const api = {
   async builderAppUsage(id: string) {
     const response = await request<APIEnvelope<BuilderAppUsage>>(`/v1/builder/apps/${encodeURIComponent(id)}/usage`, { retrySession: false })
     return response.data
+  },
+
+  // deleteBuilderApp permanently removes an owned app and all of its tenant data,
+  // freeing a slot against the free-tier app cap.
+  async deleteBuilderApp(id: string) {
+    return request<void>(`/v1/builder/apps/${encodeURIComponent(id)}`, { method: 'DELETE', retrySession: false })
+  },
+
+  async listBuilderAppUsers(id: string) {
+    const response = await request<APIEnvelope<InspectedUser[]>>(`/v1/builder/apps/${encodeURIComponent(id)}/users`, { retrySession: false })
+    return response.data
+  },
+
+  async deleteBuilderAppUser(id: string, userId: string) {
+    return request<void>(`/v1/builder/apps/${encodeURIComponent(id)}/users/${encodeURIComponent(userId)}`, { method: 'DELETE', retrySession: false })
+  },
+
+  async listBuilderAppResources(id: string, filters: { type?: string; visibility?: string } = {}) {
+    const search = new URLSearchParams()
+    if (filters.type) search.set('type', filters.type)
+    if (filters.visibility) search.set('visibility', filters.visibility)
+    const query = search.toString()
+    const path = `/v1/builder/apps/${encodeURIComponent(id)}/resources${query ? `?${query}` : ''}`
+    const response = await request<APIEnvelope<InspectedResource[]>>(path, { retrySession: false })
+    return response.data
+  },
+
+  async deleteBuilderAppResource(id: string, resourceId: string) {
+    return request<void>(`/v1/builder/apps/${encodeURIComponent(id)}/resources/${encodeURIComponent(resourceId)}`, { method: 'DELETE', retrySession: false })
   },
 }
