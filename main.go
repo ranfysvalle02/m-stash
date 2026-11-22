@@ -91,14 +91,27 @@ func main() {
 	authRateLimiter := newAuthRateLimiter(database, 10, 5*time.Minute)
 	app.vibeLimiter = newAuthRateLimiter(database, 8, time.Minute)
 	app.vibeDailyLimiter = newAuthRateLimiter(database, appConfig.VibeDailyLimit, 24*time.Hour)
-	var sweeper *sandboxSweeper
+	app.builderSignupLimiter = newAuthRateLimiter(database, 5, time.Hour)
+	app.builderSignupDailyLimiter = newAuthRateLimiter(database, appConfig.BuilderSignupDailyLimit, 24*time.Hour)
+	app.tryLimiter = newAuthRateLimiter(database, 5, 10*time.Minute)
 	if app.vibeEnabled() {
 		log.Printf("✨ Vibe lab enabled (model %s, daily cap %d)", appConfig.GeminiModel, appConfig.VibeDailyLimit)
+	} else {
+		log.Print("Vibe lab disabled because GEMINI_API_KEY is not configured")
+	}
+	if appConfig.BuilderSignupOpen {
+		log.Printf("🪄 Self-serve builder signup enabled (free plan: %d apps, daily cap %d)", appConfig.FreeTierMaxApps, appConfig.BuilderSignupDailyLimit)
+	}
+	if appConfig.TrySandbox {
+		log.Printf("🧪 Try-it sandbox enabled (TTL %s)", appConfig.TrySandboxTTL)
+	}
+	// The sweeper purges expired sandboxes, which both the vibe lab and the blank
+	// try-it endpoint create, so run it whenever either produces sandboxes.
+	var sweeper *sandboxSweeper
+	if app.vibeEnabled() || appConfig.TrySandbox {
 		sweeper = newSandboxSweeper(app)
 		sweeper.Start()
 		log.Printf("🧹 Sandbox sweeper started (every %s)", vibeSandboxSweepInterval)
-	} else {
-		log.Print("Vibe lab disabled because GEMINI_API_KEY is not configured")
 	}
 	var deliveryWorker *webhookWorker
 	if appConfig.WebhookDelivery {

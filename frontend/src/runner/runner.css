@@ -1,0 +1,323 @@
+.runner {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(6, 24, 28, 0.78);
+  box-shadow: 5px 5px 0 rgba(104, 242, 255, 0.1);
+  padding: clamp(1.1rem, 3vw, 1.75rem);
+  display: grid;
+  gap: 1.25rem;
+}
+
+.runner-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.runner-head h3 {
+  color: var(--text);
+  font-size: clamp(1.1rem, 2.4vw, 1.4rem);
+  margin: 0.3rem 0 0.5rem;
+}
+
+.runner-sub {
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 54ch;
+}
+
+.runner-sub code,
+.runner-step code {
+  background: rgba(66, 245, 141, 0.12);
+  color: var(--mongo);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+}
+
+.runner-chip {
+  border: 1px solid var(--aqua);
+  color: var(--aqua);
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.runner-banner {
+  border: 1px solid rgba(255, 225, 107, 0.5);
+  background: rgba(255, 225, 107, 0.08);
+  color: var(--yellow);
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.runner-inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.85rem;
+}
+
+.runner-inputs label {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.runner-inputs input,
+.runner-inputs select,
+.runner-inputs textarea {
+  background: rgba(3, 17, 23, 0.86);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  padding: 0.5rem 0.6rem;
+  font-size: 0.85rem;
+  font-family: var(--font-sans);
+  width: 100%;
+}
+
+.runner-inputs textarea {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  resize: vertical;
+}
+
+.runner-data {
+  grid-column: 1 / -1;
+}
+
+.runner-password {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.runner-password input {
+  flex: 1;
+}
+
+.runner-link {
+  background: none;
+  border: none;
+  color: var(--aqua);
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.78rem;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.runner-link:hover {
+  color: var(--pink);
+}
+
+.runner-error {
+  color: #ff8d7a;
+  font-weight: 600;
+}
+
+.runner-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.runner-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.runner-steps {
+  list-style: none;
+  counter-reset: runner;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.runner-step {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.95rem 1.05rem;
+  background: rgba(9, 33, 38, 0.6);
+  display: grid;
+  gap: 0.6rem;
+  counter-increment: runner;
+  transition: border-color 0.2s ease, box-shadow 0.25s ease;
+}
+
+.runner-step[data-status="ok"] {
+  border-color: rgba(66, 245, 141, 0.55);
+}
+
+.runner-step[data-status="error"] {
+  border-color: rgba(255, 107, 197, 0.6);
+}
+
+.runner-step[data-status="running"] {
+  border-color: var(--aqua);
+  box-shadow: 0 0 20px rgba(104, 242, 255, 0.12);
+}
+
+.runner-step-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.runner-step-title {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.runner-step-title::before {
+  content: counter(runner);
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: rgba(104, 242, 255, 0.14);
+  color: var(--aqua);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.runner-step-title strong {
+  color: var(--text);
+}
+
+.runner-method {
+  color: var(--pink);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.runner-step-right {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.runner-pill {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0.22rem 0.6rem;
+}
+
+.runner-pill.ok {
+  background: rgba(66, 245, 141, 0.16);
+  color: var(--mongo);
+}
+
+.runner-pill.error {
+  background: rgba(255, 107, 197, 0.18);
+  color: var(--pink);
+}
+
+.runner-run {
+  padding: 0.3rem 0.85rem;
+  font-size: 0.78rem;
+}
+
+.runner-purpose {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.runner-explain {
+  border-left: 3px solid var(--pink);
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 107, 197, 0.08);
+  border-radius: 0 6px 6px 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.runner-explain.teaching {
+  border-left-color: var(--aqua);
+  background: rgba(104, 242, 255, 0.08);
+}
+
+.runner-explain p {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.runner-response summary {
+  cursor: pointer;
+  color: var(--aqua);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.runner-response pre,
+.runner-code {
+  background: #020b10;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #dffaf5;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  margin: 0.5rem 0 0;
+  overflow-x: auto;
+  padding: 0.75rem 0.85rem;
+  white-space: pre;
+}
+
+.runner-tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+}
+
+.runner-tabs button {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 0.25rem 0.75rem;
+}
+
+.runner-tabs button.active {
+  border-color: var(--aqua);
+  color: var(--aqua);
+}
+
+.runner-keep {
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+  display: flex;
+  justify-content: center;
+}

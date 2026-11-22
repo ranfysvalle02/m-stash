@@ -87,7 +87,7 @@ func TestRenderVibeStarterIndexEscapesAndStripsSamples(t *testing.T) {
 }
 
 func TestBuildVibeStarterZip(t *testing.T) {
-	archive, err := buildVibeStarterZip(testVibeShareRecord(), "https://example.test")
+	archive, err := buildVibeStarterZip(testVibeShareRecord(), "https://example.test", false)
 	if err != nil {
 		t.Fatal(err)
 	}

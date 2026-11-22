@@ -119,34 +119,44 @@ func validateResourceVisibilityForNamespace(namespace Namespace, visibility stri
 	return nil
 }
 
-// enforceSandboxResourceWrite applies the ephemeral-tenant quotas to a resource
-// write. It returns a non-zero HTTP status and message when the write must be
-// rejected, or (0, "") when the request is within bounds or the app is not a
-// sandbox. The per-namespace count cap applies only to inserts; the record size
-// cap (content plus marshaled data) applies to both inserts and updates so a
-// sandbox link can never be turned into unbounded storage on the deployment.
-func (app *application) enforceSandboxResourceWrite(ctx context.Context, namespace Namespace, input *resourceInput, isCreate bool) (int, string) {
+// enforceAppResourceWrite applies an app's data quotas to a resource write. It
+// returns a non-zero HTTP status and message when the write must be rejected, or
+// (0, "") when the request is within bounds or the app is unbounded. The
+// per-namespace count cap applies only to inserts; the record size cap (content
+// plus marshaled data) applies to both inserts and updates so a tenant can never
+// be turned into unbounded storage on the deployment. Limits resolve from the
+// app's stored plan, falling back to sandbox quotas for a sandbox.
+func (app *application) enforceAppResourceWrite(ctx context.Context, namespace Namespace, input *resourceInput, isCreate bool) (int, string) {
 	record, ok := appFromContext(ctx)
-	if !ok || !record.Sandbox {
+	if !ok {
 		return 0, ""
 	}
-	if isCreate {
+	limits := effectiveLimits(record)
+	if isCreate && limits.MaxRecordsPerNamespace > 0 {
 		count, err := app.database.Collection(resourceCollectionName).CountDocuments(ctx, bson.M{"namespaceId": namespace.ID})
 		if err != nil {
-			return http.StatusServiceUnavailable, "Could not verify sandbox capacity"
+			return http.StatusServiceUnavailable, "Could not verify storage capacity"
 		}
-		if count >= vibeSandboxMaxResources {
-			return http.StatusTooManyRequests, "This sandbox is full. Start a fresh vibe to keep adding records."
-		}
-	}
-	size := len(input.Content)
-	if len(input.Data) > 0 {
-		if encoded, err := json.Marshal(input.Data); err == nil {
-			size += len(encoded)
+		if count >= int64(limits.MaxRecordsPerNamespace) {
+			if record.Sandbox {
+				return http.StatusTooManyRequests, "This sandbox is full. Start a fresh vibe to keep adding records."
+			}
+			return http.StatusTooManyRequests, fmt.Sprintf("This app reached its plan limit of %d records in this collection.", limits.MaxRecordsPerNamespace)
 		}
 	}
-	if size > vibeSandboxMaxRecordBytes {
-		return http.StatusRequestEntityTooLarge, "This record is too large for the sandbox."
+	if limits.MaxRecordBytes > 0 {
+		size := len(input.Content)
+		if len(input.Data) > 0 {
+			if encoded, err := json.Marshal(input.Data); err == nil {
+				size += len(encoded)
+			}
+		}
+		if size > limits.MaxRecordBytes {
+			if record.Sandbox {
+				return http.StatusRequestEntityTooLarge, "This record is too large for the sandbox."
+			}
+			return http.StatusRequestEntityTooLarge, "This record is too large for this app's plan."
+		}
 	}
 	return 0, ""
 }
@@ -520,7 +530,7 @@ func (app *application) handleResourceCollection(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if status, message := app.enforceSandboxResourceWrite(r.Context(), namespace, &input, true); status != 0 {
+		if status, message := app.enforceAppResourceWrite(r.Context(), namespace, &input, true); status != 0 {
 			writeError(w, status, message)
 			return
 		}
@@ -606,7 +616,7 @@ func (app *application) handleResourceDocument(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if status, message := app.enforceSandboxResourceWrite(r.Context(), namespace, &input, false); status != 0 {
+		if status, message := app.enforceAppResourceWrite(r.Context(), namespace, &input, false); status != 0 {
 			writeError(w, status, message)
 			return
 		}

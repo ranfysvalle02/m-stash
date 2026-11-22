@@ -236,6 +236,7 @@ func (app *application) writeVibeResult(w http.ResponseWriter, r *http.Request, 
 
 	var owner *vibeOwnerLogin
 	var sandboxAppID string
+	var claimToken string
 	publishableKey := ""
 	if sandbox, err := app.provisionVibeSandbox(ctx, spec); err != nil {
 		if !errors.Is(err, errVibeSandboxFull) {
@@ -245,9 +246,15 @@ func (app *application) writeVibeResult(w http.ResponseWriter, r *http.Request, 
 		sandboxAppID = sandbox.record.ID.Hex()
 		publishableKey = sandbox.record.PublishableKey
 		owner = &sandbox.owner
+		claimToken = sandbox.claimToken
 	}
 
 	response := map[string]any{"data": spec}
+	if publishableKey != "" {
+		// The publishable key is safe in the browser (it only names the app) and the
+		// UI needs it to store the claim token and build the "keep this app" link.
+		response["publishableKey"] = publishableKey
+	}
 	if share, err := app.saveVibeShare(ctx, idea, spec, sandboxAppID, publishableKey, baseURL); err != nil {
 		app.logger.Error("vibe share save failed", "request_id", requestID, "error", err)
 	} else {
@@ -256,6 +263,11 @@ func (app *application) writeVibeResult(w http.ResponseWriter, r *http.Request, 
 	}
 	if owner != nil {
 		response["owner"] = owner
+	}
+	// The claim token is returned only here, never stored in the share or the zip,
+	// so only the visitor who created the sandbox can later claim it.
+	if claimToken != "" {
+		response["claim"] = map[string]any{"token": claimToken}
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, response)

@@ -12,15 +12,18 @@ import (
 )
 
 type application struct {
-	config           Config
-	database         *mongo.Database
-	mongoClient      *mongo.Client
-	metrics          *metricsRegistry
-	logger           *slog.Logger
-	appCache         *appKeyCache
-	uiAppKey         string
-	vibeLimiter      *authRateLimiter
-	vibeDailyLimiter *authRateLimiter
+	config                    Config
+	database                  *mongo.Database
+	mongoClient               *mongo.Client
+	metrics                   *metricsRegistry
+	logger                    *slog.Logger
+	appCache                  *appKeyCache
+	uiAppKey                  string
+	vibeLimiter               *authRateLimiter
+	vibeDailyLimiter          *authRateLimiter
+	builderSignupLimiter      *authRateLimiter
+	builderSignupDailyLimiter *authRateLimiter
+	tryLimiter                *authRateLimiter
 	// vibeCooldownUntil (unix nanos) skips the model after a key-level failure so requests don't each pay for a doomed call.
 	vibeCooldownUntil atomic.Int64
 }
@@ -41,9 +44,10 @@ func (app *application) Handler(rateLimiter *authRateLimiter) http.Handler {
 	mux.HandleFunc("/v1/apps", app.corsMiddleware(app.requirePlatformToken(app.handleApps)))
 	mux.HandleFunc("/v1/builder/accounts", app.corsMiddleware(app.requirePlatformToken(app.handleBuilderAccounts)))
 	mux.HandleFunc("/v1/builder/auth/login", app.corsMiddleware(app.rateLimitMiddleware(rateLimiter, "builder-login", app.handleBuilderLogin)))
+	mux.HandleFunc("/v1/builder/auth/signup", app.corsMiddleware(app.rateLimitMiddleware(app.builderSignupLimiter, "builder-signup", app.handleBuilderSignup)))
 	mux.HandleFunc("/v1/builder/auth/refresh", app.corsMiddleware(app.handleSessionRefresh))
 	mux.HandleFunc("/v1/builder/auth/logout", app.corsMiddleware(app.handleSessionLogout))
-	mux.HandleFunc("/v1/builder/me", app.corsMiddleware(app.authenticateBuilder(handleBuilderMe)))
+	mux.HandleFunc("/v1/builder/me", app.corsMiddleware(app.authenticateBuilder(app.handleBuilderMe)))
 	mux.HandleFunc("/v1/builder/apps", app.corsMiddleware(app.authenticateBuilder(app.handleBuilderApps)))
 	mux.HandleFunc("/v1/builder/apps/", app.corsMiddleware(app.authenticateBuilder(app.handleBuilderApp)))
 	mux.HandleFunc("/v1/auth/signup", app.resolveApp(app.corsMiddleware(app.rateLimitMiddleware(rateLimiter, "signup", app.handleSignUp))))
@@ -60,6 +64,7 @@ func (app *application) Handler(rateLimiter *authRateLimiter) http.Handler {
 	mux.HandleFunc("/.well-known/m-stash.json", app.corsMiddleware(app.handleServiceManifest))
 	mux.HandleFunc("/v1/vibe", app.corsMiddleware(app.handleVibe))
 	mux.HandleFunc("/v1/vibe/", app.corsMiddleware(app.handleVibeShare))
+	mux.HandleFunc("/v1/try", app.corsMiddleware(app.rateLimitMiddleware(app.tryLimiter, "try-sandbox", app.handleTry)))
 	mux.HandleFunc("/v1/public/shared/resources/", app.resolveApp(app.corsMiddleware(app.handlePublicSharedResources)))
 	mux.HandleFunc("/v1/public/", app.resolveApp(app.corsMiddleware(app.handlePublicNamespace)))
 	mux.HandleFunc("/metrics", app.handleMetrics)
@@ -113,6 +118,17 @@ func (app *application) handleServiceManifest(w http.ResponseWriter, r *http.Req
 			"vibe": map[string]any{
 				"enabled":  app.vibeEnabled(),
 				"endpoint": "/v1/vibe",
+			},
+			"trySandbox": map[string]any{
+				"enabled":  app.config.TrySandbox,
+				"endpoint": "/v1/try",
+			},
+			"builderSignup": map[string]any{
+				"enabled":  app.config.BuilderSignupOpen,
+				"endpoint": "/v1/builder/auth/signup",
+			},
+			"claim": map[string]any{
+				"endpoint": "/v1/builder/apps/claim",
 			},
 		},
 	})

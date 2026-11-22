@@ -20,7 +20,16 @@ Every request identifies its app with the header `X-M-Stash-App: <publishableKey
 - `GET|POST /v1/shared/resources/{type}` and `/{type}/{slug}` — shared app data; writes require admin or the app secret key.
 - `GET /v1/public/shared/resources/{type}/{slug}` — read one public shared record (no auth).
 - `GET /v1/public/{username}/{type}/{slug}` — read one public personal record (no auth).
-- `GET /.well-known/m-stash.json` — machine-readable service manifest.
+- `GET /.well-known/m-stash.json` — machine-readable service manifest (also advertises whether try-it, builder signup, and claim are enabled).
+- `POST /v1/try` — start a blank live sandbox (when `TRY_SANDBOX=on`). Returns `{ publishableKey, expiresAt, apiBase, claim: { token } }`. The sandbox is a real, isolated app with tight limits that expires unless claimed.
+- `POST /v1/builder/auth/signup` — self-serve builder account (when `BUILDER_SIGNUP=open`). Body `{ email, password }`. Returns a session; the account is on the free plan.
+- `POST /v1/builder/apps/claim` — keep a sandbox as a live app. Builder session required. Body `{ publishableKey, claimToken, allowedOrigins?, displayName? }`. The `pk_` is unchanged and all data is kept; a new secret key is returned once. Only the claim token (returned once when the sandbox was created) authorizes this — the public share link never does.
+
+## Sandboxes, plans, and limits
+
+- An app is either a **sandbox** (no owner, expires, tight limits, has a one-time claim token) or **live** (owned, no expiry, plan limits). Claiming flips it in place, so a downloaded zip or pasted cURL keeps working.
+- Free-plan builders are capped: `FREE_TIER_MAX_APPS` apps, and each app is bounded by `FREE_TIER_MAX_USERS`, `FREE_TIER_MAX_RECORDS` (per namespace), and `FREE_TIER_MAX_RECORD_BYTES`. A zero limit means unlimited.
+- Hitting a user limit returns 429; a record count or size limit returns 429/413 with a message naming the plan or sandbox cap.
 
 ## Example
 

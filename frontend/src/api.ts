@@ -98,6 +98,7 @@ export interface VibeShare {
   previewUrl?: string
   zipUrl: string
   expiresAt: string
+  claimed?: boolean
 }
 
 export interface VibeOwner {
@@ -111,6 +112,8 @@ export interface VibeResult {
   idea?: string
   snippets?: VibeSnippet[]
   owner?: VibeOwner
+  claim?: { token: string }
+  publishableKey?: string
 }
 
 export interface BuilderApp {
@@ -132,9 +135,44 @@ export interface BuilderAppInput {
   allowedOrigins?: string[]
 }
 
+export interface AppLimits {
+  maxUsers: number
+  maxRecordsPerNamespace: number
+  maxRecordBytes: number
+}
+
 export interface BuilderAppUsage {
   users: number
   records: number
+  limits?: AppLimits
+}
+
+export interface BuilderMe {
+  id: string
+  email: string
+  plan?: string
+  appCount?: number
+  maxApps?: number
+  limits?: AppLimits
+}
+
+export interface TrySandboxResult {
+  publishableKey: string
+  expiresAt: string
+  apiBase: string
+  claim: { token: string }
+}
+
+export interface ClaimResult {
+  data: BuilderApp
+  secretKey: string
+}
+
+// ServiceCapabilities is the subset of /.well-known/m-stash.json the UI reads to
+// hide features (try-it, self-serve signup) that this deployment hasn't enabled.
+export interface ServiceCapabilities {
+  trySandbox: boolean
+  builderSignup: boolean
 }
 
 export interface Page<T> {
@@ -355,18 +393,47 @@ export const api = {
   },
 
   async vibe(idea: string): Promise<VibeResult> {
-    const response = await request<APIEnvelope<VibeSpec> & { share?: VibeShare; snippets?: VibeSnippet[]; owner?: VibeOwner }>('/v1/vibe', { method: 'POST', body: { idea }, retrySession: false })
-    return { spec: response.data, share: response.share, snippets: response.snippets, owner: response.owner }
+    const response = await request<APIEnvelope<VibeSpec> & { share?: VibeShare; snippets?: VibeSnippet[]; owner?: VibeOwner; claim?: { token: string }; publishableKey?: string }>('/v1/vibe', { method: 'POST', body: { idea }, retrySession: false })
+    return { spec: response.data, share: response.share, snippets: response.snippets, owner: response.owner, claim: response.claim, publishableKey: response.publishableKey }
+  },
+
+  // getServiceManifest reports which optional features this deployment enabled.
+  async getServiceManifest(): Promise<ServiceCapabilities> {
+    const response = await request<{ capabilities?: { trySandbox?: { enabled?: boolean }; builderSignup?: { enabled?: boolean } } }>('/.well-known/m-stash.json', { retrySession: false })
+    return {
+      trySandbox: response.capabilities?.trySandbox?.enabled ?? false,
+      builderSignup: response.capabilities?.builderSignup?.enabled ?? false,
+    }
+  },
+
+  // startTrySandbox provisions a blank live sandbox. The returned claim token is
+  // shown only once, so callers persist it (localStorage) to claim later.
+  async startTrySandbox(): Promise<TrySandboxResult> {
+    return request<TrySandboxResult>('/v1/try', { method: 'POST', retrySession: false })
   },
 
   async getVibeShare(id: string): Promise<VibeResult> {
-    const response = await request<APIEnvelope<VibeSpec> & { share: VibeShare; idea: string; snippets?: VibeSnippet[] }>(`/v1/vibe/${encodeURIComponent(id)}`, { retrySession: false })
-    return { spec: response.data, share: response.share, idea: response.idea, snippets: response.snippets }
+    const response = await request<APIEnvelope<VibeSpec> & { share: VibeShare; idea: string; snippets?: VibeSnippet[]; publishableKey?: string }>(`/v1/vibe/${encodeURIComponent(id)}`, { retrySession: false })
+    return { spec: response.data, share: response.share, idea: response.idea, snippets: response.snippets, publishableKey: response.publishableKey }
   },
 
   async builderLogin(email: string, password: string) {
     return request<{ token: string; builder: { id: string; email: string } }>('/v1/builder/auth/login', {
       method: 'POST', body: { email, password }, retrySession: false,
+    })
+  },
+
+  async builderSignup(email: string, password: string) {
+    return request<{ token: string; builder: { id: string; email: string; plan?: string } }>('/v1/builder/auth/signup', {
+      method: 'POST', body: { email, password }, retrySession: false,
+    })
+  },
+
+  // claimApp promotes a sandbox into a live app owned by the signed-in builder.
+  // Only the one-time claim token authorizes this; the pk_ and data are kept.
+  async claimApp(input: { publishableKey: string; claimToken: string; allowedOrigins?: string[]; displayName?: string }) {
+    return request<ClaimResult>('/v1/builder/apps/claim', {
+      method: 'POST', body: input, retrySession: false,
     })
   },
 
@@ -379,7 +446,7 @@ export const api = {
   },
 
   async builderMe() {
-    const response = await request<APIEnvelope<{ id: string; email: string }>>('/v1/builder/me', { retrySession: false })
+    const response = await request<APIEnvelope<BuilderMe>>('/v1/builder/me', { retrySession: false })
     return response.data
   },
 

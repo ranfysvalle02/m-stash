@@ -33,7 +33,10 @@ type User struct {
 	Email        string        `bson:"email" json:"email"`
 	PasswordHash string        `bson:"password" json:"-"`
 	Role         string        `bson:"role" json:"role"`
-	CreatedAt    time.Time     `bson:"createdAt" json:"createdAt"`
+	// Plan applies to builder (control-plane) accounts: "free" for self-serve
+	// signups, empty for platform-provisioned builders which are unbounded.
+	Plan      string    `bson:"plan,omitempty" json:"plan,omitempty"`
+	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
 }
 
 func normalizeEmail(email string) string {
@@ -156,16 +159,21 @@ func (app *application) handleSignUp(w http.ResponseWriter, r *http.Request) {
 	}
 	appID := record.ID
 
-	// Sandbox tenants cap their user count so a share link can't be turned into a
-	// free account factory on the shared deployment.
-	if record.Sandbox {
+	// Apps with a bounded plan (sandboxes, free tier) cap their user count so a
+	// public signup route can't be turned into an account factory on the shared
+	// deployment. A zero limit means unbounded.
+	if limit := effectiveLimits(record).MaxUsers; limit > 0 {
 		count, countErr := app.database.Collection("_users").CountDocuments(ctx, bson.M{"appId": appID})
 		if countErr != nil {
 			writeError(w, http.StatusServiceUnavailable, "Could not create user")
 			return
 		}
-		if count >= vibeSandboxMaxUsers {
-			writeError(w, http.StatusTooManyRequests, "This sandbox is full. Start a fresh vibe to try again.")
+		if count >= int64(limit) {
+			if record.Sandbox {
+				writeError(w, http.StatusTooManyRequests, "This sandbox is full. Start a fresh vibe to try again.")
+			} else {
+				writeError(w, http.StatusTooManyRequests, "This app reached its plan limit for user accounts.")
+			}
 			return
 		}
 	}

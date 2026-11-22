@@ -76,6 +76,9 @@ A per-app `secretKey` can be supplied to a trusted backend for shared resource m
 | `GET` / `POST /v1/shared/webhooks`, `DELETE /v1/shared/webhooks/{id}` | Admin-only: register, list, and remove HMAC-signed outbox event webhooks. |
 | `GET /v1/public/{username}/{type}/{slug}` | Read one public personal resource. |
 | `GET /v1/public/shared/resources/{type}/{slug}` | Read one public shared resource. |
+| `POST /v1/try` | Start a blank live sandbox (when `TRY_SANDBOX=on`). Returns a publishable key, an expiry, and a one-time claim token. |
+| `POST /v1/builder/auth/signup` | Self-serve builder account (when `BUILDER_SIGNUP=open`). Returns a session on the free plan. |
+| `POST /v1/builder/apps/claim` | Keep a sandbox as a live app. Needs a builder session and the sandbox's claim token; the `pk_` and all data stay, and a new secret key is returned once. |
 
 See [integration.md](integration.md) for request examples and [quickstart.md](quickstart.md) to deploy the service.
 
@@ -84,6 +87,16 @@ See [integration.md](integration.md) for request examples and [quickstart.md](qu
 Set `GEMINI_API_KEY` to turn on `/vibe`, an unauthenticated playground for feeling out m-stash before you write any code. Describe an app — say, "a habit tracker with private streaks and a public profile" — and m-stash sketches a data model, hands back copy-paste snippets, and spins up a **live sandbox** that runs against the real API: sign in with a throwaway account, save records, and watch ownership get enforced on every request.
 
 Everything is URL-powered. Share the link, download a `.zip` starter, or open the plan behind the floating `</>` button. Shares (link, live demo, and starter) expire on their own — `72h` by default, capped at 5 days — and MongoDB reclaims them with a TTL index. The app idea is length-limited and sanitized, and the model is told to treat it as untrusted input, so the prompt-injection surface stays small. If the model is unavailable or past the daily cap, the lab answers from built-in blueprints instead of erroring out.
+
+## Try it, run it, keep it
+
+Every m-stash app is either a **sandbox** (no owner, expires, tight limits, carries a one-time claim token) or a **live** app (owned, no expiry, limits set by the owner's plan). A visitor can try the service against a real backend, then keep that exact app — the publishable key never changes, so a downloaded `.zip` or pasted cURL keeps working.
+
+- **Try** — with `TRY_SANDBOX=on`, `POST /v1/try` provisions a blank, expiring sandbox. The `/guide` page and every `/console` app card run the full Register → Log in → Create → View-yours → View-public loop live in the browser.
+- **Keep** — with `BUILDER_SIGNUP=open`, a visitor creates a free builder account and claims the sandbox with its claim token. Claiming flips the app to live in place and keeps all users and records; a fresh secret key is shown once.
+- **Limits** — free-plan builders are capped at `FREE_TIER_MAX_APPS` apps, and each app is bounded by `FREE_TIER_MAX_USERS`, `FREE_TIER_MAX_RECORDS` (per namespace), and `FREE_TIER_MAX_RECORD_BYTES` (a zero value means unlimited). Operator-provisioned builders (via `PLATFORM_TOKEN`) remain unbounded.
+
+> **Note:** self-serve signup does **not** verify email addresses — there is no email transport. The `BUILDER_SIGNUP` flag, the per-IP and daily signup caps, and the free-tier quotas are the controls. Leave `BUILDER_SIGNUP=off` if you need verified accounts.
 
 ## Configuration
 
@@ -102,6 +115,15 @@ Everything is URL-powered. Share the link, download a `.zip` starter, or open th
 | `GEMINI_MODEL` | No | Model for the vibe lab. Defaults to `gemini-3.5-flash-lite`. |
 | `VIBE_DAILY_LIMIT` | No | Global daily cap on model generations (plus a per-IP limit). Past the cap, or whenever the model fails, the lab answers from built-in blueprints. Defaults to `500`. |
 | `VIBE_SHARE_TTL` | No | How long a vibe's share link, live demo, and `.zip` starter stay available before MongoDB expires them. Defaults to `72h`; capped at `120h` (5 days). |
+| `VIBE_MAX_SANDBOXES` | No | Global cap on live sandbox tenants (vibe + try-it). Past it the lab still returns a spec and snippets, just without a live demo. Defaults to `1000`. |
+| `TRY_SANDBOX` | No | Set `on` to enable the blank `POST /v1/try` sandbox used by the guide and console. Defaults to `off` (endpoint returns 404). |
+| `TRY_SANDBOX_TTL` | No | How long a try-it sandbox lives before the sweeper deletes it and its data. Defaults to `24h`; capped at `120h`. |
+| `BUILDER_SIGNUP` | No | Set `open` to allow self-serve free-plan builder signup and sandbox claiming. Defaults to `off` (operator-provisioned accounts only). Emails are not verified. |
+| `BUILDER_SIGNUP_DAILY_LIMIT` | No | Global daily cap on self-serve signups (per-IP is additionally limited to 5/hour). Defaults to `100`. |
+| `FREE_TIER_MAX_APPS` | No | Apps a free-plan builder may own. Defaults to `3`. A zero value means unlimited. |
+| `FREE_TIER_MAX_USERS` | No | User accounts per free-plan app. Defaults to `1000`. A zero value means unlimited. |
+| `FREE_TIER_MAX_RECORDS` | No | Records per namespace in a free-plan app. Defaults to `2000`. A zero value means unlimited. |
+| `FREE_TIER_MAX_RECORD_BYTES` | No | Max stored bytes per record in a free-plan app. Defaults to `65536`. A zero value means unlimited. |
 | `TRUST_PROXY` | No | Set `true` only behind a trusted TLS-terminating proxy. |
 
 The wildcard CORS default is intentionally insecure. Set explicit origins before a production browser client uses cross-origin authentication.

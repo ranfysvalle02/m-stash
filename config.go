@@ -36,6 +36,17 @@ type Config struct {
 	VibeShareTTL        time.Duration
 	VibeMaxSandboxes    int
 	PublicBaseURL       string
+	// BuilderSignupOpen enables self-serve builder account creation. When false,
+	// builder accounts can only be bootstrapped with the platform token.
+	BuilderSignupOpen       bool
+	BuilderSignupDailyLimit int
+	FreeTierMaxApps         int
+	FreeTierMaxUsers        int
+	FreeTierMaxRecords      int
+	FreeTierMaxRecordBytes  int
+	// TrySandbox enables the blank "try it live" sandbox endpoint for the guide.
+	TrySandbox    bool
+	TrySandboxTTL time.Duration
 }
 
 func loadConfig() (Config, error) {
@@ -83,6 +94,38 @@ func loadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	builderSignupOpen, err := getEnvToggle("BUILDER_SIGNUP", "open", "off", false)
+	if err != nil {
+		return Config{}, err
+	}
+	builderSignupDailyLimit, err := getEnvInt("BUILDER_SIGNUP_DAILY_LIMIT", 100)
+	if err != nil {
+		return Config{}, err
+	}
+	freeTierMaxApps, err := getEnvInt("FREE_TIER_MAX_APPS", 3)
+	if err != nil {
+		return Config{}, err
+	}
+	freeTierMaxUsers, err := getEnvInt("FREE_TIER_MAX_USERS", 1000)
+	if err != nil {
+		return Config{}, err
+	}
+	freeTierMaxRecords, err := getEnvInt("FREE_TIER_MAX_RECORDS", 2000)
+	if err != nil {
+		return Config{}, err
+	}
+	freeTierMaxRecordBytes, err := getEnvInt("FREE_TIER_MAX_RECORD_BYTES", 64*1024)
+	if err != nil {
+		return Config{}, err
+	}
+	trySandbox, err := getEnvToggle("TRY_SANDBOX", "on", "off", false)
+	if err != nil {
+		return Config{}, err
+	}
+	trySandboxTTL, err := getEnvDuration("TRY_SANDBOX_TTL", 24*time.Hour)
+	if err != nil {
+		return Config{}, err
+	}
 	loadedConfig := Config{
 		Port:                getEnv("PORT", "4000"),
 		MongoURI:            getEnv("MONGO_URI", "mongodb://localhost:27017"),
@@ -110,6 +153,15 @@ func loadConfig() (Config, error) {
 		VibeShareTTL:        vibeShareTTL,
 		VibeMaxSandboxes:    vibeMaxSandboxes,
 		PublicBaseURL:       getEnv("PUBLIC_BASE_URL", ""),
+
+		BuilderSignupOpen:       builderSignupOpen,
+		BuilderSignupDailyLimit: builderSignupDailyLimit,
+		FreeTierMaxApps:         freeTierMaxApps,
+		FreeTierMaxUsers:        freeTierMaxUsers,
+		FreeTierMaxRecords:      freeTierMaxRecords,
+		FreeTierMaxRecordBytes:  freeTierMaxRecordBytes,
+		TrySandbox:              trySandbox,
+		TrySandboxTTL:           trySandboxTTL,
 	}
 
 	if len(loadedConfig.JWTSecret) < 32 {
@@ -159,6 +211,24 @@ func getEnvDuration(key string, fallback time.Duration) (time.Duration, error) {
 		return 0, fmt.Errorf("%s must be a positive Go duration", key)
 	}
 	return value, nil
+}
+
+// getEnvToggle reads a two-valued flag such as BUILDER_SIGNUP=open|off, returning
+// true for onValue and false for offValue. An empty or unset variable uses the
+// fallback; anything else is a configuration error.
+func getEnvToggle(key, onValue, offValue string, fallback bool) (bool, error) {
+	rawValue, exists := os.LookupEnv(key)
+	if !exists || strings.TrimSpace(rawValue) == "" {
+		return fallback, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(rawValue)) {
+	case onValue:
+		return true, nil
+	case offValue:
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be %s or %s", key, onValue, offValue)
+	}
 }
 
 func getEnvInt(key string, fallback int) (int, error) {

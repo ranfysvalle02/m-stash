@@ -23,3 +23,8 @@ services:
         value: "true"
       - key: TRUST_PROXY
         value: "true"
+      # Let visitors try m-stash live and keep their app via self-serve signup.
+      - key: TRY_SANDBOX
+        value: "on"
+      - key: BUILDER_SIGNUP
+        value: "open"

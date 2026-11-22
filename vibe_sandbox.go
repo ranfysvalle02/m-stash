@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"strings"
@@ -37,8 +39,9 @@ type vibeOwnerLogin struct {
 }
 
 type vibeSandbox struct {
-	record AppRecord
-	owner  vibeOwnerLogin
+	record     AppRecord
+	owner      vibeOwnerLogin
+	claimToken string
 }
 
 func randomHex(bytes int) (string, error) {
@@ -49,9 +52,44 @@ func randomHex(bytes int) (string, error) {
 	return hex.EncodeToString(buffer), nil
 }
 
-// provisionVibeSandbox creates a short-lived tenant whose admin is the visitor
-// (the "owner") and seeds its owner-authored sections with the spec's samples.
-func (app *application) provisionVibeSandbox(ctx context.Context, spec vibeSpec) (*vibeSandbox, error) {
+// hashClaimToken stores a sandbox's single-use claim token as a SHA-256 digest.
+// A plain hash is sufficient because the token is high-entropy (not a password),
+// and it keeps the plaintext out of the database.
+func hashClaimToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// verifyClaimToken constant-time compares a presented token against a stored hash.
+func verifyClaimToken(token, hash string) bool {
+	if token == "" || hash == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(hashClaimToken(token)), []byte(hash)) == 1
+}
+
+// sandboxOptions configures a short-lived tenant.
+type sandboxOptions struct {
+	DisplayName string
+	// TTL overrides the sandbox lifetime; zero uses the vibe share TTL.
+	TTL time.Duration
+	// WithAdmin provisions a one-time owner admin login for the sandbox.
+	WithAdmin bool
+	// Spec, when set, seeds the owner-section samples so the tenant looks alive.
+	Spec *vibeSpec
+}
+
+// sandboxProvision is the result of creating a sandbox tenant.
+type sandboxProvision struct {
+	record     AppRecord
+	owner      *vibeOwnerLogin
+	claimToken string
+}
+
+// provisionSandbox creates a short-lived tenant with sandbox quotas and a
+// single-use claim token, respecting the global sandbox cap. It is shared by the
+// vibe lab (with an admin and seeded samples) and the blank try-it endpoint.
+func (app *application) provisionSandbox(ctx context.Context, opts sandboxOptions) (*sandboxProvision, error) {
 	maximum := app.config.VibeMaxSandboxes
 	if maximum <= 0 {
 		maximum = vibeSandboxDefaultMax
@@ -68,39 +106,72 @@ func (app *application) provisionVibeSandbox(ctx context.Context, spec vibeSpec)
 	if err != nil {
 		return nil, err
 	}
-	ownerSuffix, err := randomHex(4)
+	claimToken, err := randomHex(24)
 	if err != nil {
 		return nil, err
 	}
-	ownerPassword, err := randomHex(12)
-	if err != nil {
-		return nil, err
-	}
-	ownerEmail := "owner-" + ownerSuffix + "@sandbox.invalid"
-	expiresAt := time.Now().UTC().Add(app.vibeShareTTL())
 
-	record, _, _, err := app.provisionApp(ctx, provisionAppInput{
-		Slug:          "sandbox-" + slugSuffix,
-		DisplayName:   spec.Name,
-		AdminEmail:    ownerEmail,
-		AdminPassword: ownerPassword,
+	ttl := opts.TTL
+	if ttl <= 0 {
+		ttl = app.vibeShareTTL()
+	}
+	expiresAt := time.Now().UTC().Add(ttl)
+
+	input := provisionAppInput{
+		Slug:        "sandbox-" + slugSuffix,
+		DisplayName: opts.DisplayName,
 		// The starter talks to the API with bearer tokens and credentials "omit", so
 		// a wildcard origin never exposes a cookie session.
 		AllowedOrigins: []string{"*"},
 		Sandbox:        true,
 		ExpiresAt:      &expiresAt,
-	})
+		ClaimTokenHash: hashClaimToken(claimToken),
+	}
+
+	var owner *vibeOwnerLogin
+	if opts.WithAdmin {
+		ownerSuffix, err := randomHex(4)
+		if err != nil {
+			return nil, err
+		}
+		ownerPassword, err := randomHex(12)
+		if err != nil {
+			return nil, err
+		}
+		input.AdminEmail = "owner-" + ownerSuffix + "@sandbox.invalid"
+		input.AdminPassword = ownerPassword
+		owner = &vibeOwnerLogin{Email: input.AdminEmail, Password: ownerPassword}
+	}
+
+	record, _, _, err := app.provisionApp(ctx, input)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := app.seedVibeSandbox(ctx, record.ID, spec); err != nil {
-		app.logger.Error("vibe sandbox seed failed", "error", err, "app", record.ID.Hex())
+	if opts.Spec != nil {
+		if err := app.seedVibeSandbox(ctx, record.ID, *opts.Spec); err != nil {
+			app.logger.Error("vibe sandbox seed failed", "error", err, "app", record.ID.Hex())
+		}
 	}
 
+	return &sandboxProvision{record: record, owner: owner, claimToken: claimToken}, nil
+}
+
+// provisionVibeSandbox creates a short-lived tenant whose admin is the visitor
+// (the "owner") and seeds its owner-authored sections with the spec's samples.
+func (app *application) provisionVibeSandbox(ctx context.Context, spec vibeSpec) (*vibeSandbox, error) {
+	provision, err := app.provisionSandbox(ctx, sandboxOptions{
+		DisplayName: spec.Name,
+		WithAdmin:   true,
+		Spec:        &spec,
+	})
+	if err != nil {
+		return nil, err
+	}
 	return &vibeSandbox{
-		record: record,
-		owner:  vibeOwnerLogin{Email: ownerEmail, Password: ownerPassword},
+		record:     provision.record,
+		owner:      *provision.owner,
+		claimToken: provision.claimToken,
 	}, nil
 }
 
@@ -257,7 +328,10 @@ func (sweeper *sandboxSweeper) sweep(ctx context.Context) {
 // across all collections, then removes the app record itself.
 func (app *application) purgeSandboxApp(ctx context.Context, record AppRecord) error {
 	// Deactivate first and evict the cache so nothing can keep using it mid-purge.
-	if _, err := app.database.Collection(appsCollectionName).UpdateByID(ctx, record.ID, bson.M{"$set": bson.M{"active": false}}); err != nil {
+	// The sandbox:true guard is defence in depth: if the app was claimed in the
+	// race window between selection and purge, the update (and later delete) skips
+	// it, so a now-live app is never deactivated or destroyed.
+	if _, err := app.database.Collection(appsCollectionName).UpdateOne(ctx, bson.M{"_id": record.ID, "sandbox": true}, bson.M{"$set": bson.M{"active": false}}); err != nil {
 		return err
 	}
 	app.appCache.delete(record.PublishableKey)
@@ -283,7 +357,7 @@ func (app *application) purgeSandboxApp(ctx context.Context, record AppRecord) e
 	if _, err := app.database.Collection(outboxCollectionName).DeleteMany(ctx, bson.M{"appId": record.ID.Hex()}); err != nil {
 		return err
 	}
-	if _, err := app.database.Collection(appsCollectionName).DeleteOne(ctx, bson.M{"_id": record.ID}); err != nil {
+	if _, err := app.database.Collection(appsCollectionName).DeleteOne(ctx, bson.M{"_id": record.ID, "sandbox": true}); err != nil {
 		return err
 	}
 	app.logger.Info("sandbox purged", "app", record.ID.Hex(), "slug", record.Slug)

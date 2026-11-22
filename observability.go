@@ -31,13 +31,16 @@ type httpMetricValue struct {
 }
 
 type metricsRegistry struct {
-	mu            sync.Mutex
-	startedAt     time.Time
-	inFlight      int
-	requests      map[httpMetricKey]httpMetricValue
-	outboxEvent   map[string]uint64
-	rateLimited   uint64
-	sandboxPurged uint64
+	mu             sync.Mutex
+	startedAt      time.Time
+	inFlight       int
+	requests       map[httpMetricKey]httpMetricValue
+	outboxEvent    map[string]uint64
+	rateLimited    uint64
+	sandboxPurged  uint64
+	sandboxClaimed uint64
+	builderSignups uint64
+	trySandboxes   uint64
 }
 
 func newMetricsRegistry() *metricsRegistry {
@@ -80,6 +83,24 @@ func (registry *metricsRegistry) recordRateLimitRejection() {
 func (registry *metricsRegistry) recordSandboxPurge() {
 	registry.mu.Lock()
 	registry.sandboxPurged++
+	registry.mu.Unlock()
+}
+
+func (registry *metricsRegistry) recordSandboxClaim() {
+	registry.mu.Lock()
+	registry.sandboxClaimed++
+	registry.mu.Unlock()
+}
+
+func (registry *metricsRegistry) recordBuilderSignup() {
+	registry.mu.Lock()
+	registry.builderSignups++
+	registry.mu.Unlock()
+}
+
+func (registry *metricsRegistry) recordTrySandbox() {
+	registry.mu.Lock()
+	registry.trySandboxes++
 	registry.mu.Unlock()
 }
 
@@ -229,6 +250,15 @@ func (registry *metricsRegistry) prometheus() []byte {
 	builder.WriteString("# HELP m_stash_vibe_sandboxes_purged_total Expired vibe sandbox tenants purged with all their data.\n")
 	builder.WriteString("# TYPE m_stash_vibe_sandboxes_purged_total counter\n")
 	fmt.Fprintf(&builder, "m_stash_vibe_sandboxes_purged_total %d\n", registry.sandboxPurged)
+	builder.WriteString("# HELP m_stash_sandboxes_claimed_total Sandboxes promoted to live apps by a builder.\n")
+	builder.WriteString("# TYPE m_stash_sandboxes_claimed_total counter\n")
+	fmt.Fprintf(&builder, "m_stash_sandboxes_claimed_total %d\n", registry.sandboxClaimed)
+	builder.WriteString("# HELP m_stash_builder_signups_total Self-serve builder accounts created.\n")
+	builder.WriteString("# TYPE m_stash_builder_signups_total counter\n")
+	fmt.Fprintf(&builder, "m_stash_builder_signups_total %d\n", registry.builderSignups)
+	builder.WriteString("# HELP m_stash_try_sandboxes_total Blank try-it sandboxes provisioned.\n")
+	builder.WriteString("# TYPE m_stash_try_sandboxes_total counter\n")
+	fmt.Fprintf(&builder, "m_stash_try_sandboxes_total %d\n", registry.trySandboxes)
 	fmt.Fprintf(&builder, "# TYPE m_stash_process_start_time_seconds gauge\nm_stash_process_start_time_seconds %d\n", registry.startedAt.Unix())
 	return []byte(builder.String())
 }

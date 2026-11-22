@@ -54,6 +54,9 @@ type vibeShare struct {
 	PreviewURL string    `json:"previewUrl,omitempty"`
 	ZipURL     string    `json:"zipUrl"`
 	ExpiresAt  time.Time `json:"expiresAt"`
+	// Claimed is true once the sandbox behind this share has been promoted to an
+	// owned live app. The UI then hides the expiry and the "keep this app" CTA.
+	Claimed bool `json:"claimed,omitempty"`
 }
 
 func ensureVibeShareIndexes(ctx context.Context, database *mongo.Database) error {
@@ -139,6 +142,21 @@ func (app *application) saveVibeShare(ctx context.Context, idea string, spec vib
 	return &share, nil
 }
 
+// shareClaimed reports whether the app behind a share's publishable key has been
+// claimed into a builder account (it exists and is no longer a sandbox). A missing
+// app (never provisioned, or purged after expiry) counts as not claimed.
+func (app *application) shareClaimed(ctx context.Context, publishableKey string) bool {
+	if publishableKey == "" {
+		return false
+	}
+	var record AppRecord
+	if err := app.database.Collection(appsCollectionName).
+		FindOne(ctx, bson.M{"publishableKey": publishableKey}).Decode(&record); err != nil {
+		return false
+	}
+	return !record.Sandbox
+}
+
 func (app *application) loadVibeShare(ctx context.Context, id string) (*vibeShareRecord, error) {
 	var record vibeShareRecord
 	err := app.database.Collection(vibeShareCollection).FindOne(ctx, bson.M{
@@ -200,12 +218,18 @@ func (app *application) handleVibeShare(w http.ResponseWriter, r *http.Request) 
 		// request time, so a share can never carry a snippet pointed at a stored
 		// (attacker-chosen) host.
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, http.StatusOK, map[string]any{
+		share := app.describeVibeShare(*record, baseURL)
+		share.Claimed = app.shareClaimed(ctx, record.PublishableKey)
+		payload := map[string]any{
 			"data":     record.Spec,
 			"idea":     record.Idea,
-			"share":    app.describeVibeShare(*record, baseURL),
+			"share":    share,
 			"snippets": renderVibeSnippets(record.Spec, baseURL, record.PublishableKey),
-		})
+		}
+		if record.PublishableKey != "" {
+			payload["publishableKey"] = record.PublishableKey
+		}
+		writeJSON(w, http.StatusOK, payload)
 	case "preview":
 		if record.PublishableKey == "" {
 			writeError(w, http.StatusNotFound, "The live demo is not available for this vibe")
@@ -224,7 +248,7 @@ func (app *application) handleVibeShare(w http.ResponseWriter, r *http.Request) 
 		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write(page)
 	case "zip":
-		archive, err := buildVibeStarterZip(record, baseURL)
+		archive, err := buildVibeStarterZip(record, baseURL, app.shareClaimed(ctx, record.PublishableKey))
 		if err != nil {
 			app.logger.Error("vibe zip build failed", "request_id", requestIDFromContext(ctx), "error", err)
 			writeError(w, http.StatusInternalServerError, "Could not build the starter project")
@@ -324,7 +348,7 @@ func renderVibeStarterIndex(record *vibeShareRecord, config vibeStarterConfig, a
 	return []byte(replacer.Replace(string(template))), nil
 }
 
-func buildVibeStarterZip(record *vibeShareRecord, baseURL string) ([]byte, error) {
+func buildVibeStarterZip(record *vibeShareRecord, baseURL string, claimed bool) ([]byte, error) {
 	// The downloaded starter runs against the live sandbox when one exists; if the
 	// playground was full, it ships with the placeholder key for the user to swap.
 	publishableKey := record.PublishableKey
@@ -358,7 +382,7 @@ func buildVibeStarterZip(record *vibeShareRecord, baseURL string) ([]byte, error
 		name     string
 		contents []byte
 	}{
-		{"README.md", []byte(vibeStarterReadme(record, baseURL))},
+		{"README.md", []byte(vibeStarterReadme(record, baseURL, claimed))},
 		{"AGENTS.md", []byte(vibeStarterAgents(record, baseURL))},
 		{"index.html", index},
 		{"app.js", appJS},
@@ -394,7 +418,7 @@ func sectionAudienceSummary(section vibeSection) string {
 	}
 }
 
-func vibeStarterReadme(record *vibeShareRecord, baseURL string) string {
+func vibeStarterReadme(record *vibeShareRecord, baseURL string, claimed bool) string {
 	spec := record.Spec
 	name := spec.Name
 	if name == "" {
@@ -406,7 +430,11 @@ func vibeStarterReadme(record *vibeShareRecord, baseURL string) string {
 		fmt.Fprintf(&b, "> %s\n\n", spec.Tagline)
 	}
 	fmt.Fprintf(&b, "A ready-to-run starter the m-stash vibe lab generated from this idea:\n\n> %s\n\n", record.Idea)
-	b.WriteString("It's plain HTML, CSS, and JavaScript — no build step, no install. It already points at a **live m-stash sandbox**, so it works the moment you open it: browse the storefront, create a customer account, or sign in as the owner and edit the catalog.\n\n")
+	if claimed {
+		b.WriteString("It's plain HTML, CSS, and JavaScript — no build step, no install. It points at your **live m-stash app**, so it works the moment you open it: browse the storefront, create a customer account, or sign in as the owner and edit the catalog.\n\n")
+	} else {
+		b.WriteString("It's plain HTML, CSS, and JavaScript — no build step, no install. It already points at a **live m-stash sandbox**, so it works the moment you open it: browse the storefront, create a customer account, or sign in as the owner and edit the catalog.\n\n")
+	}
 
 	b.WriteString("## Run it\n\n")
 	b.WriteString("Just serve this folder and open `index.html`:\n\n")
@@ -423,16 +451,24 @@ func vibeStarterReadme(record *vibeShareRecord, baseURL string) string {
 	}
 	b.WriteString("\n")
 
-	b.WriteString("## Keep it past the sandbox\n\n")
-	if !record.ExpiresAt.IsZero() {
-		fmt.Fprintf(&b, "The live sandbox behind this starter is temporary — it is deleted on **%s**. To keep your app running after that, point it at your own app instead:\n\n", record.ExpiresAt.UTC().Format("Mon, 02 Jan 2006 15:04 MST"))
+	if claimed {
+		// A claimed app is permanent and already belongs to the builder, so the
+		// zip drops the "this sandbox expires" guidance entirely.
+		b.WriteString("## It's yours now\n\n")
+		b.WriteString("This app has been claimed into your m-stash console, so it no longer expires and the publishable key in this folder points at your live app. Manage it, rotate its secret, and set allowed origins at the console.\n\n")
+		b.WriteString("Nothing secret lives in this folder. The publishable key only names an app; m-stash enforces ownership and visibility on the server for every request, so it is safe to ship in frontend code.\n\n")
 	} else {
-		b.WriteString("The live sandbox behind this starter is temporary. To keep your app running, point it at your own app instead:\n\n")
+		b.WriteString("## Keep it past the sandbox\n\n")
+		if !record.ExpiresAt.IsZero() {
+			fmt.Fprintf(&b, "The live sandbox behind this starter is temporary — it is deleted on **%s**. To keep your app running after that, claim it into a free builder account — the publishable key stays the same, so this folder keeps working with no changes:\n\n", record.ExpiresAt.UTC().Format("Mon, 02 Jan 2006 15:04 MST"))
+		} else {
+			b.WriteString("The live sandbox behind this starter is temporary. To keep your app running, claim it into a free builder account — the publishable key stays the same, so this folder keeps working with no changes:\n\n")
+		}
+		fmt.Fprintf(&b, "1. Open %s/console and claim this app (or paste its publishable key). You keep every user and record already created.\n", baseURL)
+		b.WriteString("2. That's it — the same `pk_…` now points at your own live app, under your control.\n")
+		b.WriteString("3. (Optional) Set allowed origins and rotate the secret key from the console.\n\n")
+		b.WriteString("Nothing secret lives in this folder. The publishable key only names an app; m-stash enforces ownership and visibility on the server for every request, so it is safe to ship in frontend code.\n\n")
 	}
-	fmt.Fprintf(&b, "1. Open %s/console and create an app to get your own publishable key (`pk_…`).\n", baseURL)
-	b.WriteString("2. In `index.html`, find the `m-stash-config` block and replace the `app` value with your key.\n")
-	b.WriteString("3. Reload. Your data now lives in your own app, under your control.\n\n")
-	b.WriteString("Nothing secret lives in this folder. The publishable key only names an app; m-stash enforces ownership and visibility on the server for every request, so it is safe to ship in frontend code.\n\n")
 
 	b.WriteString("## Data model\n\n| Section | Type | Who writes | Visibility | View |\n| --- | --- | --- | --- | --- |\n")
 	for _, section := range spec.Sections {

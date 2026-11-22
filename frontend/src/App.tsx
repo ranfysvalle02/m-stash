@@ -1,10 +1,12 @@
 import {
   createContext,
   useEffect,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowUpRight,
   BookOpen,
@@ -47,13 +49,16 @@ import {
   useNavigate,
   useOutletContext,
   useParams,
+  useSearchParams,
 } from "react-router-dom";
 import {
   APIError,
   api,
+  type AppLimits,
   type BuilderApp,
   type BuilderAppInput,
   type BuilderAppUsage,
+  type BuilderMe,
   type Namespace,
   type NamespaceIdentityInput,
   type PublicNamespace,
@@ -61,6 +66,8 @@ import {
   type PublicResourcePreview,
   type ResourceInput,
   type ResourcePreview,
+  type ServiceCapabilities,
+  type TrySandboxResult,
   type UserClaims,
   type VibeOwner,
   type VibeSection,
@@ -68,6 +75,7 @@ import {
   type VibeSnippet,
   type VibeSpec,
 } from "./api";
+import { ApiLoopRunner } from "./runner/ApiLoopRunner";
 import "./App.css";
 
 type SessionState =
@@ -1970,6 +1978,29 @@ function saveVibeOwner(shareId: string, owner: VibeOwner) {
   }
 }
 
+// A sandbox's claim token is returned only once, when the sandbox is created, so
+// it is persisted per publishable key. The claim flow in the console reads it
+// back to promote the sandbox into a live app.
+function claimStorageKey(publishableKey: string) {
+  return `m-stash-claim:${publishableKey}`;
+}
+
+function saveClaimToken(publishableKey: string, token: string) {
+  try {
+    localStorage.setItem(claimStorageKey(publishableKey), token);
+  } catch {
+    // Best-effort; the token also lives in component state for this session.
+  }
+}
+
+function loadClaimToken(publishableKey: string): string | null {
+  try {
+    return localStorage.getItem(claimStorageKey(publishableKey));
+  } catch {
+    return null;
+  }
+}
+
 // A fixed set of accent palettes drives the result theme via a CSS variable.
 const vibeAccentNames = new Set([
   "teal",
@@ -2255,17 +2286,72 @@ function VibeUnderTheHood({
   );
 }
 
+function VibeKeepCard({
+  publishableKey,
+  claimToken,
+  claimed,
+}: {
+  publishableKey: string | null;
+  claimToken: string | null;
+  claimed: boolean;
+}) {
+  if (claimed) {
+    return (
+      <div className="vibe-keep-card claimed">
+        <span className="vibe-owner-badge">
+          <Check aria-hidden="true" size={14} /> Kept
+        </span>
+        <p className="vibe-owner-lede">
+          This app lives in a builder console now — it no longer expires.
+        </p>
+      </div>
+    );
+  }
+  if (!publishableKey || !claimToken) {
+    return (
+      <div className="vibe-keep-card">
+        <span className="vibe-owner-badge">
+          <Sparkles aria-hidden="true" size={14} /> Keep this app
+        </span>
+        <p className="vibe-owner-lede">
+          The one-time claim token for this sandbox isn’t on this device, so it
+          can only be kept from the device that first generated it.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="vibe-keep-card">
+      <span className="vibe-owner-badge">
+        <Sparkles aria-hidden="true" size={14} /> Keep this app
+      </span>
+      <p className="vibe-owner-lede">
+        Claim this exact app into a free builder account — same key, all data
+        kept. It stops expiring the moment you do.
+      </p>
+      <Link className="button primary full-width" to={`/console?claim=${encodeURIComponent(publishableKey)}`}>
+        Keep this app <ArrowUpRight aria-hidden="true" size={16} />
+      </Link>
+    </div>
+  );
+}
+
 function VibeSidePanel({
   spec,
   share,
   owner,
   snippets,
+  publishableKey,
+  claimToken,
 }: {
   spec: VibeSpec;
   share: VibeShare;
   owner: VibeOwner | null;
   snippets: VibeSnippet[];
+  publishableKey: string | null;
+  claimToken: string | null;
 }) {
+  const claimed = share.claimed ?? false;
   const [copied, setCopied] = useState(false);
   const [hoodOpen, setHoodOpen] = useState(false);
   const shareLink = share.url || window.location.href;
@@ -2282,6 +2368,7 @@ function VibeSidePanel({
 
   return (
     <aside className="vibe-live-side">
+      <VibeKeepCard claimToken={claimToken} claimed={claimed} publishableKey={publishableKey} />
       <VibeOwnerCard owner={owner} />
 
       <div className="vibe-side-actions">
@@ -2309,14 +2396,16 @@ function VibeSidePanel({
         </button>
       </div>
 
-      <div className="vibe-side-meta">
-        <span className="vibe-expiry">
-          <Clock aria-hidden="true" size={14} /> {expiresLabel(share.expiresAt)}
-        </span>
-        <p className="vibe-side-note">
-          This sandbox is temporary — it clears itself when the timer runs out.
-        </p>
-      </div>
+      {!claimed && (
+        <div className="vibe-side-meta">
+          <span className="vibe-expiry">
+            <Clock aria-hidden="true" size={14} /> {expiresLabel(share.expiresAt)}
+          </span>
+          <p className="vibe-side-note">
+            This sandbox is temporary — it clears itself when the timer runs out.
+          </p>
+        </div>
+      )}
 
       {hoodOpen && (
         <VibeUnderTheHood
@@ -2334,12 +2423,16 @@ function VibeStorefront({
   share,
   owner,
   snippets,
+  publishableKey,
+  claimToken,
   onNewIdea,
 }: {
   spec: VibeSpec;
   share: VibeShare;
   owner: VibeOwner | null;
   snippets: VibeSnippet[];
+  publishableKey: string | null;
+  claimToken: string | null;
   onNewIdea: () => void;
 }) {
   const previewUrl = share.previewUrl ?? "";
@@ -2369,7 +2462,9 @@ function VibeStorefront({
           />
         </div>
         <VibeSidePanel
+          claimToken={claimToken}
           owner={owner}
+          publishableKey={publishableKey}
           share={share}
           snippets={snippets}
           spec={spec}
@@ -2448,6 +2543,8 @@ function VibePage() {
   const [share, setShare] = useState<VibeShare | null>(null);
   const [snippets, setSnippets] = useState<VibeSnippet[]>([]);
   const [owner, setOwner] = useState<VibeOwner | null>(null);
+  const [publishableKey, setPublishableKey] = useState<string | null>(null);
+  const [claimToken, setClaimToken] = useState<string | null>(null);
   const [errorText, setErrorText] = useState("");
   const [loadedShareId, setLoadedShareId] = useState<string | null>(null);
 
@@ -2462,6 +2559,11 @@ function VibePage() {
         setShare(result.share ?? null);
         setSnippets(result.snippets ?? []);
         setIdea(result.idea ?? "");
+        setPublishableKey(result.publishableKey ?? null);
+        // The claim token is never returned on GET either; read back the once-shown
+        // copy the create response saved on this device. Absent elsewhere, which is
+        // fine — the sandbox can only be kept from the device that created it.
+        setClaimToken(result.publishableKey ? loadClaimToken(result.publishableKey) : null);
         // Owner creds are never returned on GET. Read back the once-shown copy
         // the create response saved; absent on a fresh device, which is fine —
         // the storefront stays live and the visitor can sign in manually.
@@ -2491,6 +2593,15 @@ function VibePage() {
       setShare(result.share ?? null);
       setSnippets(result.snippets ?? []);
       setOwner(result.owner ?? null);
+      setPublishableKey(result.publishableKey ?? null);
+      // The claim token arrives only once, on create — persist it per publishable
+      // key so this device can later keep the sandbox as a live app.
+      if (result.publishableKey && result.claim) {
+        saveClaimToken(result.publishableKey, result.claim.token);
+        setClaimToken(result.claim.token);
+      } else {
+        setClaimToken(null);
+      }
       setState("done");
       if (result.share) {
         // Owner creds arrive only once, on create — persist them so a reload or
@@ -2510,6 +2621,8 @@ function VibePage() {
     setShare(null);
     setSnippets([]);
     setOwner(null);
+    setPublishableKey(null);
+    setClaimToken(null);
     setIdea("");
     setErrorText("");
     setLoadedShareId(null);
@@ -2526,8 +2639,10 @@ function VibePage() {
         <main className="discovery-page vibe-page vibe-live-page">
           {share.previewUrl ? (
             <VibeStorefront
+              claimToken={claimToken}
               onNewIdea={newIdea}
               owner={owner}
+              publishableKey={publishableKey}
               share={share}
               snippets={snippets}
               spec={spec}
@@ -3223,6 +3338,113 @@ function GuidePage() {
     </PublicLayout>
   );
 }
+// TryItLiveSection lets a visitor run the full API loop against a real backend
+// without any setup. When TRY_SANDBOX is on it provisions a disposable sandbox
+// and offers a one-click "Keep this app". When it is off (or full), it falls back
+// to running the loop against a publishable key the visitor pastes from /console.
+function TryItLiveSection() {
+  const [capabilities, setCapabilities] = useState<ServiceCapabilities | null>(null);
+  const [sandbox, setSandbox] = useState<TrySandboxResult | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState("");
+  const [pastedKey, setPastedKey] = useState("");
+  const [manualKey, setManualKey] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    api
+      .getServiceManifest()
+      .then((caps) => {
+        if (active) setCapabilities(caps);
+      })
+      .catch(() => {
+        if (active) setCapabilities({ trySandbox: false, builderSignup: false });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function startSandbox() {
+    setStarting(true);
+    setError("");
+    try {
+      const result = await api.startTrySandbox();
+      // The claim token is shown once; persist it so the console can claim later.
+      saveClaimToken(result.publishableKey, result.claim.token);
+      setSandbox(result);
+    } catch (err) {
+      if (err instanceof APIError && err.status === 503) {
+        setError("The playground is full right now. Please try again in a few minutes.");
+      } else {
+        setError(err instanceof APIError ? err.message : "Could not start a sandbox right now.");
+      }
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  return (
+    <section className="guide-section try-live-section">
+      <div className="guide-section-heading">
+        <p className="eyebrow">
+          <Sparkles aria-hidden="true" size={15} /> Try it live
+        </p>
+        <h2>Register, save, publish in 60 seconds.</h2>
+        <p>
+          Run the whole auth-to-public API loop against a real backend, right
+          here — no install, no signup. Watch ownership get enforced on every
+          request, then keep the app you just tried.
+        </p>
+      </div>
+
+      {sandbox ? (
+        <ApiLoopRunner
+          base={sandbox.apiBase || window.location.origin}
+          pk={sandbox.publishableKey}
+          mode="sandbox"
+          appName="your sandbox"
+          expiresAt={sandbox.expiresAt}
+          onKeep={
+            <Link className="button primary" to={`/console?claim=${encodeURIComponent(sandbox.publishableKey)}`}>
+              Keep this app <ArrowUpRight aria-hidden="true" size={16} />
+            </Link>
+          }
+        />
+      ) : capabilities?.trySandbox ? (
+        <div className="try-live-start">
+          <button type="button" className="button primary" onClick={startSandbox} disabled={starting}>
+            {starting ? "Starting…" : "Start a live sandbox"}
+          </button>
+          <p>
+            Spins up a real, isolated app that expires on its own. The{" "}
+            <code>pk_</code> key it hands you is safe in the browser — it only
+            names the app; the server enforces ownership.
+          </p>
+          {error ? <p className="form-error">{error}</p> : null}
+        </div>
+      ) : capabilities ? (
+        <div className="try-live-fallback">
+          <p>
+            Live try-it isn’t enabled on this deployment. Paste a publishable key
+            from your <Link to="/console">console</Link> to run the same loop
+            against your own app:
+          </p>
+          <div className="try-live-key">
+            <input value={pastedKey} onChange={(event) => setPastedKey(event.target.value.trim())} placeholder="pk_…" aria-label="Publishable key" />
+            <button type="button" className="button secondary" onClick={() => setManualKey(pastedKey)} disabled={!pastedKey.startsWith("pk_")}>
+              Load runner
+            </button>
+          </div>
+          {manualKey ? <ApiLoopRunner base={window.location.origin} pk={manualKey} mode="app" appName="your app" /> : null}
+        </div>
+      ) : (
+        <p className="quiet">Checking availability…</p>
+      )}
+    </section>
+  );
+}
+
 function GuideContent() {
   return (
     <>
@@ -3251,6 +3473,7 @@ function GuideContent() {
           </Link>
         </div>
       </header>
+      <TryItLiveSection />
       <section className="guide-section workflow-section">
         <div className="guide-section-heading">
           <p className="eyebrow">
@@ -3500,6 +3723,11 @@ type BuilderState =
 
 function ConsolePage() {
   const [state, setState] = useState<BuilderState>({ kind: "loading" });
+  const [capabilities, setCapabilities] = useState<ServiceCapabilities | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // A ?claim=<pk> deep link survives sign-in or signup because it lives in the
+  // URL, which ConsolePage reads regardless of auth state.
+  const claimPk = searchParams.get("claim");
 
   useEffect(() => {
     let active = true;
@@ -3525,12 +3753,35 @@ function ConsolePage() {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    api
+      .getServiceManifest()
+      .then((caps) => {
+        if (active) setCapabilities(caps);
+      })
+      .catch(() => {
+        if (active) setCapabilities({ trySandbox: false, builderSignup: false });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function clearClaim() {
+    const next = new URLSearchParams(searchParams);
+    next.delete("claim");
+    setSearchParams(next, { replace: true });
+  }
+
   return (
     <PublicLayout>
       {state.kind === "loading" ? (
         <LoadingPage />
       ) : state.kind === "anonymous" ? (
         <ConsoleLogin
+          signupEnabled={capabilities?.builderSignup ?? false}
+          claimPk={claimPk}
           onAuthenticated={(builder) =>
             setState({ kind: "authenticated", builder })
           }
@@ -3538,6 +3789,8 @@ function ConsolePage() {
       ) : (
         <ConsoleDashboard
           builder={state.builder}
+          claimPk={claimPk}
+          onClaimConsumed={clearClaim}
           onSignedOut={() => setState({ kind: "anonymous" })}
         />
       )}
@@ -3547,9 +3800,14 @@ function ConsolePage() {
 
 function ConsoleLogin({
   onAuthenticated,
+  signupEnabled,
+  claimPk,
 }: {
   onAuthenticated: (builder: BuilderIdentity) => void;
+  signupEnabled: boolean;
+  claimPk: string | null;
 }) {
+  const [mode, setMode] = useState<"signin" | "signup">(signupEnabled && claimPk ? "signup" : "signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -3560,7 +3818,10 @@ function ConsoleLogin({
     setError("");
     setSubmitting(true);
     try {
-      const result = await api.builderLogin(email, password);
+      const result =
+        mode === "signup"
+          ? await api.builderSignup(email, password)
+          : await api.builderLogin(email, password);
       onAuthenticated(result.builder);
     } catch (requestError) {
       setError(messageFromError(requestError));
@@ -3573,12 +3834,25 @@ function ConsoleLogin({
     <main className="setup-page information-page">
       <header className="information-intro">
         <p className="eyebrow">Builder console</p>
-        <h1>Sign in to manage your apps.</h1>
+        <h1>{mode === "signup" ? "Create your builder account." : "Sign in to manage your apps."}</h1>
         <p>
-          Builder accounts are created by the deployment operator with the
-          platform token. This console never sees that token.
+          {claimPk
+            ? "Sign in or create an account to keep the app you just built — the key and all its data come with you."
+            : signupEnabled
+              ? "Create a free builder account or sign in. This console never sees the platform token."
+              : "Sign in to manage your apps. This console never sees the platform token."}
         </p>
       </header>
+      {signupEnabled && (
+        <div className="console-auth-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={mode === "signin"} className={mode === "signin" ? "active" : ""} onClick={() => setMode("signin")}>
+            Sign in
+          </button>
+          <button type="button" role="tab" aria-selected={mode === "signup"} className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>
+            Create account
+          </button>
+        </div>
+      )}
       <form className="profile-form console-form" onSubmit={submit}>
         <label>
           Email
@@ -3593,8 +3867,10 @@ function ConsoleLogin({
         <label>
           Password
           <input
-            autoComplete="current-password"
+            autoComplete={mode === "signup" ? "new-password" : "current-password"}
+            minLength={mode === "signup" ? 12 : undefined}
             onChange={(event) => setPassword(event.target.value)}
+            placeholder={mode === "signup" ? "at least 12 characters" : undefined}
             required
             type="password"
             value={password}
@@ -3612,23 +3888,133 @@ function ConsoleLogin({
             ) : (
               <ChevronRight aria-hidden="true" size={17} />
             )}{" "}
-            Sign in
+            {mode === "signup" ? "Create account" : "Sign in"}
           </button>
         </div>
       </form>
-      <p className="information-note">
-        No builder account yet? Ask your operator to run the bootstrap in the{" "}
-        <Link to="/guide">builder guide</Link>.
-      </p>
+      {mode === "signup" ? (
+        <p className="information-note">
+          Free accounts aren’t email-verified. Use an address you control; your
+          plan has per-app limits you can see once you’re in.
+        </p>
+      ) : !signupEnabled ? (
+        <p className="information-note">
+          No builder account yet? Ask your operator to run the bootstrap in the{" "}
+          <Link to="/guide">builder guide</Link>.
+        </p>
+      ) : null}
     </main>
+  );
+}
+
+// ClaimSandboxDialog promotes a sandbox into the signed-in builder's account. It
+// reads the one-time claim token from localStorage (persisted when the sandbox
+// was created) and falls back to a paste field when it's missing — e.g. claiming
+// from a different device than the one that built the sandbox.
+function ClaimSandboxDialog({
+  publishableKey,
+  onClaimed,
+  onClose,
+}: {
+  publishableKey: string;
+  onClaimed: (app: BuilderApp, secretKey: string) => void;
+  onClose: () => void;
+}) {
+  const storedToken = loadClaimToken(publishableKey);
+  const [token, setToken] = useState(storedToken ?? "");
+  const [displayName, setDisplayName] = useState("");
+  const [origin, setOrigin] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const trimmedOrigin = origin.trim();
+      const result = await api.claimApp({
+        publishableKey,
+        claimToken: token.trim(),
+        allowedOrigins: trimmedOrigin ? [trimmedOrigin] : undefined,
+        displayName: displayName.trim() || undefined,
+      });
+      // The claim token is single-use; drop the local copy once it's spent.
+      try {
+        localStorage.removeItem(claimStorageKey(publishableKey));
+      } catch {
+        // Ignore storage failures; the token is already consumed server-side.
+      }
+      onClaimed(result.data, result.secretKey);
+    } catch (requestError) {
+      setError(messageFromError(requestError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="console-claim" role="region" aria-label="Claim sandbox">
+      <p className="eyebrow">
+        <Sparkles aria-hidden="true" size={15} /> Keep your sandbox
+      </p>
+      <h2>Claim this app</h2>
+      <p>
+        Promote <code>{publishableKey}</code> into your account. The publishable
+        key and all of its data stay exactly as they are; a fresh secret key is
+        shown once.
+      </p>
+      <form className="profile-form" onSubmit={submit}>
+        {!storedToken && (
+          <label>
+            Claim token
+            <input
+              onChange={(event) => setToken(event.target.value.trim())}
+              placeholder="paste the one-time claim token"
+              required
+              spellCheck={false}
+              value={token}
+            />
+            <small>Shown once when the sandbox was created. Not stored on this device.</small>
+          </label>
+        )}
+        <div className="form-grid">
+          <label>
+            App name (optional)
+            <input maxLength={80} onChange={(event) => setDisplayName(event.target.value)} placeholder="My app" value={displayName} />
+          </label>
+          <label>
+            Site origin (optional)
+            <input onChange={(event) => setOrigin(event.target.value)} placeholder="https://app.example.com" value={origin} />
+          </label>
+        </div>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="form-actions">
+          <button className="button primary" disabled={busy || !token.trim()} type="submit">
+            {busy ? <LoaderCircle aria-hidden="true" className="spin" size={17} /> : <Check aria-hidden="true" size={17} />} Keep this app
+          </button>
+          <button className="text-button" onClick={onClose} type="button">
+            Not now
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }
 
 function ConsoleDashboard({
   builder,
+  claimPk,
+  onClaimConsumed,
   onSignedOut,
 }: {
   builder: BuilderIdentity;
+  claimPk: string | null;
+  onClaimConsumed: () => void;
   onSignedOut: () => void;
 }) {
   const [apps, setApps] = useState<BuilderApp[]>();
@@ -3644,6 +4030,8 @@ function ConsoleDashboard({
   const [adminPassword, setAdminPassword] = useState("");
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState("");
+  const [me, setMe] = useState<BuilderMe>();
+  const [highlightId, setHighlightId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -3658,10 +4046,33 @@ function ConsoleDashboard({
           setError(messageFromError(requestError));
         }
       });
+    void api
+      .builderMe()
+      .then((value) => {
+        if (active) setMe(value);
+      })
+      .catch(() => {
+        // Plan metadata is best-effort; management still works without it.
+      });
     return () => {
       active = false;
     };
   }, []);
+
+  const isFreePlan = me?.plan === "free";
+  const appCount = apps?.length ?? me?.appCount ?? 0;
+  const atAppCap = isFreePlan && typeof me?.maxApps === "number" && me.maxApps > 0 && appCount >= me.maxApps;
+
+  function handleClaimed(claimedApp: BuilderApp, secretKey: string) {
+    setReveal({ app: claimedApp, secretKey, rotated: false });
+    setApps((current) => {
+      const rest = (current ?? []).filter((item) => item.id !== claimedApp.id);
+      return [claimedApp, ...rest];
+    });
+    setHighlightId(claimedApp.id);
+    setMe((current) => (current ? { ...current, appCount: (current.appCount ?? 0) + 1 } : current));
+    onClaimConsumed();
+  }
 
   async function copy(label: string, value: string) {
     try {
@@ -3721,12 +4132,29 @@ function ConsoleDashboard({
         <div>
           <p className="eyebrow">Builder console</p>
           <h1>Your apps</h1>
-          <p className="console-id">Signed in as {builder.email}</p>
+          <p className="console-id">
+            Signed in as {builder.email}
+            {isFreePlan && (
+              <>
+                {" "}
+                <span className="console-plan-badge">Free tier</span>
+                {typeof me?.maxApps === "number" && me.maxApps > 0 ? (
+                  <span className="console-plan-count">
+                    {appCount} of {me.maxApps} apps
+                  </span>
+                ) : null}
+              </>
+            )}
+          </p>
         </div>
         <button className="text-button" onClick={() => void signOut()} type="button">
           <LogOut aria-hidden="true" size={16} /> Sign out
         </button>
       </div>
+
+      {claimPk && (
+        <ClaimSandboxDialog key={claimPk} publishableKey={claimPk} onClaimed={handleClaimed} onClose={onClaimConsumed} />
+      )}
 
       {reveal && (
         <section className="console-secret" role="alert">
@@ -3836,10 +4264,15 @@ function ConsoleDashboard({
               {error}
             </p>
           )}
+          {atAppCap && (
+            <p className="form-error" role="alert">
+              You’ve reached your free-plan limit of {me?.maxApps} apps. Delete one to add another.
+            </p>
+          )}
           <div className="form-actions">
             <button
               className="button primary"
-              disabled={creating || !slug || !displayName}
+              disabled={creating || !slug || !displayName || atAppCap}
               type="submit"
             >
               {creating ? (
@@ -3864,6 +4297,8 @@ function ConsoleDashboard({
             {apps.map((item) => (
               <ConsoleAppRow
                 app={item}
+                freePlan={isFreePlan}
+                highlight={item.id === highlightId}
                 key={item.id}
                 onError={setError}
                 onRotated={handleRotated}
@@ -3879,11 +4314,15 @@ function ConsoleDashboard({
 
 function ConsoleAppRow({
   app,
+  freePlan,
+  highlight,
   onRotated,
   onUpdated,
   onError,
 }: {
   app: BuilderApp;
+  freePlan: boolean;
+  highlight: boolean;
   onRotated: (app: BuilderApp, secretKey: string) => void;
   onUpdated: (app: BuilderApp) => void;
   onError: (message: string) => void;
@@ -3893,7 +4332,8 @@ function ConsoleAppRow({
   const [copied, setCopied] = useState(false);
   const [savedOrigins, setSavedOrigins] = useState(false);
   const [usage, setUsage] = useState<BuilderAppUsage>();
-  const [showConnect, setShowConnect] = useState(false);
+  const [connectTab, setConnectTab] = useState<"" | "run" | "code">("");
+  const cardRef = useRef<HTMLLIElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -3910,26 +4350,42 @@ function ConsoleAppRow({
     };
   }, [app.id]);
 
+  // A freshly-claimed app scrolls into view and flashes so the builder sees it.
+  useEffect(() => {
+    if (highlight && cardRef.current) {
+      cardRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [highlight]);
+
+  const allowsAnyOrigin = (app.allowedOrigins ?? []).length === 0 || (app.allowedOrigins ?? []).includes("*");
+
   const connectSnippet = [
     `const API_URL = "${window.location.origin}";`,
     `const APP_KEY = "${app.publishableKey}";`,
     "",
+    "// Keep the bearer token your sign-up/login returns and send it on every",
+    "// authed request. Use credentials: \"omit\" — m-stash never relies on cookies",
+    "// from a third-party frontend.",
     "export async function signUp(email, password, username) {",
-    "  const res = await fetch(`${API_URL}/v1/auth/signup`, {",
+    "  const res = await fetch(`${API_URL}/v1/auth/signup?app=${APP_KEY}`, {",
     '    method: "POST",',
-    '    credentials: "include",',
+    '    credentials: "omit",',
     '    headers: { "X-M-Stash-App": APP_KEY, "Content-Type": "application/json" },',
     "    body: JSON.stringify({ email, password, username }),",
     "  });",
     '  if (!res.ok) throw new Error("Sign-up failed");',
-    "  return res.json();",
+    "  return res.json(); // { token, user, namespace }",
     "}",
     "",
-    "export async function saveRecord(type, body) {",
-    "  const res = await fetch(`${API_URL}/v1/me/resources/${type}`, {",
+    "export async function saveRecord(token, type, body) {",
+    "  const res = await fetch(`${API_URL}/v1/me/resources/${type}?app=${APP_KEY}`, {",
     '    method: "POST",',
-    '    credentials: "include",',
-    '    headers: { "X-M-Stash-App": APP_KEY, "Content-Type": "application/json" },',
+    '    credentials: "omit",',
+    "    headers: {",
+    '      "X-M-Stash-App": APP_KEY,',
+    "      Authorization: `Bearer ${token}`,",
+    '      "Content-Type": "application/json",',
+    "    },",
     "    body: JSON.stringify(body),",
     "  });",
     '  if (!res.ok) throw new Error("Save failed");',
@@ -4011,11 +4467,15 @@ function ConsoleAppRow({
   }
 
   return (
-    <li className={app.active ? "console-app-card" : "console-app-card disabled"}>
+    <li
+      ref={cardRef}
+      className={`${app.active ? "console-app-card" : "console-app-card disabled"}${highlight ? " claimed-flash" : ""}`}
+    >
       <div className="console-app-row">
         <div className="console-app-main">
           <div className="console-app-title">
             <h3>{app.displayName}</h3>
+            {freePlan && <span className="console-plan-badge">Free tier</span>}
             {!app.active && <span className="status">Disabled</span>}
           </div>
           <p className="console-slug">/{app.slug}</p>
@@ -4024,6 +4484,12 @@ function ConsoleAppRow({
               ? `${usage.users} user${usage.users === 1 ? "" : "s"} · ${usage.records} record${usage.records === 1 ? "" : "s"}`
               : "…"}
           </p>
+          {usage?.limits ? <UsageBars usage={usage} limits={usage.limits} /> : null}
+          {allowsAnyOrigin && (
+            <p className="console-origin-warn">
+              <AlertTriangle aria-hidden="true" size={13} /> Any origin can use this key in a browser. Add your site below to lock it down.
+            </p>
+          )}
         </div>
         <div className="console-key">
           <code>{app.publishableKey}</code>
@@ -4071,10 +4537,10 @@ function ConsoleAppRow({
           </button>
           <button
             className="button secondary"
-            onClick={() => setShowConnect((value) => !value)}
+            onClick={() => setConnectTab((value) => (value === "" ? "run" : ""))}
             type="button"
           >
-            <Code2 aria-hidden="true" size={15} /> {showConnect ? "Hide client" : "Get client code"}
+            <Code2 aria-hidden="true" size={15} /> {connectTab === "" ? "Test and connect" : "Hide"}
           </button>
           <button
             className="button secondary danger-button"
@@ -4103,15 +4569,55 @@ function ConsoleAppRow({
             {app.active ? "Disable" : "Enable"}
           </button>
         </div>
-        {showConnect && (
-          <CopyableSnippet
-            title="Starter client"
-            description="Paste into your app. The publishable key is safe in frontend code."
-            code={connectSnippet}
-          />
+        {connectTab !== "" && (
+          <div className="console-connect">
+            <div className="console-connect-tabs" role="tablist">
+              <button type="button" role="tab" aria-selected={connectTab === "run"} className={connectTab === "run" ? "active" : ""} onClick={() => setConnectTab("run")}>
+                Run the loop
+              </button>
+              <button type="button" role="tab" aria-selected={connectTab === "code"} className={connectTab === "code" ? "active" : ""} onClick={() => setConnectTab("code")}>
+                Client code
+              </button>
+            </div>
+            {connectTab === "run" ? (
+              <ApiLoopRunner base={window.location.origin} pk={app.publishableKey} mode="app" appName={app.displayName} />
+            ) : (
+              <CopyableSnippet
+                title="Starter client"
+                description="Paste into your app. Bearer tokens, credentials omit — the publishable key is safe in frontend code."
+                code={connectSnippet}
+              />
+            )}
+          </div>
         )}
       </div>
     </li>
+  );
+}
+
+// UsageBars draws how close an app is to each of its plan limits. A zero limit
+// means unlimited, so that bar is omitted.
+function UsageBars({ usage, limits }: { usage: BuilderAppUsage; limits: AppLimits }) {
+  const bars: { label: string; used: number; cap: number }[] = []
+  if (limits.maxUsers > 0) bars.push({ label: "Users", used: usage.users, cap: limits.maxUsers })
+  if (limits.maxRecordsPerNamespace > 0) bars.push({ label: "Records", used: usage.records, cap: limits.maxRecordsPerNamespace })
+  if (bars.length === 0) return null
+  return (
+    <div className="console-usage-bars">
+      {bars.map((bar) => {
+        const pct = Math.min(100, Math.round((bar.used / bar.cap) * 100))
+        return (
+          <div className="console-usage-bar" key={bar.label}>
+            <span className="console-usage-bar-label">
+              {bar.label} <strong>{bar.used}</strong> / {bar.cap}
+            </span>
+            <span className="console-usage-track">
+              <span className={`console-usage-fill${pct >= 90 ? " near" : ""}`} style={{ width: `${pct}%` }} />
+            </span>
+          </div>
+        )
+      })}
+    </div>
   );
 }
 
