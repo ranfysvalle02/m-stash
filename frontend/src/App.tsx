@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type Ref,
 } from "react";
 import {
   AlertTriangle,
@@ -70,6 +71,7 @@ import {
   type ServiceCapabilities,
   type UserClaims,
   type VibeOwner,
+  type VibeRecipeMeta,
   type VibeSection,
   type VibeShare,
   type VibeSnippet,
@@ -82,7 +84,13 @@ import { ToastProvider } from "./console/Toast";
 import { AiPromptPanel } from "./console/AiPromptPanel";
 import { AppInspector } from "./console/AppInspector";
 import { ConfirmButton } from "./console/ConfirmButton";
+import { PersonaBar, Wiretap } from "./vibe/PersonaWiretap";
+import {
+  useVibePreviewBridge,
+  type VibeApiEvent,
+} from "./vibe/previewBridge";
 import "./App.css";
+import "./vibe/vibe.css";
 
 type SessionState =
   | { kind: "loading" }
@@ -182,6 +190,7 @@ function App() {
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/faq" element={<FAQPage />} />
           <Route path="/console" element={<ConsolePage />} />
+          <Route path="/admin" element={<OperatorConsolePage />} />
           <Route
             path="/login"
             element={
@@ -2069,15 +2078,15 @@ function VibeOwnerCard({ owner }: { owner: VibeOwner | null }) {
       {owner ? (
         <>
           <p className="vibe-owner-lede">
-            This is your shop sign-in — shown once. Copy it somewhere safe.
+            This is your owner sign-in — shown once. Copy it somewhere safe.
           </p>
           <VibeCopyField label="Email" value={owner.email} />
           <VibeCopyField label="Password" value={owner.password} />
         </>
       ) : (
         <p className="vibe-owner-lede">
-          Your one-time shop sign-in isn’t stored on this device. The storefront
-          is still live — sign in from the app, or start a fresh idea to get new
+          Your one-time owner sign-in isn’t stored on this device. The app is
+          still live — sign in from the app, or start a fresh idea to get new
           owner keys.
         </p>
       )}
@@ -2089,10 +2098,12 @@ function VibeBrowserFrame({
   title,
   src,
   displayUrl,
+  iframeRef,
 }: {
   title: string;
   src: string;
   displayUrl: string;
+  iframeRef?: Ref<HTMLIFrameElement>;
 }) {
   return (
     <div className="vibe-browser">
@@ -2119,6 +2130,7 @@ function VibeBrowserFrame({
       <iframe
         className="vibe-browser-view"
         loading="lazy"
+        ref={iframeRef}
         sandbox="allow-scripts allow-forms allow-popups"
         src={src}
         title={title}
@@ -2317,6 +2329,61 @@ function VibeKeepCard({
   );
 }
 
+// VibeSkillActions gives a one-click way to hand this exact app to a coding
+// agent: copy the tailored SKILL.md to the clipboard or download it as a file.
+// It carries only the publishable key and section shapes — never a secret.
+function VibeSkillActions({ skillUrl }: { skillUrl?: string }) {
+  const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
+  if (!skillUrl) {
+    return null;
+  }
+  const downloadHref = skillUrl + (skillUrl.includes("?") ? "&" : "?") + "download=1";
+  async function copySkill() {
+    setFailed(false);
+    try {
+      const res = await fetch(skillUrl!, { credentials: "omit" });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      await navigator.clipboard.writeText(await res.text());
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setFailed(true);
+      window.setTimeout(() => setFailed(false), 2400);
+    }
+  }
+  return (
+    <div className="vibe-skill-actions">
+      <button
+        className="button secondary full-width"
+        onClick={() => void copySkill()}
+        type="button"
+      >
+        {copied ? (
+          <Check aria-hidden="true" size={16} />
+        ) : (
+          <Copy aria-hidden="true" size={16} />
+        )}{" "}
+        {copied
+          ? "SKILL.md copied"
+          : failed
+            ? "Copy failed — retry"
+            : "Copy agent skill"}
+      </button>
+      <a className="button secondary full-width" download href={downloadHref}>
+        <Download aria-hidden="true" size={16} /> Download SKILL.md
+      </a>
+      <p className="vibe-skill-hint">
+        Drop <code>SKILL.md</code> into <code>.cursor/skills/</code> (or{" "}
+        <code>.claude/skills/</code>) so Cursor, Claude Code, or Codex build on
+        this app instantly.
+      </p>
+    </div>
+  );
+}
+
 function VibeSidePanel({
   spec,
   share,
@@ -2324,6 +2391,7 @@ function VibeSidePanel({
   snippets,
   publishableKey,
   claimToken,
+  events,
 }: {
   spec: VibeSpec;
   share: VibeShare;
@@ -2331,6 +2399,7 @@ function VibeSidePanel({
   snippets: VibeSnippet[];
   publishableKey: string | null;
   claimToken: string | null;
+  events: VibeApiEvent[];
 }) {
   const claimed = share.claimed ?? false;
   const [copied, setCopied] = useState(false);
@@ -2350,6 +2419,7 @@ function VibeSidePanel({
   return (
     <aside className="vibe-live-side">
       <VibeKeepCard claimToken={claimToken} claimed={claimed} publishableKey={publishableKey} />
+      <Wiretap events={events} />
       <VibeOwnerCard owner={owner} />
 
       <div className="vibe-side-actions">
@@ -2375,6 +2445,7 @@ function VibeSidePanel({
         >
           <Code2 aria-hidden="true" size={16} /> Under the hood
         </button>
+        <VibeSkillActions skillUrl={share.skillUrl} />
       </div>
 
       {!claimed && (
@@ -2418,6 +2489,8 @@ function VibeStorefront({
 }) {
   const previewUrl = share.previewUrl ?? "";
   const previewSrc = vibePreviewSrc(previewUrl, owner);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const { persona, setPersona, events, handles } = useVibePreviewBridge(iframeRef, true);
 
   return (
     <section className={`vibe-live ${vibeAccentClass(spec.accent)}`}>
@@ -2436,14 +2509,17 @@ function VibeStorefront({
 
       <div className="vibe-live-grid">
         <div className="vibe-live-main">
+          <PersonaBar handles={handles} onSelect={setPersona} persona={persona} />
           <VibeBrowserFrame
             displayUrl={previewUrl}
+            iframeRef={iframeRef}
             src={previewSrc}
             title={spec.name}
           />
         </div>
         <VibeSidePanel
           claimToken={claimToken}
+          events={events}
           owner={owner}
           publishableKey={publishableKey}
           share={share}
@@ -2501,6 +2577,8 @@ function VibeCapacity({
         </span>
       </div>
 
+      <VibeSkillActions skillUrl={share.skillUrl} />
+
       <div className="vibe-block vibe-spec-summary">
         <h2>App spec</h2>
         <VibeSpecSections spec={spec} />
@@ -2513,7 +2591,13 @@ function VibeCapacity({
 function VibePage() {
   const { shareId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const available = useVibeAvailable();
+  const [recipes, setRecipes] = useState<VibeRecipeMeta[]>([]);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [launchingId, setLaunchingId] = useState<string | null>(null);
+  const autoLaunchedRef = useRef(false);
+  const ideaRef = useRef<HTMLTextAreaElement>(null);
   const [idea, setIdea] = useState("");
   // A deep link (/vibe/:shareId) starts in the loading state so the effect only
   // kicks off the fetch — no synchronous setState inside the effect.
@@ -2562,39 +2646,91 @@ function VibePage() {
     };
   }, [shareId, loadedShareId]);
 
+  // Load the launchpad recipes and whether AI spec generation is configured.
+  useEffect(() => {
+    if (available !== true) return;
+    let active = true;
+    void Promise.all([
+      api.listVibeRecipes().catch(() => [] as VibeRecipeMeta[]),
+      api.getServiceManifest().catch(() => null),
+    ]).then(([list, manifest]) => {
+      if (!active) return;
+      setRecipes(list);
+      setAiEnabled(Boolean(manifest?.vibeAIEnabled));
+    });
+    return () => {
+      active = false;
+    };
+  }, [available]);
+
+  // runVibe drives both the recipe launch and the free-text idea paths through
+  // one shared result-handling flow. Wrapped in useCallback so the auto-launch
+  // effect can depend on a stable reference.
+  const runVibe = useCallback(
+    async (input: string | { recipe: string }, launchId?: string) => {
+      if (launchId) setLaunchingId(launchId);
+      setState("loading");
+      setErrorText("");
+      try {
+        const result = await api.vibe(input);
+        setSpec(result.spec);
+        setShare(result.share ?? null);
+        setSnippets(result.snippets ?? []);
+        setOwner(result.owner ?? null);
+        setPublishableKey(result.publishableKey ?? null);
+        // The claim token arrives only once, on create — persist it per
+        // publishable key so this device can later keep the sandbox as a live app.
+        if (result.publishableKey && result.claim) {
+          saveClaimToken(result.publishableKey, result.claim.token);
+          setClaimToken(result.claim.token);
+        } else {
+          setClaimToken(null);
+        }
+        setState("done");
+        if (result.share) {
+          // Owner creds arrive only once, on create — persist them so a reload or
+          // deep link on this device keeps one-click owner sign-in available.
+          if (result.owner) saveVibeOwner(result.share.id, result.owner);
+          setLoadedShareId(result.share.id);
+          navigate(`/vibe/${result.share.id}`);
+        }
+      } catch (requestError) {
+        setErrorText(messageFromError(requestError));
+        setState("error");
+      } finally {
+        setLaunchingId(null);
+      }
+    },
+    [navigate],
+  );
+
+  // A ?recipe=<id> deep link (from the /discover strip) auto-launches once. A
+  // ref guard — not state — avoids a synchronous setState inside the effect; a
+  // successful launch navigates to /vibe/:id, which drops the query on its own.
+  useEffect(() => {
+    const recipeId = searchParams.get("recipe");
+    if (!recipeId || shareId || autoLaunchedRef.current || available !== true) return;
+    autoLaunchedRef.current = true;
+    void runVibe({ recipe: recipeId }, recipeId);
+  }, [searchParams, shareId, available, runVibe]);
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = idea.trim();
     if (!trimmed) return;
-    setState("loading");
-    setErrorText("");
-    try {
-      const result = await api.vibe(trimmed);
-      setSpec(result.spec);
-      setShare(result.share ?? null);
-      setSnippets(result.snippets ?? []);
-      setOwner(result.owner ?? null);
-      setPublishableKey(result.publishableKey ?? null);
-      // The claim token arrives only once, on create — persist it per publishable
-      // key so this device can later keep the sandbox as a live app.
-      if (result.publishableKey && result.claim) {
-        saveClaimToken(result.publishableKey, result.claim.token);
-        setClaimToken(result.claim.token);
-      } else {
-        setClaimToken(null);
-      }
-      setState("done");
-      if (result.share) {
-        // Owner creds arrive only once, on create — persist them so a reload or
-        // deep link on this device keeps one-click owner sign-in available.
-        if (result.owner) saveVibeOwner(result.share.id, result.owner);
-        setLoadedShareId(result.share.id);
-        navigate(`/vibe/${result.share.id}`);
-      }
-    } catch (requestError) {
-      setErrorText(messageFromError(requestError));
-      setState("error");
-    }
+    await runVibe(trimmed);
+  }
+
+  // Remix drops a recipe's concrete idea into the composer, scrolls it into
+  // view, and focuses it so a builder can tweak before generating. We use
+  // remixIdea (keyword-rich) over the poetic tagline so a no-model-key remix
+  // still maps back to the same blueprint.
+  function remixRecipe(recipe: VibeRecipeMeta) {
+    setIdea(recipe.remixIdea || recipe.tagline || recipe.name);
+    requestAnimationFrame(() => {
+      ideaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      ideaRef.current?.focus();
+    });
   }
 
   function newIdea() {
@@ -2664,8 +2800,10 @@ function VibePage() {
             <Wand2 aria-hidden="true" size={28} />
             <h2>The vibe lab isn’t switched on here.</h2>
             <p>
-              This deployment hasn’t set a model key yet. In the meantime, the{" "}
-              <Link to="/public">live demo</Link> and the{" "}
+              This deployment has neither the Try-it sandbox nor a model key
+              enabled, so the lab is closed. Turn on <code>TRY_SANDBOX</code> (or
+              set <code>GEMINI_API_KEY</code>) to unlock instant recipes. In the
+              meantime, the <Link to="/public">live demo</Link> and the{" "}
               <a
                 href="https://github.com/ranfysvalle02/m-stash/blob/main/quick.md"
                 rel="noreferrer"
@@ -2678,6 +2816,25 @@ function VibePage() {
           </section>
         ) : (
           <>
+            <Suspense fallback={null}>
+              <RecipeLaunchpad
+                disabled={state === "loading"}
+                launchingId={launchingId}
+                onLaunch={(id) => void runVibe({ recipe: id }, id)}
+                onRemix={remixRecipe}
+                recipes={recipes}
+              />
+            </Suspense>
+
+            <div className="vibe-compose-head">
+              <h2>Or describe your own</h2>
+              <p>
+                {aiEnabled
+                  ? "Describe any app and the AI designs a matching spec — then it goes live on a sandbox."
+                  : "No model key here, so ideas map to m-stash's built-in blueprints — still a real, live app."}
+              </p>
+            </div>
+
             <form className="vibe-form" onSubmit={submit}>
               <label>
                 Your app idea
@@ -2685,6 +2842,7 @@ function VibePage() {
                   maxLength={250}
                   onChange={(event) => setIdea(event.target.value)}
                   placeholder="a site for my guitar and vinyl shop with in-store gigs and customer wishlists"
+                  ref={ideaRef}
                   rows={3}
                   value={idea}
                 />
@@ -2728,6 +2886,68 @@ function VibePage() {
         )}
       </main>
     </PublicLayout>
+  );
+}
+
+// GenericSkillCallout offers the deployment-wide m-stash agent skill (served at
+// /skill.md) as a one-click copy or download, so builders can teach Cursor,
+// Claude Code, or Codex the whole API at once. It reveals no secret — the
+// generic skill has no app key.
+function GenericSkillCallout() {
+  const skillUrl = `${window.location.origin}/skill.md`;
+  const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
+  async function copySkill() {
+    setFailed(false);
+    try {
+      const res = await fetch(skillUrl, { credentials: "omit" });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      await navigator.clipboard.writeText(await res.text());
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setFailed(true);
+      window.setTimeout(() => setFailed(false), 2400);
+    }
+  }
+  return (
+    <section aria-label="Agent skill" className="public-lookup agent-skill-callout">
+      <div>
+        <p className="eyebrow">
+          <Wand2 aria-hidden="true" size={15} /> Plug-and-play agent skill
+        </p>
+        <h2>Hand m-stash to your coding agent.</h2>
+        <p>
+          <code>SKILL.md</code> teaches Cursor, Claude Code, or Codex the whole
+          m-stash API — auth, ownership, endpoints, and the record shape — so it
+          builds against this deployment with zero setup. Drop it into{" "}
+          <code>.cursor/skills/</code> or <code>.claude/skills/</code>.
+        </p>
+      </div>
+      <div className="agent-skill-actions">
+        <button
+          className="button primary"
+          onClick={() => void copySkill()}
+          type="button"
+        >
+          {copied ? (
+            <Check aria-hidden="true" size={16} />
+          ) : (
+            <Copy aria-hidden="true" size={16} />
+          )}{" "}
+          {copied
+            ? "SKILL.md copied"
+            : failed
+              ? "Copy failed — retry"
+              : "Copy SKILL.md"}
+        </button>
+        <a className="button secondary" download href={`${skillUrl}?download=1`}>
+          <Download aria-hidden="true" size={16} /> Download SKILL.md
+        </a>
+      </div>
+    </section>
   );
 }
 
@@ -2775,6 +2995,11 @@ function NamespaceLookupPage() {
             required.
           </p>
         </div>
+        {vibeOn && (
+          <Suspense fallback={null}>
+            <RecipeStrip />
+          </Suspense>
+        )}
         <TryItLiveSection />
         <LiveApiDemo />
         <section className="scope-model" aria-labelledby="scope-model-title">
@@ -2818,6 +3043,7 @@ function NamespaceLookupPage() {
             Read the build guide <ArrowUpRight aria-hidden="true" size={16} />
           </a>
         </section>
+        <GenericSkillCallout />
       </main>
     </PublicLayout>
   );
@@ -3490,6 +3716,7 @@ function GuideContent() {
           </article>
         </div>
       </section>
+      <GenericSkillCallout />
     </>
   );
 }
@@ -3592,7 +3819,7 @@ function PrivacyPage() {
   );
 }
 
-type BuilderIdentity = { id: string; email: string };
+type BuilderIdentity = { id: string; email: string; operator?: boolean };
 
 type BuilderState =
   | { kind: "loading" }
@@ -3639,7 +3866,7 @@ function ConsolePage() {
         if (active) setCapabilities(caps);
       })
       .catch(() => {
-        if (active) setCapabilities({ trySandbox: false, builderSignup: false });
+        if (active) setCapabilities({ trySandbox: false, builderSignup: false, operatorConfigured: false, vibeEnabled: false, vibeAIEnabled: false });
       });
     return () => {
       active = false;
@@ -3676,14 +3903,113 @@ function ConsolePage() {
   );
 }
 
+type OperatorState =
+  | { kind: "loading" }
+  | { kind: "anonymous" }
+  | { kind: "authorized"; id: string; email: string }
+  | { kind: "forbidden"; email: string };
+
+// OperatorConsolePage guards the /admin surface: it only renders the lazy-loaded
+// OperatorConsole for a signed-in super-operator. A builder who isn't an operator
+// gets a clear "operator only" message, and everyone else sees the sign-in form.
+function OperatorConsolePage() {
+  const [state, setState] = useState<OperatorState>({ kind: "loading" });
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    let active = true;
+    async function check() {
+      const me = await api.builderMe();
+      if (!active) return;
+      if (me.operator) setState({ kind: "authorized", id: me.id, email: me.email });
+      else setState({ kind: "forbidden", email: me.email });
+    }
+    async function restore() {
+      try {
+        await check();
+        return;
+      } catch {
+        // Fall through to a refresh attempt before giving up.
+      }
+      try {
+        await api.builderRefresh();
+        await check();
+      } catch {
+        if (active) setState({ kind: "anonymous" });
+      }
+    }
+    void restore();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function handleAuthenticated(builder: BuilderIdentity) {
+    if (builder.operator) setState({ kind: "authorized", id: builder.id, email: builder.email });
+    else setState({ kind: "forbidden", email: builder.email });
+  }
+
+  if (state.kind === "loading") {
+    return (
+      <PublicLayout>
+        <LoadingPage />
+      </PublicLayout>
+    );
+  }
+
+  if (state.kind === "anonymous") {
+    return (
+      <PublicLayout>
+        <ConsoleLogin admin signupEnabled={false} claimPk={null} onAuthenticated={handleAuthenticated} />
+      </PublicLayout>
+    );
+  }
+
+  if (state.kind === "forbidden") {
+    return (
+      <PublicLayout>
+        <main className="setup-page information-page">
+          <header className="information-intro">
+            <p className="eyebrow">Deployment admin</p>
+            <h1>Operator access only.</h1>
+            <p>
+              {state.email} isn’t an operator on this deployment. The operator is bootstrapped
+              from <code>ADMIN_EMAIL</code> / <code>ADMIN_PASSWORD</code>, or promoted by an
+              existing operator.
+            </p>
+          </header>
+          <p className="information-note">
+            <Link to="/console">Go to the builder console</Link>
+          </p>
+        </main>
+      </PublicLayout>
+    );
+  }
+
+  return (
+    <PublicLayout>
+      <Suspense fallback={<LoadingPage />}>
+        <OperatorConsole
+          email={state.email}
+          selfId={state.id}
+          onSignedOut={() => setState({ kind: "anonymous" })}
+          onBackToConsole={() => navigate("/console")}
+        />
+      </Suspense>
+    </PublicLayout>
+  );
+}
+
 function ConsoleLogin({
   onAuthenticated,
   signupEnabled,
   claimPk,
+  admin = false,
 }: {
   onAuthenticated: (builder: BuilderIdentity) => void;
   signupEnabled: boolean;
   claimPk: string | null;
+  admin?: boolean;
 }) {
   const [mode, setMode] = useState<"signin" | "signup">(signupEnabled && claimPk ? "signup" : "signin");
   const [email, setEmail] = useState("");
@@ -3711,14 +4037,22 @@ function ConsoleLogin({
   return (
     <main className="setup-page information-page">
       <header className="information-intro">
-        <p className="eyebrow">Builder console</p>
-        <h1>{mode === "signup" ? "Create your builder account." : "Sign in to manage your apps."}</h1>
+        <p className="eyebrow">{admin ? "Deployment admin" : "Builder console"}</p>
+        <h1>
+          {admin
+            ? "Sign in to the deployment admin."
+            : mode === "signup"
+              ? "Create your builder account."
+              : "Sign in to manage your apps."}
+        </h1>
         <p>
-          {claimPk
-            ? "Sign in or create an account to keep the app you just built — the key and all its data come with you."
-            : signupEnabled
-              ? "Create a free builder account or sign in. This console never sees the platform token."
-              : "Sign in to manage your apps. This console never sees the platform token."}
+          {admin
+            ? "Sign in with your operator credentials — the ADMIN_EMAIL / ADMIN_PASSWORD set on this deployment — to tune live settings, manage the fleet, and inspect traffic."
+            : claimPk
+              ? "Sign in or create an account to keep the app you just built — the key and all its data come with you."
+              : signupEnabled
+                ? "Create a free builder account or sign in. This console never sees the platform token."
+                : "Sign in to manage your apps. This console never sees the platform token."}
         </p>
       </header>
       {signupEnabled && (
@@ -4056,6 +4390,17 @@ function ConsoleDashboard({
           <LogOut aria-hidden="true" size={16} /> Sign out
         </button>
       </div>
+
+      {me?.operator && (
+        <Link className="console-operator-banner" to="/admin">
+          <ShieldCheck aria-hidden="true" size={17} />
+          <span>
+            <strong>You’re an operator.</strong> Open the deployment admin to tune live
+            settings, manage the fleet, and inspect traffic.
+          </span>
+          <ChevronRight aria-hidden="true" size={17} />
+        </Link>
+      )}
 
       {claimPk && (
         <ClaimSandboxDialog key={claimPk} publishableKey={claimPk} onClaimed={handleClaimed} onClose={onClaimConsumed} />
@@ -4667,6 +5012,16 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
+// The operator control plane is lazy-loaded so its weight (and the API-loop
+// runner it embeds) never lands in the public bundle for ordinary visitors.
+const OperatorConsole = lazy(() => import("./admin/OperatorConsole"));
+
+// The recipe launchpad and /discover strip are lazy-loaded so their lucide
+// glyphs and card markup stay out of the critical path until a visitor reaches
+// the lab or the discover page.
+const RecipeLaunchpad = lazy(() => import("./vibe/RecipeLaunchpad"));
+const RecipeStrip = lazy(() => import("./vibe/RecipeStrip"));
 
 const LazyMarkdown = lazy(() => import("./Markdown"));
 function Markdown({ content }: { content: string }) {

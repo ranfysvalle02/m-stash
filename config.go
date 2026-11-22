@@ -47,6 +47,13 @@ type Config struct {
 	// TrySandbox enables the blank "try it live" sandbox endpoint for the guide.
 	TrySandbox    bool
 	TrySandboxTTL time.Duration
+	// AdminEmail and AdminPassword bootstrap the deployment super-operator on boot.
+	// Both empty disables the bootstrap; set together they upsert an operator
+	// (control-plane) principal and a hosted-demo admin that share these
+	// credentials, so an operator can sign straight into /admin and /login with
+	// no platform token or curl. These are the .env baseline and never mutate.
+	AdminEmail    string
+	AdminPassword string
 }
 
 func loadConfig() (Config, error) {
@@ -126,6 +133,10 @@ func loadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	adminEmail, err := validateBootstrapAdminCredentials(getEnv("ADMIN_EMAIL", ""), getEnv("ADMIN_PASSWORD", ""))
+	if err != nil {
+		return Config{}, err
+	}
 	loadedConfig := Config{
 		Port:                getEnv("PORT", "4000"),
 		MongoURI:            getEnv("MONGO_URI", "mongodb://localhost:27017"),
@@ -162,6 +173,8 @@ func loadConfig() (Config, error) {
 		FreeTierMaxRecordBytes:  freeTierMaxRecordBytes,
 		TrySandbox:              trySandbox,
 		TrySandboxTTL:           trySandboxTTL,
+		AdminEmail:              adminEmail,
+		AdminPassword:           getEnv("ADMIN_PASSWORD", ""),
 	}
 
 	if len(loadedConfig.JWTSecret) < 32 {

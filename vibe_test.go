@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateVibeIdea(t *testing.T) {
@@ -363,5 +364,330 @@ func TestVibeCooldown(t *testing.T) {
 	app.startVibeCooldown()
 	if !app.vibeCoolingDown() {
 		t.Fatal("cooldown not started")
+	}
+}
+
+// sectionByType / fieldByKey are small lookups so the recipe assertions below
+// read as "the owner section's booking field keeps its options".
+func sectionByType(spec vibeSpec, resourceType string) *vibeSection {
+	for i := range spec.Sections {
+		if spec.Sections[i].Type == resourceType {
+			return &spec.Sections[i]
+		}
+	}
+	return nil
+}
+
+func fieldByKey(section *vibeSection, key string) *vibeField {
+	if section == nil {
+		return nil
+	}
+	for i := range section.Fields {
+		if section.Fields[i].Key == key {
+			return &section.Fields[i]
+		}
+	}
+	return nil
+}
+
+// TestVibeRecipesPairPublicAndPrivateData is the core showcase guarantee: every
+// recipe validates, is stamped as a recipe, and pairs at least one public owner
+// section (with seeded samples so it looks alive) with at least one private
+// member section (which must never carry samples).
+func TestVibeRecipesPairPublicAndPrivateData(t *testing.T) {
+	if len(vibeRecipes) != 6 {
+		t.Fatalf("expected the curated roster of 6 recipes, got %d", len(vibeRecipes))
+	}
+	for _, recipe := range vibeRecipes {
+		spec := finalizeRecipe(recipe.build())
+		if spec.Source != vibeSourceRecipe {
+			t.Fatalf("%s: source = %q, want recipe", recipe.ID, spec.Source)
+		}
+		if spec.Name != recipe.Name {
+			t.Fatalf("%s: launched spec name = %q, want %q", recipe.ID, spec.Name, recipe.Name)
+		}
+		if !vibeAccents[spec.Accent] {
+			t.Fatalf("%s: bad accent %q", recipe.ID, spec.Accent)
+		}
+		if !vibeIcons[spec.Icon] {
+			t.Fatalf("%s: bad icon %q", recipe.ID, spec.Icon)
+		}
+		ownerWithSamples := 0
+		memberSections := 0
+		for i := range spec.Sections {
+			section := &spec.Sections[i]
+			if err := validateResourceType(section.Type); err != nil {
+				t.Fatalf("%s: invalid type %q: %v", recipe.ID, section.Type, err)
+			}
+			if !vibeAudiences[section.Audience] {
+				t.Fatalf("%s: bad audience %q", recipe.ID, section.Audience)
+			}
+			if !vibeViews[section.View] {
+				t.Fatalf("%s: bad view %q", recipe.ID, section.View)
+			}
+			if len(section.Fields) == 0 {
+				t.Fatalf("%s: section %q has no fields", recipe.ID, section.Type)
+			}
+			if section.Audience == vibeAudienceOwner {
+				if len(section.Samples) > 0 {
+					ownerWithSamples++
+				}
+			} else {
+				memberSections++
+				if len(section.Samples) != 0 {
+					t.Fatalf("%s: member section %q must not carry samples", recipe.ID, section.Type)
+				}
+			}
+		}
+		if ownerWithSamples == 0 {
+			t.Fatalf("%s: needs a public owner section with seeded samples", recipe.ID)
+		}
+		if memberSections == 0 {
+			t.Fatalf("%s: needs a private member section", recipe.ID)
+		}
+	}
+}
+
+// TestVibeRecipesPreserveOptionsAndActionLabels pins the per-recipe details the
+// renderer depends on: dropdown options survive validation, and each CTA recipe
+// keeps its owner action label (while leaderboard/status recipes have none).
+func TestVibeRecipesPreserveOptionsAndActionLabels(t *testing.T) {
+	leaderboard := finalizeRecipe(leaderboardRecipe())
+	if opts := fieldByKey(sectionByType(leaderboard, "save"), "world").Options; len(opts) != 3 {
+		t.Fatalf("leaderboard save.world options = %v, want 3 choices", opts)
+	}
+
+	tickets := finalizeRecipe(userTicketsRecipe())
+	if opts := fieldByKey(sectionByType(tickets, "ticket"), "priority").Options; len(opts) != 4 {
+		t.Fatalf("ticket priority options = %v, want 4 choices", opts)
+	}
+
+	appointments := finalizeRecipe(appointmentsRecipe())
+	if got := sectionByType(appointments, "practitioner").ActionLabel; got != "Book visit" {
+		t.Fatalf("appointments actionLabel = %q, want %q", got, "Book visit")
+	}
+	if opts := fieldByKey(sectionByType(appointments, "appointment"), "visit_type").Options; len(opts) != 4 {
+		t.Fatalf("appointment visit_type options = %v, want 4 choices", opts)
+	}
+
+	for _, want := range []struct {
+		build func() vibeSpec
+		typ   string
+		label string
+	}{
+		{barberRecipe, "service", "Book this cut"},
+		{realEstateRecipe, "listing", "Request tour"},
+		{storefrontRecipe, "catalog", "Save to wishlist"},
+	} {
+		spec := finalizeRecipe(want.build())
+		if got := sectionByType(spec, want.typ).ActionLabel; got != want.label {
+			t.Fatalf("%s actionLabel = %q, want %q", want.typ, got, want.label)
+		}
+	}
+
+	// Recipes without a CTA must not invent one.
+	if got := sectionByType(leaderboard, "leaderboard").ActionLabel; got != "" {
+		t.Fatalf("leaderboard owner actionLabel = %q, want empty", got)
+	}
+}
+
+// TestVibeRecipeMetasMatchRoster confirms the launchpad summaries mirror the
+// roster order and derive action labels from the validated spec.
+func TestVibeRecipeMetasMatchRoster(t *testing.T) {
+	metas := vibeRecipeMetas()
+	if len(metas) != len(vibeRecipes) {
+		t.Fatalf("metas = %d, recipes = %d", len(metas), len(vibeRecipes))
+	}
+	wantLabels := map[string]string{
+		"leaderboard":          "",
+		"user-tickets":         "",
+		"appointments":         "Book visit",
+		"barber-bookings":      "Book this cut",
+		"real-estate-bookings": "Request tour",
+		"storefront":           "Save to wishlist",
+	}
+	for i, meta := range metas {
+		if meta.ID != vibeRecipes[i].ID {
+			t.Fatalf("meta[%d].ID = %q, want %q", i, meta.ID, vibeRecipes[i].ID)
+		}
+		if meta.Name == "" || meta.PublicBlurb == "" || meta.PrivateBlurb == "" {
+			t.Fatalf("meta %q missing presentation copy: %#v", meta.ID, meta)
+		}
+		if want := wantLabels[meta.ID]; meta.ActionLabel != want {
+			t.Fatalf("meta %q actionLabel = %q, want %q", meta.ID, meta.ActionLabel, want)
+		}
+	}
+
+	// The metas are presentation-only: marshaling must never leak seeded samples.
+	encoded, err := json.Marshal(metas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "samples") || strings.Contains(string(encoded), "ace_of_space") {
+		t.Fatalf("recipe metas leaked seeded data:\n%s", encoded)
+	}
+}
+
+func TestHandleVibeRecipesRoundTrip(t *testing.T) {
+	app := newApplication(Config{TrySandbox: true}, nil, nil)
+	rec := httptest.NewRecorder()
+	app.handleVibeRecipes(rec, httptest.NewRequest(http.MethodGet, "/v1/vibe/recipes", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if store := rec.Header().Get("Cache-Control"); store != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", store)
+	}
+	var payload struct {
+		Data []vibeRecipeMeta `json:"data"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(payload.Data) != len(vibeRecipes) {
+		t.Fatalf("recipes returned = %d, want %d", len(payload.Data), len(vibeRecipes))
+	}
+	for i, meta := range payload.Data {
+		if _, found := lookupVibeRecipe(meta.ID); !found {
+			t.Fatalf("recipe[%d] id %q is not registered", i, meta.ID)
+		}
+	}
+}
+
+func TestHandleVibeRecipesGating(t *testing.T) {
+	// Closed deployment: no model key and the sandbox off -> the list 404s so a
+	// closed instance reveals nothing about the lab.
+	closed := newApplication(Config{}, nil, nil)
+	rec := httptest.NewRecorder()
+	closed.handleVibeRecipes(rec, httptest.NewRequest(http.MethodGet, "/v1/vibe/recipes", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("closed recipes status = %d, want 404", rec.Code)
+	}
+
+	// Non-GET is rejected even when open.
+	open := newApplication(Config{TrySandbox: true}, nil, nil)
+	rec = httptest.NewRecorder()
+	open.handleVibeRecipes(rec, httptest.NewRequest(http.MethodPost, "/v1/vibe/recipes", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST recipes status = %d, want 405", rec.Code)
+	}
+}
+
+func TestHandleVibeClosedReturns404(t *testing.T) {
+	app := newApplication(Config{}, nil, nil)
+	rec := httptest.NewRecorder()
+	// The gate runs before the body is decoded or any limiter/DB is touched.
+	app.handleVibe(rec, httptest.NewRequest(http.MethodPost, "/v1/vibe", strings.NewReader(`{"recipe":"leaderboard"}`)))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("closed /v1/vibe status = %d, want 404", rec.Code)
+	}
+}
+
+func TestVibeAvailableUnlocksViaSandboxAndModel(t *testing.T) {
+	// A fully closed deployment keeps the lab shut.
+	closed := &application{config: Config{}}
+	if closed.vibeAvailable(context.Background()) {
+		t.Fatal("closed deployment should not expose the vibe lab")
+	}
+
+	// A Gemini key alone unlocks the lab (and marks AI available).
+	withModel := &application{config: Config{GeminiAPIKey: "k"}}
+	if !withModel.vibeAvailable(context.Background()) || !withModel.vibeEnabled() {
+		t.Fatal("a Gemini key should unlock the lab with AI enabled")
+	}
+
+	// TRY_SANDBOX from .env unlocks the lab without a model.
+	withSandbox := &application{config: Config{TrySandbox: true}}
+	if !withSandbox.vibeAvailable(context.Background()) || withSandbox.vibeEnabled() {
+		t.Fatal("TRY_SANDBOX should unlock the lab with AI still disabled")
+	}
+
+	// A runtime settings override flips the sandbox on with no restart and no
+	// Gemini key; the cached-fresh store avoids any database access.
+	trySandbox := true
+	app := &application{
+		config: Config{},
+		settings: &runtimeSettingsStore{
+			config:     Config{},
+			overrides:  settingsOverrides{TrySandbox: &trySandbox},
+			loaded:     true,
+			lastLoaded: time.Now(),
+		},
+	}
+	if !app.vibeAvailable(context.Background()) {
+		t.Fatal("runtime TrySandbox override should unlock the lab")
+	}
+	if app.vibeEnabled() {
+		t.Fatal("runtime override must not imply AI is configured")
+	}
+}
+
+func TestServiceManifestVibeCapability(t *testing.T) {
+	cases := []struct {
+		name          string
+		config        Config
+		wantEnabled   bool
+		wantAIEnabled bool
+	}{
+		{"closed", Config{}, false, false},
+		{"sandbox only", Config{TrySandbox: true}, true, false},
+		{"model configured", Config{GeminiAPIKey: "k"}, true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app := newApplication(tc.config, nil, nil)
+			rec := httptest.NewRecorder()
+			app.handleServiceManifest(rec, httptest.NewRequest(http.MethodGet, "/.well-known/m-stash.json", nil))
+			var manifest struct {
+				Capabilities struct {
+					Vibe struct {
+						Enabled         bool   `json:"enabled"`
+						AIEnabled       bool   `json:"aiEnabled"`
+						Endpoint        string `json:"endpoint"`
+						RecipesEndpoint string `json:"recipesEndpoint"`
+					} `json:"vibe"`
+				} `json:"capabilities"`
+			}
+			if err := json.NewDecoder(rec.Body).Decode(&manifest); err != nil {
+				t.Fatalf("decode manifest: %v", err)
+			}
+			vibe := manifest.Capabilities.Vibe
+			if vibe.Enabled != tc.wantEnabled || vibe.AIEnabled != tc.wantAIEnabled {
+				t.Fatalf("vibe enabled/aiEnabled = %v/%v, want %v/%v", vibe.Enabled, vibe.AIEnabled, tc.wantEnabled, tc.wantAIEnabled)
+			}
+			if vibe.Endpoint != "/v1/vibe" || vibe.RecipesEndpoint != "/v1/vibe/recipes" {
+				t.Fatalf("vibe endpoints = %q / %q", vibe.Endpoint, vibe.RecipesEndpoint)
+			}
+		})
+	}
+}
+
+// TestParseVibeSpecResponseParsesOptionsAndActionLabel proves AI-authored specs
+// can also drive dropdowns and public CTAs: options survive on fields and an
+// actionLabel survives on an owner section.
+func TestParseVibeSpecResponseParsesOptionsAndActionLabel(t *testing.T) {
+	text := `{"name":"Clinic","tagline":"care","accent":"teal","icon":"calendar","sections":[` +
+		`{"type":"practitioner","title":"Team","audience":"owner","view":"grid","actionLabel":"Book visit","fields":[` +
+		`{"key":"name","label":"Name","kind":"text"},` +
+		`{"key":"specialty","label":"Specialty","kind":"text","options":["Family","Dermatology","Pediatrics"]}],` +
+		`"samples":[{"values":[{"key":"name","value":"Dr. A"},{"key":"specialty","value":"Family"}]}]},` +
+		`{"type":"appointment","title":"Mine","audience":"member","view":"list","fields":[` +
+		`{"key":"visit_type","label":"Visit","kind":"text","options":["New patient","Follow-up"]}]}]}`
+	spec, err := parseVibeSpecResponse(geminiResponseWithText(text))
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if spec.Source != vibeSourceModel {
+		t.Fatalf("source = %q, want model", spec.Source)
+	}
+	owner := sectionByType(spec, "practitioner")
+	if owner == nil || owner.ActionLabel != "Book visit" {
+		t.Fatalf("owner actionLabel not parsed: %#v", owner)
+	}
+	if opts := fieldByKey(owner, "specialty").Options; len(opts) != 3 {
+		t.Fatalf("owner field options = %v, want 3", opts)
+	}
+	if opts := fieldByKey(sectionByType(spec, "appointment"), "visit_type").Options; len(opts) != 2 {
+		t.Fatalf("member field options = %v, want 2", opts)
 	}
 }

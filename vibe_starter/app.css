@@ -285,6 +285,20 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 textarea.input { resize: vertical; line-height: 1.5; min-height: 2.6rem; }
 .checkbox { width: 1.2rem; height: 1.2rem; accent-color: var(--accent); }
 
+/* Select dropdowns (field.options). The caret is a data: SVG background, allowed
+   by the preview CSP's img-src 'self' data: — never an inline style. */
+select.input {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 2rem;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b6572' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 1rem;
+}
+
 /* ---------- Buttons ---------- */
 .btn {
   display: inline-flex;
@@ -310,6 +324,25 @@ textarea.input { resize: vertical; line-height: 1.5; min-height: 2.6rem; }
 .btn.primary:hover:not(:disabled) { background: var(--accent-strong); box-shadow: 0 10px 22px -8px var(--accent); }
 .btn.accent { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-strong); }
 .btn.ghost { background: transparent; }
+
+/* Cross-tab action CTA on public items (e.g. "Book this cut"). */
+.act-row { margin-top: 0.6rem; }
+.act-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 9px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font: inherit;
+  font-weight: 650;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, transform 0.15s;
+}
+.act-btn:hover { background: var(--accent); color: var(--accent-ink); transform: translateY(-1px); }
 
 .icon-btn {
   display: inline-grid;

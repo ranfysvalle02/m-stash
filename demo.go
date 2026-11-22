@@ -126,7 +126,7 @@ func (app *application) syncDemoData(ctx context.Context, appID bson.ObjectID) e
 	}
 
 	resources := app.database.Collection(resourceCollectionName)
-	if !app.config.DemoSeed {
+	if !app.demoSeedEnabled(ctx) {
 		_, err := resources.DeleteMany(ctx, bson.M{"namespaceId": shared.ID, "demo": true})
 		return err
 	}

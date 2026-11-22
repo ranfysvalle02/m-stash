@@ -90,7 +90,8 @@ type sandboxProvision struct {
 // single-use claim token, respecting the global sandbox cap. It is shared by the
 // vibe lab (with an admin and seeded samples) and the blank try-it endpoint.
 func (app *application) provisionSandbox(ctx context.Context, opts sandboxOptions) (*sandboxProvision, error) {
-	maximum := app.config.VibeMaxSandboxes
+	settings := app.effectiveSettings(ctx)
+	maximum := settings.VibeMaxSandboxes
 	if maximum <= 0 {
 		maximum = vibeSandboxDefaultMax
 	}
@@ -113,7 +114,7 @@ func (app *application) provisionSandbox(ctx context.Context, opts sandboxOption
 
 	ttl := opts.TTL
 	if ttl <= 0 {
-		ttl = app.vibeShareTTL()
+		ttl = settings.VibeShareTTL
 	}
 	expiresAt := time.Now().UTC().Add(ttl)
 

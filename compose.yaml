@@ -44,6 +44,16 @@ services:
       PLATFORM_TOKEN: ${PLATFORM_TOKEN:?Set PLATFORM_TOKEN in .env}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      # Deployment super-operator bootstrap (both blank disables it).
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Optional runtime feature baselines; all can be toggled live from /admin.
+      TRY_SANDBOX: ${TRY_SANDBOX:-off}
+      BUILDER_SIGNUP: ${BUILDER_SIGNUP:-off}
+      DEMO_DATA: ${DEMO_DATA:-on}
+      WEBHOOK_DELIVERY: ${WEBHOOK_DELIVERY:-false}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
     depends_on:
       mongo-init:
         condition: service_completed_successfully

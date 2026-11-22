@@ -75,6 +75,7 @@ export interface VibeSection {
   audience: 'owner' | 'member' | 'member-public'
   view: 'grid' | 'list' | 'checklist' | 'timeline' | 'ranked'
   fields: VibeField[]
+  actionLabel?: string
 }
 
 export interface VibeSpec {
@@ -83,7 +84,23 @@ export interface VibeSpec {
   accent: 'teal' | 'indigo' | 'rose' | 'amber' | 'emerald' | 'slate'
   icon: string
   sections: VibeSection[]
-  source?: 'model' | 'blueprint'
+  source?: 'model' | 'blueprint' | 'recipe'
+}
+
+// VibeRecipeMeta is one curated launchpad card from GET /v1/vibe/recipes. It
+// carries only presentation metadata — never seeded samples.
+export interface VibeRecipeMeta {
+  id: string
+  name: string
+  tagline: string
+  accent: 'teal' | 'indigo' | 'rose' | 'amber' | 'emerald' | 'slate'
+  icon: string
+  publicBlurb: string
+  privateBlurb: string
+  // remixIdea is a concrete, keyword-rich prompt that maps back to this recipe's
+  // blueprint even without a model key; it is what "Remix" drops into the composer.
+  remixIdea: string
+  actionLabel?: string
 }
 
 export interface VibeSnippet {
@@ -97,6 +114,9 @@ export interface VibeShare {
   url: string
   previewUrl?: string
   zipUrl: string
+  // skillUrl serves a plug-and-play SKILL.md pre-filled with this app's key and
+  // sections; append ?download=1 to download it as a file.
+  skillUrl?: string
   expiresAt: string
   claimed?: boolean
 }
@@ -181,6 +201,195 @@ export interface BuilderMe {
   appCount?: number
   maxApps?: number
   limits?: AppLimits
+  // operator is true for the super-operator who manages the whole deployment.
+  operator?: boolean
+}
+
+// MetricsRoute is one normalized route/status row in the live telemetry.
+export interface MetricsRoute {
+  method: string
+  route: string
+  status: number
+  count: number
+  avgLatencyMs: number
+}
+
+// MetricsSnapshot mirrors the Go metricsSnapshot for the operator pulse view.
+export interface MetricsSnapshot {
+  startedAt: string
+  uptimeSeconds: number
+  inFlight: number
+  totalRequests: number
+  statusClasses: Record<string, number>
+  avgLatencyMs: number
+  routes: MetricsRoute[]
+  rateLimited: number
+  sandboxesPurged: number
+  sandboxesClaimed: number
+  builderSignups: number
+  trySandboxes: number
+  outboxEvents: Record<string, number>
+}
+
+export interface AdminOverview {
+  counts: Record<string, number>
+  recordsByVisibility: Record<string, number>
+  outboxByState: Record<string, number>
+  metrics: MetricsSnapshot
+  webhookRunning: boolean
+}
+
+// ResolvedSettings is the deployment's effective, live configuration. Durations
+// are serialized as Go duration strings (e.g. "24h0m0s").
+export interface ResolvedSettings {
+  trySandbox: boolean
+  builderSignupOpen: boolean
+  builderSignupDailyLimit: number
+  demoSeed: boolean
+  webhookDelivery: boolean
+  freeTierMaxApps: number
+  freeTierMaxUsers: number
+  freeTierMaxRecords: number
+  freeTierMaxRecordBytes: number
+  vibeMaxSandboxes: number
+  vibeDailyLimit: number
+  trySandboxTTL: string
+  vibeShareTTL: string
+}
+
+// SettingsOverrides holds only the fields an operator has overridden from the
+// .env baseline; absent keys fall back to it.
+export interface SettingsOverrides {
+  trySandbox?: boolean
+  trySandboxTTL?: string
+  builderSignupOpen?: boolean
+  builderSignupDailyLimit?: number
+  demoSeed?: boolean
+  webhookDelivery?: boolean
+  freeTierMaxApps?: number
+  freeTierMaxUsers?: number
+  freeTierMaxRecords?: number
+  freeTierMaxRecordBytes?: number
+  vibeMaxSandboxes?: number
+  vibeDailyLimit?: number
+  vibeShareTTL?: string
+}
+
+// EnvironmentPosture reports read-only, boot-fixed deployment configuration. No
+// secret value is ever included — only whether each is configured.
+export interface EnvironmentPosture {
+  geminiConfigured: boolean
+  geminiModel: string
+  vibeCoolingDown: boolean
+  metricsTokenConfigured: boolean
+  platformTokenConfigured: boolean
+  operatorConfigured: boolean
+  trustProxy: boolean
+  sessionCookieSecure: boolean
+  allowedOrigins: string[]
+  publicBaseURL: string
+  database: string
+  webhookRunning: boolean
+}
+
+export interface AdminSettings {
+  effective: ResolvedSettings
+  envDefaults: ResolvedSettings
+  overrides: SettingsOverrides
+  environment: EnvironmentPosture
+}
+
+export interface AdminSettingsPatch {
+  trySandbox?: boolean
+  trySandboxTTL?: string
+  builderSignupOpen?: boolean
+  builderSignupDailyLimit?: number
+  demoSeed?: boolean
+  webhookDelivery?: boolean
+  freeTierMaxApps?: number
+  freeTierMaxUsers?: number
+  freeTierMaxRecords?: number
+  freeTierMaxRecordBytes?: number
+  vibeMaxSandboxes?: number
+  vibeDailyLimit?: number
+  vibeShareTTL?: string
+  resetKeys?: string[]
+  resetAll?: boolean
+}
+
+export interface AdminAppView {
+  id: string
+  slug: string
+  displayName: string
+  publishableKey: string
+  active: boolean
+  sandbox: boolean
+  allowedOrigins?: string[]
+  ownerId?: string
+  ownerEmail?: string
+  ownerRole?: string
+  users: number
+  records: number
+  limits: AppLimits
+  expiresAt?: string
+  claimedAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AdminAppPatch {
+  active?: boolean
+  displayName?: string
+  allowedOrigins?: string[]
+  limits?: AppLimits
+  unlimited?: boolean
+  extendHours?: number
+  ownerId?: string
+  promote?: boolean
+}
+
+export interface AdminBuilderView {
+  id: string
+  email: string
+  role: string
+  plan?: string
+  appCount: number
+  isBootstrapAdmin: boolean
+  createdAt: string
+}
+
+export interface AdminBuilderCreate {
+  email: string
+  password: string
+  role: 'builder' | 'operator'
+  plan: 'free' | 'unlimited'
+}
+
+export interface AdminBuilderPatch {
+  plan?: 'free' | 'unlimited'
+  role?: 'builder' | 'operator'
+  password?: string
+  applyLimitsToApps?: boolean
+}
+
+export interface OutboxDelivery {
+  state: string
+  attempts: number
+  availableAt: string
+}
+
+export interface OutboxEvent {
+  id: string
+  appId?: string
+  type: string
+  schemaVersion: string
+  occurredAt: string
+  requestId: string
+  namespaceId?: string
+  actor: { id: string; role: string }
+  resource: { collection: string; id?: string }
+  data?: Record<string, unknown>
+  delivery: OutboxDelivery
 }
 
 export interface TrySandboxResult {
@@ -196,10 +405,16 @@ export interface ClaimResult {
 }
 
 // ServiceCapabilities is the subset of /.well-known/m-stash.json the UI reads to
-// hide features (try-it, self-serve signup) that this deployment hasn't enabled.
+// hide features (try-it, self-serve signup) that this deployment hasn't enabled,
+// and to learn whether a bootstrap operator is configured.
 export interface ServiceCapabilities {
   trySandbox: boolean
   builderSignup: boolean
+  operatorConfigured: boolean
+  // vibeEnabled is true when the lab is usable at all (recipes/blueprints need
+  // only a live sandbox); vibeAIEnabled is true only when a model is configured.
+  vibeEnabled: boolean
+  vibeAIEnabled: boolean
 }
 
 export interface Page<T> {
@@ -419,17 +634,30 @@ export const api = {
     return response.data
   },
 
-  async vibe(idea: string): Promise<VibeResult> {
-    const response = await request<APIEnvelope<VibeSpec> & { share?: VibeShare; snippets?: VibeSnippet[]; owner?: VibeOwner; claim?: { token: string }; publishableKey?: string }>('/v1/vibe', { method: 'POST', body: { idea }, retrySession: false })
+  // vibe launches an app either from a curated recipe id or a free-text idea. A
+  // recipe is instant (no model); an idea uses the model when configured and
+  // falls back to a deterministic blueprint otherwise.
+  async vibe(input: string | { recipe?: string; idea?: string }): Promise<VibeResult> {
+    const body = typeof input === 'string' ? { idea: input } : input
+    const response = await request<APIEnvelope<VibeSpec> & { share?: VibeShare; snippets?: VibeSnippet[]; owner?: VibeOwner; claim?: { token: string }; publishableKey?: string }>('/v1/vibe', { method: 'POST', body, retrySession: false })
     return { spec: response.data, share: response.share, snippets: response.snippets, owner: response.owner, claim: response.claim, publishableKey: response.publishableKey }
+  },
+
+  // listVibeRecipes returns the curated launchpad cards.
+  async listVibeRecipes(): Promise<VibeRecipeMeta[]> {
+    const response = await request<APIEnvelope<VibeRecipeMeta[]>>('/v1/vibe/recipes', { retrySession: false })
+    return response.data ?? []
   },
 
   // getServiceManifest reports which optional features this deployment enabled.
   async getServiceManifest(): Promise<ServiceCapabilities> {
-    const response = await request<{ capabilities?: { trySandbox?: { enabled?: boolean }; builderSignup?: { enabled?: boolean } } }>('/.well-known/m-stash.json', { retrySession: false })
+    const response = await request<{ capabilities?: { trySandbox?: { enabled?: boolean }; builderSignup?: { enabled?: boolean }; operatorBootstrap?: { configured?: boolean }; vibe?: { enabled?: boolean; aiEnabled?: boolean } } }>('/.well-known/m-stash.json', { retrySession: false })
     return {
       trySandbox: response.capabilities?.trySandbox?.enabled ?? false,
       builderSignup: response.capabilities?.builderSignup?.enabled ?? false,
+      operatorConfigured: response.capabilities?.operatorBootstrap?.configured ?? false,
+      vibeEnabled: response.capabilities?.vibe?.enabled ?? false,
+      vibeAIEnabled: response.capabilities?.vibe?.aiEnabled ?? false,
     }
   },
 
@@ -445,13 +673,13 @@ export const api = {
   },
 
   async builderLogin(email: string, password: string) {
-    return request<{ token: string; builder: { id: string; email: string } }>('/v1/builder/auth/login', {
+    return request<{ token: string; builder: { id: string; email: string; operator?: boolean } }>('/v1/builder/auth/login', {
       method: 'POST', body: { email, password }, retrySession: false,
     })
   },
 
   async builderSignup(email: string, password: string) {
-    return request<{ token: string; builder: { id: string; email: string; plan?: string } }>('/v1/builder/auth/signup', {
+    return request<{ token: string; builder: { id: string; email: string; plan?: string; operator?: boolean } }>('/v1/builder/auth/signup', {
       method: 'POST', body: { email, password }, retrySession: false,
     })
   },
@@ -533,5 +761,117 @@ export const api = {
 
   async deleteBuilderAppResource(id: string, resourceId: string) {
     return request<void>(`/v1/builder/apps/${encodeURIComponent(id)}/resources/${encodeURIComponent(resourceId)}`, { method: 'DELETE', retrySession: false })
+  },
+
+  // --- Operator control plane (super-operator only) -----------------------
+
+  async adminOverview() {
+    const response = await request<APIEnvelope<AdminOverview>>('/v1/admin/overview', { retrySession: false })
+    return response.data
+  },
+
+  async adminGetSettings() {
+    const response = await request<APIEnvelope<AdminSettings>>('/v1/admin/settings', { retrySession: false })
+    return response.data
+  },
+
+  async adminPatchSettings(patch: AdminSettingsPatch) {
+    const response = await request<APIEnvelope<AdminSettings>>('/v1/admin/settings', { method: 'PATCH', body: patch, retrySession: false })
+    return response.data
+  },
+
+  async adminClearVibeCooldown() {
+    return request<APIEnvelope<{ vibeCoolingDown: boolean }>>('/v1/admin/vibe/clear-cooldown', { method: 'POST', retrySession: false })
+  },
+
+  async adminListApps(filters: { filter?: string; q?: string } = {}) {
+    const search = new URLSearchParams()
+    if (filters.filter) search.set('filter', filters.filter)
+    if (filters.q) search.set('q', filters.q)
+    const query = search.toString()
+    const response = await request<APIEnvelope<AdminAppView[]>>(`/v1/admin/apps${query ? `?${query}` : ''}`, { retrySession: false })
+    return response.data
+  },
+
+  async adminUpdateApp(id: string, patch: AdminAppPatch) {
+    const response = await request<APIEnvelope<AdminAppView>>(`/v1/admin/apps/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch, retrySession: false })
+    return response.data
+  },
+
+  async adminDeleteApp(id: string) {
+    return request<void>(`/v1/admin/apps/${encodeURIComponent(id)}`, { method: 'DELETE', retrySession: false })
+  },
+
+  async adminSweepSandboxes() {
+    const response = await request<APIEnvelope<{ purged: number }>>('/v1/admin/sandboxes/sweep', { method: 'POST', retrySession: false })
+    return response.data
+  },
+
+  async adminListAppUsers(id: string) {
+    const response = await request<APIEnvelope<InspectedUser[]>>(`/v1/admin/apps/${encodeURIComponent(id)}/users`, { retrySession: false })
+    return response.data
+  },
+
+  async adminDeleteAppUser(id: string, userId: string) {
+    return request<void>(`/v1/admin/apps/${encodeURIComponent(id)}/users/${encodeURIComponent(userId)}`, { method: 'DELETE', retrySession: false })
+  },
+
+  async adminListAppResources(id: string, filters: { type?: string; visibility?: string } = {}) {
+    const search = new URLSearchParams()
+    if (filters.type) search.set('type', filters.type)
+    if (filters.visibility) search.set('visibility', filters.visibility)
+    const query = search.toString()
+    const response = await request<APIEnvelope<InspectedResource[]>>(`/v1/admin/apps/${encodeURIComponent(id)}/resources${query ? `?${query}` : ''}`, { retrySession: false })
+    return response.data
+  },
+
+  async adminDeleteAppResource(id: string, resourceId: string) {
+    return request<void>(`/v1/admin/apps/${encodeURIComponent(id)}/resources/${encodeURIComponent(resourceId)}`, { method: 'DELETE', retrySession: false })
+  },
+
+  async adminListBuilders() {
+    const response = await request<APIEnvelope<AdminBuilderView[]>>('/v1/admin/builders', { retrySession: false })
+    return response.data
+  },
+
+  async adminCreateBuilder(input: AdminBuilderCreate) {
+    const response = await request<APIEnvelope<AdminBuilderView>>('/v1/admin/builders', { method: 'POST', body: input, retrySession: false })
+    return response.data
+  },
+
+  async adminUpdateBuilder(id: string, patch: AdminBuilderPatch) {
+    return request<APIEnvelope<{ id: string }>>(`/v1/admin/builders/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch, retrySession: false })
+  },
+
+  async adminDeleteBuilder(id: string) {
+    return request<void>(`/v1/admin/builders/${encodeURIComponent(id)}`, { method: 'DELETE', retrySession: false })
+  },
+
+  async adminListOutbox(state?: string) {
+    const search = new URLSearchParams()
+    if (state) search.set('state', state)
+    const query = search.toString()
+    const response = await request<APIEnvelope<OutboxEvent[]>>(`/v1/admin/outbox${query ? `?${query}` : ''}`, { retrySession: false })
+    return response.data
+  },
+
+  async adminRetryOutbox(id: string) {
+    return request<APIEnvelope<{ retried: number }>>(`/v1/admin/outbox/${encodeURIComponent(id)}/retry`, { method: 'POST', retrySession: false })
+  },
+
+  async adminRetryDeadOutbox() {
+    const response = await request<APIEnvelope<{ retried: number }>>('/v1/admin/outbox/retry-dead', { method: 'POST', retrySession: false })
+    return response.data
+  },
+
+  async adminPruneDelivered() {
+    const response = await request<APIEnvelope<{ pruned: number }>>('/v1/admin/outbox/delivered', { method: 'DELETE', retrySession: false })
+    return response.data
+  },
+
+  // adminTinkerSandbox provisions a throwaway sandbox for the operator to drive
+  // the live API loop against, with the same shape as the public try-it.
+  async adminTinkerSandbox(): Promise<TrySandboxResult> {
+    return request<TrySandboxResult>('/v1/admin/tinker/sandbox', { method: 'POST', retrySession: false })
   },
 }

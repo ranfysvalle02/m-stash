@@ -72,13 +72,20 @@ func main() {
 		app.uiAppKey = uiAppKey
 		log.Printf("🪪 UI bound to application key %s", uiAppKey)
 		if record, err := app.lookupApp(ctx, uiAppKey); err != nil {
-			log.Printf("⚠️  Could not resolve default application for demo data: %v", err)
-		} else if err := app.syncDemoData(ctx, record.ID); err != nil {
-			log.Printf("⚠️  Demo data sync failed: %v", err)
-		} else if appConfig.DemoSeed {
-			log.Print("🪄 Demo data seeded (set DEMO_DATA=off to hide it)")
+			log.Printf("⚠️  Could not resolve default application: %v", err)
 		} else {
-			log.Print("🧹 Demo data disabled (DEMO_DATA=off)")
+			if err := app.ensureBootstrapAdmin(ctx, record.ID); err != nil {
+				log.Printf("⚠️  Could not ensure bootstrap operator: %v", err)
+			} else if appConfig.AdminEmail != "" {
+				log.Printf("🔐 Bootstrap operator ready (%s) — sign in at /admin", appConfig.AdminEmail)
+			}
+			if err := app.syncDemoData(ctx, record.ID); err != nil {
+				log.Printf("⚠️  Demo data sync failed: %v", err)
+			} else if app.demoSeedEnabled(ctx) {
+				log.Print("🪄 Demo data seeded (toggle it live from /admin or set DEMO_DATA=off)")
+			} else {
+				log.Print("🧹 Demo data disabled (DEMO_DATA=off)")
+			}
 		}
 	}
 	if appConfig.MetricsToken == "" {
@@ -105,18 +112,19 @@ func main() {
 	if appConfig.TrySandbox {
 		log.Printf("🧪 Try-it sandbox enabled (TTL %s)", appConfig.TrySandboxTTL)
 	}
-	// The sweeper purges expired sandboxes, which both the vibe lab and the blank
-	// try-it endpoint create, so run it whenever either produces sandboxes.
-	var sweeper *sandboxSweeper
-	if app.vibeEnabled() || appConfig.TrySandbox {
-		sweeper = newSandboxSweeper(app)
-		sweeper.Start()
-		log.Printf("🧹 Sandbox sweeper started (every %s)", vibeSandboxSweepInterval)
-	}
-	var deliveryWorker *webhookWorker
-	if appConfig.WebhookDelivery {
-		deliveryWorker = newWebhookWorker(app)
-		deliveryWorker.Start()
+	// The sweeper purges expired sandboxes, which the vibe lab, the try-it
+	// endpoint, and operator tinker sandboxes all create. It runs unconditionally
+	// so flipping TRY_SANDBOX on at runtime never leaves tenants un-swept.
+	app.sweeper = newSandboxSweeper(app)
+	app.sweeper.Start()
+	log.Printf("🧹 Sandbox sweeper started (every %s)", vibeSandboxSweepInterval)
+
+	// The webhook controller drains the outbox and can be toggled on and off at
+	// runtime from the operator console; it starts enabled when the effective
+	// WEBHOOK_DELIVERY setting is on at boot.
+	app.webhooks = newWebhookController(app)
+	if app.effectiveSettings(ctx).WebhookDelivery {
+		app.webhooks.SetEnabled(true)
 		log.Printf("📡 Webhook delivery worker started (poll %s, max attempts %d)", appConfig.WebhookPollInterval, appConfig.WebhookMaxAttempts)
 	}
 	server := &http.Server{
@@ -135,11 +143,11 @@ func main() {
 		<-shutdown
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		if deliveryWorker != nil {
-			deliveryWorker.Stop(ctx)
+		if app.webhooks != nil {
+			app.webhooks.Stop(ctx)
 		}
-		if sweeper != nil {
-			sweeper.Stop(ctx)
+		if app.sweeper != nil {
+			app.sweeper.Stop(ctx)
 		}
 		if err := server.Shutdown(ctx); err != nil {
 			log.Printf("Graceful shutdown failed: %v", err)

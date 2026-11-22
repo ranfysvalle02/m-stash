@@ -1,0 +1,149 @@
+/* Styles for the vibe recipe launchpad, /discover strip, persona switcher, and
+   live API wiretap. They reuse the dark public-shell palette variables so the
+   new surfaces match the existing vibe lab. */
+
+/* ---------- Recipe Launchpad (/vibe) ---------- */
+.vibe-launchpad { margin-top: 2.5rem; }
+.vibe-launchpad-head { max-width: 46rem; }
+.vibe-launchpad-head h2 { color: var(--text); font-size: clamp(1.5rem, 3vw, 2.1rem); margin-bottom: .4rem; }
+.vibe-launchpad-head p { color: var(--muted); font-family: Georgia, 'Times New Roman', serif; font-size: 1.05rem; line-height: 1.45; margin: 0; }
+
+.recipe-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr)); margin-top: 1.5rem; }
+.recipe-card {
+  --vibe-accent: var(--aqua);
+  background: rgba(3, 17, 23, .5);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem;
+  position: relative;
+  overflow: hidden;
+}
+.recipe-card::before { background: var(--vibe-accent); content: ""; inset: 0 auto 0 0; position: absolute; width: 3px; }
+.recipe-card-head { align-items: flex-start; display: flex; gap: .8rem; }
+.recipe-badge {
+  align-items: center;
+  background: color-mix(in srgb, var(--vibe-accent) 16%, transparent);
+  border-radius: 11px;
+  color: var(--vibe-accent);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 2.4rem;
+  justify-content: center;
+  width: 2.4rem;
+}
+.recipe-card-heading { min-width: 0; }
+.recipe-card-heading h3 { color: var(--text); font-family: var(--font-display); font-size: 1.15rem; margin: 0 0 .15rem; }
+.recipe-tagline { color: var(--muted); font-size: .88rem; line-height: 1.4; margin: 0; }
+
+.recipe-splits { display: flex; flex-direction: column; gap: .55rem; list-style: none; margin: 0; padding: 0; }
+.recipe-splits li { color: var(--muted); display: flex; font-size: .82rem; gap: .5rem; line-height: 1.4; }
+.split-pill {
+  border-radius: 999px;
+  flex: 0 0 auto;
+  font-size: .62rem;
+  font-weight: 800;
+  height: fit-content;
+  letter-spacing: .06em;
+  padding: .2em .55em;
+  text-transform: uppercase;
+}
+.split-pill.public { background: rgba(104, 242, 255, .14); color: var(--aqua); }
+.split-pill.private { background: rgba(66, 245, 141, .14); color: var(--mongo); }
+
+.recipe-actions { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: auto; }
+.recipe-actions .button { flex: 1 1 auto; }
+
+.vibe-compose-head { margin-top: 2.5rem; }
+.vibe-compose-head h2 { color: var(--text); font-size: 1.4rem; margin-bottom: .3rem; }
+.vibe-compose-head p { color: var(--muted); font-size: .98rem; line-height: 1.45; margin: 0; max-width: 42rem; }
+
+/* ---------- Recipe strip (/discover) ---------- */
+.recipe-strip { border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 1.25rem; margin-top: 3rem; padding-top: 3rem; }
+.recipe-strip-head { max-width: 44rem; }
+.recipe-strip-head h2 { color: var(--text); font-size: clamp(1.7rem, 3.5vw, 2.5rem); line-height: 1.05; margin-bottom: .5rem; }
+.recipe-strip-head > p:last-child { color: var(--muted); font-family: Georgia, 'Times New Roman', serif; font-size: 1.1rem; line-height: 1.45; margin: 0; }
+
+.recipe-strip-track { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
+.recipe-chip {
+  --vibe-accent: var(--aqua);
+  background: rgba(3, 17, 23, .5);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: .3rem;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "badge name" "badge tagline" "go go";
+  padding: 1rem 1.1rem;
+  text-decoration: none;
+  transition: border-color .18s ease, transform .18s ease;
+}
+.recipe-chip:hover { border-color: var(--vibe-accent); transform: translateY(-2px); }
+.recipe-chip .recipe-badge { grid-area: badge; height: 2.2rem; margin-right: .6rem; width: 2.2rem; }
+.recipe-chip-name { color: var(--text); font-size: 1rem; grid-area: name; }
+.recipe-chip-tagline { color: var(--muted); font-size: .82rem; grid-area: tagline; line-height: 1.35; }
+.recipe-chip-go { align-items: center; color: var(--vibe-accent); display: inline-flex; font-size: .78rem; font-weight: 700; gap: .3rem; grid-area: go; margin-top: .5rem; }
+.recipe-strip > .button { align-self: flex-start; }
+
+/* ---------- Persona switcher bar ---------- */
+.persona-bar { display: flex; flex-direction: column; gap: .7rem; margin-bottom: 1.1rem; }
+.persona-pills { display: flex; flex-wrap: wrap; gap: .5rem; }
+.persona-pill {
+  align-items: center;
+  background: rgba(3, 17, 23, .5);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 1 1 10rem;
+  gap: .6rem;
+  padding: .6rem .8rem;
+  text-align: left;
+  transition: border-color .18s ease, color .18s ease, background .18s ease;
+}
+.persona-pill:hover { border-color: var(--aqua); color: var(--text); }
+.persona-pill.active { background: rgba(104, 242, 255, .12); border-color: var(--aqua); color: var(--text); }
+.persona-glyph { align-items: center; color: var(--aqua); display: inline-flex; flex: 0 0 auto; }
+.persona-pill.active .persona-glyph { color: var(--aqua); }
+.persona-text { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+.persona-label { font-size: .85rem; font-weight: 700; }
+.persona-sub { color: var(--muted-quiet); font-size: .72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.persona-note { color: var(--muted); font-size: .82rem; line-height: 1.45; margin: 0; }
+
+/* ---------- Live API wiretap ---------- */
+.vibe-wiretap { background: rgba(3, 17, 23, .5); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+.wiretap-head { align-items: center; border-bottom: 1px solid var(--line); color: var(--aqua); display: flex; font-size: .72rem; font-weight: 800; gap: .4rem; letter-spacing: .1em; padding: .75rem 1rem; text-transform: uppercase; }
+.wiretap-empty { color: var(--muted); font-size: .82rem; line-height: 1.45; margin: 0; padding: 1rem; }
+.wiretap-log { display: flex; flex-direction: column; list-style: none; margin: 0; max-height: 15rem; overflow-y: auto; padding: .4rem; }
+.wiretap-row {
+  align-items: center;
+  border-radius: 7px;
+  color: var(--muted);
+  display: grid;
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  gap: .5rem;
+  grid-template-columns: 2.7rem minmax(0, 1fr) auto auto auto;
+  padding: .35rem .5rem;
+}
+.wiretap-row + .wiretap-row { border-top: 1px solid rgba(52, 114, 122, .25); }
+.wiretap-method { color: var(--text); font-weight: 700; }
+.wiretap-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wiretap-status { font-weight: 700; }
+.wiretap-row.is-ok .wiretap-status { color: var(--mongo); }
+.wiretap-row.is-warn .wiretap-status { color: var(--yellow); }
+.wiretap-row.is-err .wiretap-status { color: var(--coral); }
+.wiretap-ms { color: var(--muted-quiet); }
+.wiretap-persona { color: var(--pink); max-width: 7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 680px) {
+  .wiretap-row { grid-template-columns: 2.4rem minmax(0, 1fr) auto; }
+  .wiretap-ms, .wiretap-persona { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recipe-chip, .persona-pill { transition: none; }
+}

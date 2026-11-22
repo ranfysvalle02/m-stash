@@ -11,6 +11,19 @@
   const isPreview = config.mode === "preview";
   const sections = Array.isArray(config.sections) ? config.sections : [];
 
+  // Dual customer personas for the preview's isolation switcher. Only the preview
+  // ever runs two customer slots; the downloaded starter stays single-customer.
+  const CUSTOMER_SLOTS = {
+    a: { name: "Alex", handle: "alex" },
+    b: { name: "Sam", handle: "sam" },
+  };
+  // activeMember picks which customer slot the "member" role resolves to, so the
+  // parent UI can switch between Alex and Sam and watch the API reload under each
+  // one's own JWT. pendingPrefill carries a public item's title across to the
+  // private composer when a cross-tab action CTA is clicked.
+  let activeMember = "a";
+  let pendingPrefill = null;
+
   // Accent is applied through a body class so the strict CSP (style-src 'self')
   // never needs an inline style attribute.
   document.body.classList.add("accent-" + (config.accent || "teal"));
@@ -128,7 +141,21 @@
   // starters on the same origin never share a session.
   // ---------------------------------------------------------------------------
   function sessionKey(role) {
+    // In the preview, the generic "member" role maps onto the active customer
+    // slot so Alex and Sam keep fully separate sessions (and separate server
+    // data) on the same origin.
+    if (isPreview && role === "member") role = "member:" + activeMember;
     return "m-stash-starter:" + config.app + ":" + role;
+  }
+
+  // sessionForMemberSlot reads a specific customer slot regardless of which one
+  // is active, so the persona bar can report both Alex and Sam at once.
+  function sessionForMemberSlot(slot) {
+    try {
+      return JSON.parse(storageGet("m-stash-starter:" + config.app + ":member:" + slot)) || null;
+    } catch (_) {
+      return null;
+    }
   }
 
   // Web Storage throws in a sandboxed iframe with an opaque origin (the live
@@ -189,21 +216,25 @@
   }
   async function api(path, options) {
     const opts = options || {};
+    const method = opts.method || "GET";
     const headers = { "X-M-Stash-App": config.app };
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     const session = opts.role ? getSession(opts.role) : null;
     if (session && session.token) headers.Authorization = "Bearer " + session.token;
+    const started = now();
     let response;
     try {
       response = await fetch(config.api + withAppKey(path), {
-        method: opts.method || "GET",
+        method,
         headers,
         body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
         credentials: "omit",
       });
     } catch (_) {
+      emitApi(method, path, 0, Math.round(now() - started), opts.role);
       throw new Error("Can't reach the server. Check your connection and try again.");
     }
+    emitApi(method, path, response.status, Math.round(now() - started), opts.role);
     if (response.status === 204) return null;
     const payload = await response.json().catch(() => ({}));
     if (response.status === 401 && opts.role && session) {
@@ -212,6 +243,76 @@
     }
     if (!response.ok) throw new Error(payload.error || payload.message || "Request failed (" + response.status + ")");
     return payload;
+  }
+
+  function now() {
+    return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Preview bridge. The preview is framed by the parent console UI; it posts
+  // persona switches down and the iframe posts back lightweight telemetry so the
+  // parent can draw a Persona Switcher and an API Wiretap. Messages NEVER carry
+  // tokens, passwords, or request bodies — only method, path, status, timing,
+  // persona, and scope. The target origin is this document's real origin (the
+  // sandboxed iframe has an opaque origin but a concrete location), so a cross
+  // origin page can never receive it.
+  // ---------------------------------------------------------------------------
+  function postToParent(message) {
+    if (!isPreview || window.parent === window) return;
+    try {
+      window.parent.postMessage(message, new URL(location.href).origin);
+    } catch (_) {
+      // Parent gone or blocked; telemetry is best effort.
+    }
+  }
+
+  function scopeForPath(path) {
+    const clean = String(path).split("?")[0];
+    if (clean.indexOf("/v1/me/") === 0) return "me";
+    if (clean.indexOf("/v1/shared/") === 0) return "shared";
+    if (clean.indexOf("/v1/public/") === 0) return "public";
+    if (clean.indexOf("/v1/auth/") === 0) return "auth";
+    return "api";
+  }
+
+  function personaHandle(role) {
+    if (role === "owner") return "owner";
+    if (role === "member") {
+      const member = getSession("member");
+      if (member && member.username) return member.username;
+      return "customer " + (activeMember === "b" ? "B" : "A");
+    }
+    return "visitor";
+  }
+
+  function emitApi(method, path, status, durationMs, role) {
+    postToParent({
+      type: "m-stash-vibe:api",
+      method,
+      path: String(path).split("?")[0],
+      status,
+      durationMs,
+      persona: personaHandle(role),
+      scope: scopeForPath(path),
+    });
+  }
+
+  function emitState() {
+    if (!isPreview) return;
+    const a = sessionForMemberSlot("a");
+    const b = sessionForMemberSlot("b");
+    const ownerSession = getSession("owner");
+    postToParent({
+      type: "m-stash-vibe:state",
+      path: currentPath(),
+      persona: currentPersona(),
+      handles: {
+        a: a ? a.username || a.email : null,
+        b: b ? b.username || b.email : null,
+        owner: ownerSession ? ownerSession.email || "owner" : null,
+      },
+    });
   }
 
   async function signup(role, creds) {
@@ -237,12 +338,59 @@
   }
 
   async function createThrowawayCustomer() {
+    const info = (isPreview && CUSTOMER_SLOTS[activeMember]) || { handle: "guest" };
     const hex = randomHex(4);
     return signup("member", {
-      username: "shopper-" + hex,
-      email: "shopper-" + hex + "@example.com",
+      username: info.handle + "-" + hex,
+      email: info.handle + "-" + hex + "@example.com",
       password: randomHex(12),
     });
+  }
+
+  // ensureCustomer makes the given slot the active customer and signs up a fresh
+  // throwaway identity for it on first use, so switching personas in the preview
+  // always lands on a real, isolated signed-in user.
+  async function ensureCustomer(slot) {
+    activeMember = CUSTOMER_SLOTS[slot] ? slot : "a";
+    if (getSession("member")) return;
+    await createThrowawayCustomer();
+  }
+
+  // applyPersona drives the preview from a parent persona message: it provisions
+  // or switches the acting identity, then navigates to the matching view.
+  async function applyPersona(persona) {
+    try {
+      if (persona === "owner") {
+        if (!getSession("owner") && ownerCreds) await login("owner", ownerCreds).catch(() => {});
+        navigate("#/owner");
+      } else if (persona === "customerA" || persona === "customerB") {
+        await ensureCustomer(persona === "customerB" ? "b" : "a");
+        navigate("#/account");
+      } else {
+        navigate("#/");
+      }
+    } catch (_) {
+      render();
+    }
+    emitState();
+  }
+
+  function currentPersona() {
+    const path = currentPath();
+    if (path === "/owner") return "owner";
+    if (path === "/account") return activeMember === "b" ? "customerB" : "customerA";
+    return "visitor";
+  }
+
+  // navigate switches the hash route, re-rendering in place when the hash is
+  // already current (e.g. switching customer A -> B while on #/account).
+  function navigate(hash) {
+    const current = location.hash || "#/";
+    if (current === hash) {
+      render();
+      return;
+    }
+    location.hash = hash;
   }
 
   // ---------------------------------------------------------------------------
@@ -317,6 +465,55 @@
     return { slug: slugify(title), title, visibility: sectionVisibility(section), data: values };
   }
 
+  // sectionAction turns a public owner section into a cross-tab call to action
+  // when there is somewhere private to send the visitor. An explicit actionLabel
+  // wins; otherwise any grid/timeline owner section gets a sensible default so a
+  // visitor can always carry a public item into their own private space.
+  function sectionAction(section) {
+    if (section.audience !== "owner") return null;
+    const members = memberSections();
+    if (!members.length) return null;
+    const label = (section.actionLabel || "").trim();
+    const viewTakesAction = section.view === "grid" || section.view === "timeline";
+    if (!label && !viewTakesAction) return null;
+    return {
+      label: label || "Add to " + (members[0].title || "my list").toLowerCase(),
+      onAct: (item) => startPrefill(item),
+    };
+  }
+
+  // startPrefill carries a public item's title into the private composer: it signs
+  // in the active preview customer if needed, then routes to the account view
+  // where applyPrefill fills the first field.
+  async function startPrefill(item) {
+    const title = (item && (item.title || item.slug)) || "";
+    pendingPrefill = { value: String(title) };
+    if (isPreview && !getSession("member")) {
+      await ensureCustomer(activeMember).catch(() => {});
+    }
+    navigate("#/account");
+  }
+
+  // applyPrefill drops the pending title into the first member composer and moves
+  // focus to the next field, then clears the pending state. It only runs once the
+  // member view (not the auth card) is on screen.
+  function applyPrefill() {
+    const composer = root.querySelector(".manager .composer");
+    if (composer) {
+      const inputs = composer.querySelectorAll("input, textarea, select");
+      if (inputs.length) {
+        const first = inputs[0];
+        if (first.tagName !== "SELECT" && first.type !== "checkbox") first.value = pendingPrefill.value;
+        try {
+          (inputs[1] || first).focus();
+        } catch (_) {
+          // Focus is best effort.
+        }
+      }
+      pendingPrefill = null;
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Small reusable pieces.
   // ---------------------------------------------------------------------------
@@ -365,7 +562,12 @@
     const id = "f-" + field.key + "-" + randomHex(2);
     let input;
     const kind = field.kind;
-    if (kind === "longtext") input = el("textarea", { className: "input", rows: "3", id });
+    const hasOptions = Array.isArray(field.options) && field.options.length > 0;
+    if (hasOptions) {
+      input = el("select", { className: "input select", id });
+      input.append(el("option", { value: "" }, "Select " + String(field.label || field.key).toLowerCase() + "…"));
+      for (const option of field.options) input.append(el("option", { value: String(option) }, String(option)));
+    } else if (kind === "longtext") input = el("textarea", { className: "input", rows: "3", id });
     else if (kind === "toggle") input = el("input", { type: "checkbox", className: "checkbox", id });
     else if (kind === "number" || kind === "price")
       input = el("input", { type: "number", step: kind === "price" ? "0.01" : "any", className: "input", id });
@@ -481,8 +683,8 @@
     return el(
       "section",
       { className: "hero" },
-      el("div", { className: "hero-top" }, iconBadge(config.icon), el("span", { className: "hero-eyebrow" }, "Live storefront")),
-      el("h1", { className: "hero-title" }, config.name || "Your shop"),
+      el("div", { className: "hero-top" }, iconBadge(config.icon), el("span", { className: "hero-eyebrow" }, "Live app")),
+      el("h1", { className: "hero-title" }, config.name || "Your app"),
       config.tagline ? el("p", { className: "hero-tagline" }, config.tagline) : null,
     );
   }
@@ -492,7 +694,7 @@
       "div",
       { className: "shelf-head" },
       el("h2", { className: "shelf-title" }, section.title || section.type),
-      el("span", { className: "shelf-sub" }, "Updated by the shop owner"),
+      el("span", { className: "shelf-sub" }, "Updated by the app owner"),
     );
   }
 
@@ -516,7 +718,7 @@
             .catch(() => ({ type: section.type, slug: preview.slug, title: preview.title, summary: preview.summary, data: {} })),
         ),
       );
-      setChildren(body, [window.MStashViews.render(section, items, ui)]);
+      setChildren(body, [window.MStashViews.render(section, items, ui, sectionAction(section))]);
     } catch (error) {
       setChildren(body, [errorNote(error.message)]);
     }
@@ -707,7 +909,7 @@
       ),
     );
     if (!members.length) {
-      stack.append(el("div", { className: "card pad" }, el("p", { className: "muted" }, "This app has no customer sections.")));
+      stack.append(el("div", { className: "card pad" }, el("p", { className: "muted" }, "This app has no personal sections.")));
     } else {
       for (const section of members) stack.append(memberSectionCard(section));
     }
@@ -729,7 +931,7 @@
         const result = await action();
         if (!result || !result.user || result.user.role !== "admin") {
           setSession("owner", null);
-          throw new Error("That account isn't the shop owner.");
+          throw new Error("That account isn't the app owner.");
         }
         render();
       } catch (error) {
@@ -760,10 +962,10 @@
         "div",
         { className: "card auth-card" },
         el("div", { className: "auth-icon" }, iconBadge("shield")),
-        el("h2", {}, "Shop owner"),
-        el("p", { className: "muted" }, "Sign in to edit the catalog and anything else customers see. Changes appear on the storefront instantly."),
+        el("h2", {}, "App owner"),
+        el("p", { className: "muted" }, "Sign in to manage everything visitors see. Changes appear live instantly."),
         isPreview && ownerCreds
-          ? el("button", { className: "btn accent wide", type: "button", onclick: () => run(() => login("owner", ownerCreds)) }, icon("shield", 16), "Sign in as the shop owner")
+          ? el("button", { className: "btn accent wide", type: "button", onclick: () => run(() => login("owner", ownerCreds)) }, icon("shield", 16), "Sign in as the app owner")
           : null,
         isPreview && ownerCreds ? el("div", { className: "divider" }, "or type credentials") : null,
         form,
@@ -839,7 +1041,7 @@
         const page = await api("/v1/shared/resources/" + section.type + "?limit=20", { role: "owner" });
         const previews = (page.data || []).slice(0, 20);
         if (!previews.length) {
-          setChildren(body, [emptyState("No items yet. Add your first above — it appears on the storefront instantly.")]);
+          setChildren(body, [emptyState("No items yet. Add your first above — it appears for everyone instantly.")]);
           return;
         }
         const items = await Promise.all(
@@ -891,7 +1093,7 @@
         "div",
         { className: "welcome" },
         el("h1", {}, "Owner tools"),
-        el("p", { className: "muted" }, "Signed in as " + (session.email || "owner") + ". Edits go live on the storefront."),
+        el("p", { className: "muted" }, "Signed in as " + (session.email || "owner") + ". Edits go live for everyone instantly."),
       ),
     );
     if (!owned.length) {
@@ -941,6 +1143,18 @@
     return el("a", { className: "nav-link" + (active ? " active" : ""), href }, label);
   }
 
+  // Spec-derived nav labels so the shell reads like the app it is, not a shop.
+  function publicLabel() {
+    const owned = ownerSections();
+    if (owned.length === 1) return owned[0].title || "Explore";
+    return owned.length ? "Explore" : "Home";
+  }
+  function memberLabel() {
+    const members = memberSections();
+    if (members.length === 1) return members[0].title || "My account";
+    return "My account";
+  }
+
   function topbar(path) {
     const role = path === "/owner" ? "owner" : path === "/account" ? "member" : null;
     const session = role ? getSession(role) : null;
@@ -961,8 +1175,8 @@
       el(
         "nav",
         { className: "nav" },
-        navLink("#/", "Shop", path === "/"),
-        navLink("#/account", "My account", path === "/account"),
+        navLink("#/", publicLabel(), path === "/"),
+        navLink("#/account", memberLabel(), path === "/account"),
         navLink("#/owner", "Owner", path === "/owner"),
       ),
       right,
@@ -985,8 +1199,23 @@
     setChildren(root, [
       el("div", { className: "app-shell" }, topbar(path), el("main", { className: "container" }, view), footer()),
     ]);
+    if (path === "/account" && pendingPrefill && getSession("member")) applyPrefill();
+    emitState();
   }
 
   window.addEventListener("hashchange", render);
+
+  // Preview only: accept persona switches from the framing console. Filter by
+  // source (not origin — the sandboxed iframe's own origin is opaque) so only the
+  // real parent window can drive the preview.
+  if (isPreview) {
+    window.addEventListener("message", (event) => {
+      if (event.source !== window.parent) return;
+      const data = event.data;
+      if (!data || data.type !== "m-stash-vibe:persona") return;
+      applyPersona(String(data.persona || "visitor"));
+    });
+  }
+
   render();
 })();

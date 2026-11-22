@@ -84,7 +84,7 @@ See [integration.md](integration.md) for request examples and [quickstart.md](qu
 
 ## Vibe lab
 
-Set `GEMINI_API_KEY` to turn on `/vibe`, an unauthenticated playground for feeling out m-stash before you write any code. Describe an app — say, "a habit tracker with private streaks and a public profile" — and m-stash sketches a data model, hands back copy-paste snippets, and spins up a **live sandbox** that runs against the real API: sign in with a throwaway account, save records, and watch ownership get enforced on every request.
+`/vibe` is an unauthenticated playground for feeling out m-stash before you write any code. Launch one of the curated **recipes**, or describe an app — say, "a habit tracker with private streaks and a public profile" — and m-stash sketches a data model, hands back copy-paste snippets, and spins up a **live sandbox** that runs against the real API: sign in with a throwaway account, save records, and watch ownership get enforced on every request. The lab (and `GET /v1/vibe/recipes`) unlocks whenever `TRY_SANDBOX=on` **or** `GEMINI_API_KEY` is set, and returns `404` only when both are off. Recipes and deterministic blueprints need no model key; a `GEMINI_API_KEY` adds AI-authored specs on top.
 
 Everything is URL-powered. Share the link, download a `.zip` starter, or open the plan behind the floating `</>` button. Shares (link, live demo, and starter) expire on their own — `72h` by default, capped at 5 days — and MongoDB reclaims them with a TTL index. The app idea is length-limited and sanitized, and the model is told to treat it as untrusted input, so the prompt-injection surface stays small. If the model is unavailable or past the daily cap, the lab answers from built-in blueprints instead of erroring out.
 
@@ -111,12 +111,12 @@ Every m-stash app is either a **sandbox** (no owner, expires, tight limits, carr
 | `METRICS_TOKEN` | No | Enables protected Prometheus metrics when at least 32 characters. |
 | `SESSION_COOKIE_SECURE` | No | Set `true` behind HTTPS. |
 | `DEMO_DATA` | No | Seeds a storytelling public demo into `/public` on boot. Default `on`; set `off` for a clean deployment. |
-| `GEMINI_API_KEY` | No | Enables the unauth `/vibe` lab (AI sketches an m-stash backend from an app idea). Blank disables the feature. |
+| `GEMINI_API_KEY` | No | Adds AI-authored specs to the `/vibe` lab (AI sketches an m-stash backend from an app idea). The lab's recipes and blueprints work without it; the lab is closed only when this is blank **and** `TRY_SANDBOX=off`. |
 | `GEMINI_MODEL` | No | Model for the vibe lab. Defaults to `gemini-3.5-flash-lite`. |
 | `VIBE_DAILY_LIMIT` | No | Global daily cap on model generations (plus a per-IP limit). Past the cap, or whenever the model fails, the lab answers from built-in blueprints. Defaults to `500`. |
 | `VIBE_SHARE_TTL` | No | How long a vibe's share link, live demo, and `.zip` starter stay available before MongoDB expires them. Defaults to `72h`; capped at `120h` (5 days). |
 | `VIBE_MAX_SANDBOXES` | No | Global cap on live sandbox tenants (vibe + try-it). Past it the lab still returns a spec and snippets, just without a live demo. Defaults to `1000`. |
-| `TRY_SANDBOX` | No | Set `on` to enable the blank `POST /v1/try` sandbox used by the guide and console. Defaults to `off` (endpoint returns 404). |
+| `TRY_SANDBOX` | No | Set `on` to enable the blank `POST /v1/try` sandbox used by the guide and console, and to unlock the Vibe lab's instant recipes and blueprints (no `GEMINI_API_KEY` needed). Defaults to `off` (endpoint returns 404). |
 | `TRY_SANDBOX_TTL` | No | How long a try-it sandbox lives before the sweeper deletes it and its data. Defaults to `24h`; capped at `120h`. |
 | `BUILDER_SIGNUP` | No | Set `open` to allow self-serve free-plan builder signup and sandbox claiming. Defaults to `off` (operator-provisioned accounts only). Emails are not verified. |
 | `BUILDER_SIGNUP_DAILY_LIMIT` | No | Global daily cap on self-serve signups (per-IP is additionally limited to 5/hour). Defaults to `100`. |

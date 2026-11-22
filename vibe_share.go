@@ -53,6 +53,7 @@ type vibeShare struct {
 	URL        string    `json:"url"`
 	PreviewURL string    `json:"previewUrl,omitempty"`
 	ZipURL     string    `json:"zipUrl"`
+	SkillURL   string    `json:"skillUrl"`
 	ExpiresAt  time.Time `json:"expiresAt"`
 	// Claimed is true once the sandbox behind this share has been promoted to an
 	// owned live app. The UI then hides the expiry and the "keep this app" CTA.
@@ -109,6 +110,7 @@ func (app *application) describeVibeShare(record vibeShareRecord, baseURL string
 		ID:        record.ID,
 		URL:       baseURL + "/vibe/" + record.ID,
 		ZipURL:    baseURL + "/v1/vibe/" + record.ID + "/zip",
+		SkillURL:  baseURL + "/v1/vibe/" + record.ID + "/skill.md",
 		ExpiresAt: record.ExpiresAt,
 	}
 	// A live demo only exists when a sandbox was provisioned (its publishable key
@@ -192,7 +194,7 @@ func (app *application) handleVibeShare(w http.ResponseWriter, r *http.Request) 
 	case "views.js":
 		app.serveVibeStarterAsset(w, "views.js", "text/javascript; charset=utf-8")
 		return
-	case "", "preview", "zip":
+	case "", "preview", "zip", "skill.md":
 	default:
 		writeError(w, http.StatusNotFound, "API route not found")
 		return
@@ -258,6 +260,10 @@ func (app *application) handleVibeShare(w http.ResponseWriter, r *http.Request) 
 		w.Header().Set("Content-Disposition", `attachment; filename="m-stash-starter-`+record.ID+`.zip"`)
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write(archive)
+	case "skill.md":
+		// The spec-tailored agent skill: safe to serve for any valid share since it
+		// carries only the publishable key and section shapes, never secrets.
+		writeSkill(w, r, vibeAppSkill(record, baseURL))
 	}
 }
 
@@ -384,6 +390,7 @@ func buildVibeStarterZip(record *vibeShareRecord, baseURL string, claimed bool) 
 	}{
 		{"README.md", []byte(vibeStarterReadme(record, baseURL, claimed))},
 		{"AGENTS.md", []byte(vibeStarterAgents(record, baseURL))},
+		{"SKILL.md", []byte(vibeAppSkill(record, baseURL))},
 		{"index.html", index},
 		{"app.js", appJS},
 		{"app.css", appCSS},
@@ -405,16 +412,16 @@ func buildVibeStarterZip(record *vibeShareRecord, baseURL string, claimed bool) 
 	return buffer.Bytes(), nil
 }
 
-// sectionAudienceSummary explains, in store-owner language, who may write and
+// sectionAudienceSummary explains, in app-owner language, who may write and
 // read a section's records.
 func sectionAudienceSummary(section vibeSection) string {
 	switch section.Audience {
 	case vibeAudienceOwner:
-		return "the shop owner writes these; everyone can read them without signing in"
+		return "the app owner writes these; everyone can read them without signing in"
 	case vibeAudienceMemberPublic:
-		return "each signed-in customer owns these and they are public on their page"
+		return "each signed-in user owns these and they are public on their page"
 	default:
-		return "each signed-in customer keeps these privately to themselves"
+		return "each signed-in user keeps these privately to themselves"
 	}
 }
 
@@ -431,9 +438,9 @@ func vibeStarterReadme(record *vibeShareRecord, baseURL string, claimed bool) st
 	}
 	fmt.Fprintf(&b, "A ready-to-run starter the m-stash vibe lab generated from this idea:\n\n> %s\n\n", record.Idea)
 	if claimed {
-		b.WriteString("It's plain HTML, CSS, and JavaScript — no build step, no install. It points at your **live m-stash app**, so it works the moment you open it: browse the storefront, create a customer account, or sign in as the owner and edit the catalog.\n\n")
+		b.WriteString("It's plain HTML, CSS, and JavaScript — no build step, no install. It points at your **live m-stash app**, so it works the moment you open it: browse the public pages, create a user account, or sign in as the app owner to manage the shared data.\n\n")
 	} else {
-		b.WriteString("It's plain HTML, CSS, and JavaScript — no build step, no install. It already points at a **live m-stash sandbox**, so it works the moment you open it: browse the storefront, create a customer account, or sign in as the owner and edit the catalog.\n\n")
+		b.WriteString("It's plain HTML, CSS, and JavaScript — no build step, no install. It already points at a **live m-stash sandbox**, so it works the moment you open it: browse the public pages, create a user account, or sign in as the app owner to manage the shared data.\n\n")
 	}
 
 	b.WriteString("## Run it\n\n")
@@ -495,7 +502,11 @@ func vibeStarterReadme(record *vibeShareRecord, baseURL string, claimed bool) st
 		}
 	}
 
-	fmt.Fprintf(&b, "## Keep building\n\nSee `AGENTS.md` for the full set of API rules a coding agent should follow, and the machine-readable reference at %s/llms.txt.\n", baseURL)
+	b.WriteString("## Hand it to your coding agent\n\n")
+	b.WriteString("`SKILL.md` is a plug-and-play agent skill pre-filled with this app's key and sections. Drop it in so Cursor, Claude Code, or Codex can build against m-stash with zero setup:\n\n")
+	b.WriteString("- Cursor: `.cursor/skills/m-stash/SKILL.md`\n")
+	b.WriteString("- Claude Code: `.claude/skills/m-stash/SKILL.md`\n\n")
+	fmt.Fprintf(&b, "`AGENTS.md` has the full set of API rules a coding agent should follow, and the machine-readable reference lives at %s/llms.txt.\n", baseURL)
 	return b.String()
 }
 

@@ -29,6 +29,17 @@ func freeTierLimits(cfg Config) AppLimits {
 	}
 }
 
+// freeTierLimitsFromSettings stamps the free-tier quotas from the live, resolved
+// settings so an operator's runtime quota change applies to newly created and
+// newly claimed apps immediately.
+func freeTierLimitsFromSettings(settings resolvedSettings) AppLimits {
+	return AppLimits{
+		MaxUsers:               settings.FreeTierMaxUsers,
+		MaxRecordsPerNamespace: settings.FreeTierMaxRecords,
+		MaxRecordBytes:         settings.FreeTierMaxRecordBytes,
+	}
+}
+
 // effectiveLimits resolves the limits that apply to a record right now. A stored
 // Limits value always wins; otherwise a sandbox falls back to sandboxLimits so
 // legacy sandbox documents (written before Limits existed) need no migration,

@@ -16,7 +16,7 @@ func (app *application) handleTry(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	if !app.config.TrySandbox {
+	if !app.effectiveSettings(r.Context()).TrySandbox {
 		writeError(w, http.StatusNotFound, "The try-it sandbox is not enabled on this deployment")
 		return
 	}
@@ -24,19 +24,11 @@ func (app *application) handleTry(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 
-	// TRY_SANDBOX_TTL is capped by the same ceiling as shared vibes so the store
-	// never accumulates long-lived throwaway tenants.
-	ttl := app.config.TrySandboxTTL
-	if ttl <= 0 {
-		ttl = 24 * time.Hour
-	}
-	if ttl > vibeShareMaxTTL {
-		ttl = vibeShareMaxTTL
-	}
-
+	// The resolved TrySandboxTTL is already capped by the shared ceiling, so the
+	// store never accumulates long-lived throwaway tenants.
 	provision, err := app.provisionSandbox(ctx, sandboxOptions{
 		DisplayName: "Try m-stash",
-		TTL:         ttl,
+		TTL:         app.effectiveSettings(ctx).TrySandboxTTL,
 	})
 	if err != nil {
 		if errors.Is(err, errVibeSandboxFull) {

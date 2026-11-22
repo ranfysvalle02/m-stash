@@ -5,7 +5,7 @@
 // only ever sees their own app's tenant data; the server never exposes password
 // hashes or another owner's app.
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Database, LoaderCircle, RefreshCw, Users } from "lucide-react"
 import { APIError, api } from "../api"
 import type { InspectedResource, InspectedUser } from "../api"
@@ -39,8 +39,32 @@ function shortDate(value: string): string {
   return new Intl.DateTimeFormat("en", { day: "numeric", month: "short", year: "numeric" }).format(date)
 }
 
-export function AppInspector({ appId, appName, onChanged }: { appId: string; appName: string; onChanged?: () => void }) {
+// scope decides which tenant-inspection endpoints to call. "owner" (the default)
+// uses owner-scoped /v1/builder routes; "admin" uses the operator's /v1/admin
+// routes, which can inspect any app's tenant data on the deployment.
+export type InspectorScope = "owner" | "admin"
+
+export function AppInspector({ appId, appName, onChanged, scope = "owner" }: { appId: string; appName: string; onChanged?: () => void; scope?: InspectorScope }) {
   const toast = useToast()
+  // The api methods are stable module references, so memoizing on scope keeps the
+  // load callbacks' identities stable and avoids re-triggering the debounced loads.
+  const inspect = useMemo(
+    () =>
+      scope === "admin"
+        ? {
+            listResources: api.adminListAppResources,
+            deleteResource: api.adminDeleteAppResource,
+            listUsers: api.adminListAppUsers,
+            deleteUser: api.adminDeleteAppUser,
+          }
+        : {
+            listResources: api.listBuilderAppResources,
+            deleteResource: api.deleteBuilderAppResource,
+            listUsers: api.listBuilderAppUsers,
+            deleteUser: api.deleteBuilderAppUser,
+          },
+    [scope],
+  )
   const [tab, setTab] = useState<Tab>("records")
 
   const [records, setRecords] = useState<InspectedResource[]>()
@@ -58,7 +82,7 @@ export function AppInspector({ appId, appName, onChanged }: { appId: string; app
     setRecordsLoading(true)
     setRecordsError("")
     try {
-      const data = await api.listBuilderAppResources(appId, {
+      const data = await inspect.listResources(appId, {
         type: typeFilter.trim() || undefined,
         visibility: visFilter || undefined,
       })
@@ -68,19 +92,19 @@ export function AppInspector({ appId, appName, onChanged }: { appId: string; app
     } finally {
       setRecordsLoading(false)
     }
-  }, [appId, typeFilter, visFilter])
+  }, [appId, typeFilter, visFilter, inspect])
 
   const loadUsers = useCallback(async () => {
     setUsersLoading(true)
     setUsersError("")
     try {
-      setUsers(await api.listBuilderAppUsers(appId))
+      setUsers(await inspect.listUsers(appId))
     } catch (error) {
       setUsersError(error instanceof APIError ? error.message : "Could not load users.")
     } finally {
       setUsersLoading(false)
     }
-  }, [appId])
+  }, [appId, inspect])
 
   useEffect(() => {
     if (tab !== "records") return
@@ -96,7 +120,7 @@ export function AppInspector({ appId, appName, onChanged }: { appId: string; app
 
   async function deleteRecord(id: string) {
     try {
-      await api.deleteBuilderAppResource(appId, id)
+      await inspect.deleteResource(appId, id)
       setRecords((all) => all?.filter((record) => record.id !== id))
       toast.success("Record deleted")
       onChanged?.()
@@ -107,7 +131,7 @@ export function AppInspector({ appId, appName, onChanged }: { appId: string; app
 
   async function deleteUser(id: string) {
     try {
-      await api.deleteBuilderAppUser(appId, id)
+      await inspect.deleteUser(appId, id)
       setUsers((all) => all?.filter((user) => user.id !== id))
       toast.success("User and their data deleted")
       onChanged?.()

@@ -10,6 +10,18 @@
     return item && item.data ? item.data[key] : undefined;
   }
 
+  // actionButton renders the cross-tab call to action (e.g. "Book this cut") that
+  // app.js wires on a public item. It is omitted when there is no action.
+  function actionButton(ui, action, item) {
+    if (!action) return null;
+    return ui.el(
+      "button",
+      { type: "button", className: "act-btn", onclick: () => action.onAct(item) },
+      ui.icon("bolt", 14),
+      action.label,
+    );
+  }
+
   function hasValue(value) {
     return !(value == null || value === "" || (Array.isArray(value) && value.length === 0));
   }
@@ -64,7 +76,7 @@
     return pairs;
   }
 
-  function gridView(ui, section, items) {
+  function gridView(ui, section, items, action) {
     const priceField = firstField(section, ["price"]);
     const nameField = firstField(section, ["text"]);
     const grid = ui.el("div", { className: "grid" });
@@ -86,12 +98,14 @@
       const skip = [nameField && nameField.key, priceField && priceField.key].filter(Boolean);
       const pairs = metaPairs(ui, section, item, skip);
       if (pairs.length) card.append(ui.el("div", { className: "metas" }, ...pairs));
+      const act = actionButton(ui, action, item);
+      if (act) card.append(ui.el("div", { className: "act-row" }, act));
       grid.append(card);
     }
     return grid;
   }
 
-  function timelineView(ui, section, items) {
+  function timelineView(ui, section, items, action) {
     const dateField = firstField(section, ["date"]);
     const nameField = firstField(section, ["text"]);
     const sorted = items.slice().sort((a, b) => {
@@ -112,6 +126,8 @@
       if (desc) body.append(ui.el("p", { className: "tl-desc" }, desc));
       const pairs = metaPairs(ui, section, item, [nameField && nameField.key, dateField && dateField.key].filter(Boolean));
       if (pairs.length) body.append(ui.el("div", { className: "metas" }, ...pairs));
+      const act = actionButton(ui, action, item);
+      if (act) body.append(ui.el("div", { className: "act-row" }, act));
       line.append(
         ui.el(
           "div",
@@ -124,7 +140,7 @@
     return line;
   }
 
-  function rankedView(ui, section, items) {
+  function rankedView(ui, section, items, action) {
     const scoreField = firstField(section, ["number", "price"]);
     const nameField = firstField(section, ["text"]);
     const sorted = items.slice().sort((a, b) => {
@@ -144,13 +160,14 @@
           hasValue(scoreValue)
             ? ui.el("span", { className: "rank-score" }, scoreField.kind === "price" ? ui.formatPrice(scoreValue) : String(scoreValue))
             : null,
+          actionButton(ui, action, item),
         ),
       );
     });
     return list;
   }
 
-  function listView(ui, section, items, checklist) {
+  function listView(ui, section, items, checklist, action) {
     const nameField = firstField(section, ["text"]);
     const toggleField = firstField(section, ["toggle"]);
     const list = ui.el("ul", { className: "rows" });
@@ -168,26 +185,29 @@
       left.append(main);
       const row = ui.el("li", { className: "row" }, left);
       const pairs = metaPairs(ui, section, item, [nameField && nameField.key, toggleField && toggleField.key].filter(Boolean));
-      if (pairs.length) row.append(ui.el("div", { className: "row-metas" }, ...pairs));
+      const right = ui.el("div", { className: "row-metas" }, ...pairs);
+      const act = actionButton(ui, action, item);
+      if (act) right.append(act);
+      if (pairs.length || act) row.append(right);
       list.append(row);
     }
     return list;
   }
 
   window.MStashViews = {
-    render(section, items, ui) {
+    render(section, items, ui, action) {
       if (!items || !items.length) return ui.el("div", {});
       switch (section.view) {
         case "grid":
-          return gridView(ui, section, items);
+          return gridView(ui, section, items, action);
         case "timeline":
-          return timelineView(ui, section, items);
+          return timelineView(ui, section, items, action);
         case "ranked":
-          return rankedView(ui, section, items);
+          return rankedView(ui, section, items, action);
         case "checklist":
-          return listView(ui, section, items, true);
+          return listView(ui, section, items, true, action);
         default:
-          return listView(ui, section, items, false);
+          return listView(ui, section, items, false, action);
       }
     },
   };

@@ -97,35 +97,24 @@ func (app *application) deleteBuilderApp(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// listBuilderAppUsers returns an owned app's end users (not builder accounts,
-// which carry a nil appId). Each user's handle is joined from their personal
-// namespace so the console can show "@username" alongside the email.
-func (app *application) listBuilderAppUsers(w http.ResponseWriter, r *http.Request, ownerID, appID bson.ObjectID) {
-	if !requireMethod(w, r, http.MethodGet) {
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	if _, err := app.ownedApp(ctx, ownerID, appID); err != nil {
-		app.writeOwnedAppLookupError(w, err, "Could not read users")
-		return
-	}
-
+// inspectAppUsers returns the safe projection of an app's end users (not builder
+// or operator accounts, which carry a nil appId). Each user's handle is joined
+// from their personal namespace. This is tenant-scoped by appId but not
+// owner-scoped, so it is shared by the owner console and the operator console;
+// the password hash is never included.
+func (app *application) inspectAppUsers(ctx context.Context, appID bson.ObjectID) ([]inspectedUser, error) {
 	cursor, err := app.database.Collection("_users").Find(
 		ctx,
 		bson.M{"appId": appID},
 		options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(inspectorListLimit),
 	)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not read users")
-		return
+		return nil, err
 	}
 	var users []User
 	if err := cursor.All(ctx, &users); err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not read users")
-		return
+		return nil, err
 	}
-
 	usernameByOwner := app.personalNamespaceSlugs(ctx, appID)
 	out := make([]inspectedUser, 0, len(users))
 	for _, user := range users {
@@ -137,109 +126,32 @@ func (app *application) listBuilderAppUsers(w http.ResponseWriter, r *http.Reque
 			CreatedAt: user.CreatedAt,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	return out, nil
 }
 
-// deleteBuilderAppUser removes a single end user from an owned app along with
-// everything scoped to them: their sessions, personal namespace, that
-// namespace's records, and their namespace memberships.
-func (app *application) deleteBuilderAppUser(w http.ResponseWriter, r *http.Request, ownerID, appID, userID bson.ObjectID) {
-	if !requireMethod(w, r, http.MethodDelete) {
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	if _, err := app.ownedApp(ctx, ownerID, appID); err != nil {
-		app.writeOwnedAppLookupError(w, err, "Could not delete user")
-		return
-	}
-
-	// The user must belong to this app before anything is deleted.
-	var target User
-	if err := app.database.Collection("_users").
-		FindOne(ctx, bson.M{"_id": userID, "appId": appID}).Decode(&target); err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			writeError(w, http.StatusNotFound, "User not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "Could not delete user")
-		return
-	}
-
-	// Remove the user's personal namespace and the records it holds.
-	var personal Namespace
-	if err := app.database.Collection(namespaceCollectionName).
-		FindOne(ctx, bson.M{"appId": appID, "kind": personalNamespaceKind, "ownerId": userID}).Decode(&personal); err == nil {
-		if _, err := app.database.Collection(resourceCollectionName).
-			DeleteMany(ctx, bson.M{"appId": appID, "namespaceId": personal.ID}); err != nil {
-			writeError(w, http.StatusInternalServerError, "Could not delete user")
-			return
-		}
-		if _, err := app.database.Collection(namespaceCollectionName).
-			DeleteOne(ctx, bson.M{"_id": personal.ID}); err != nil {
-			writeError(w, http.StatusInternalServerError, "Could not delete user")
-			return
-		}
-	} else if !errors.Is(err, mongo.ErrNoDocuments) {
-		writeError(w, http.StatusInternalServerError, "Could not delete user")
-		return
-	}
-
-	if _, err := app.database.Collection(namespaceMembershipCollection).
-		DeleteMany(ctx, bson.M{"appId": appID, "userId": userID}); err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not delete user")
-		return
-	}
-	if _, err := app.database.Collection(sessionCollectionName).
-		DeleteMany(ctx, bson.M{"userId": userID}); err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not delete user")
-		return
-	}
-	if _, err := app.database.Collection("_users").
-		DeleteOne(ctx, bson.M{"_id": userID, "appId": appID}); err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not delete user")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// listBuilderAppResources returns the records in an owned app, optionally
-// filtered by type and visibility, with their namespace joined in so the
-// console can show where each record lives and link public ones.
-func (app *application) listBuilderAppResources(w http.ResponseWriter, r *http.Request, ownerID, appID bson.ObjectID) {
-	if !requireMethod(w, r, http.MethodGet) {
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	if _, err := app.ownedApp(ctx, ownerID, appID); err != nil {
-		app.writeOwnedAppLookupError(w, err, "Could not read records")
-		return
-	}
-
+// inspectAppResources returns an app's records, optionally filtered by type and
+// visibility, each joined to its owning namespace. Tenant-scoped by appId and
+// shared by the owner and operator consoles.
+func (app *application) inspectAppResources(ctx context.Context, appID bson.ObjectID, typeFilter, visibilityFilter string) ([]inspectedResource, error) {
 	filter := bson.M{"appId": appID}
-	if resourceType := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("type"))); resourceType != "" {
+	if resourceType := strings.ToLower(strings.TrimSpace(typeFilter)); resourceType != "" {
 		filter["type"] = resourceType
 	}
-	if visibility := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("visibility"))); visibility != "" {
+	if visibility := strings.ToLower(strings.TrimSpace(visibilityFilter)); visibility != "" {
 		filter["visibility"] = visibility
 	}
-
 	cursor, err := app.database.Collection(resourceCollectionName).Find(
 		ctx,
 		filter,
 		options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(inspectorListLimit),
 	)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not read records")
-		return
+		return nil, err
 	}
 	var records []Resource
 	if err := cursor.All(ctx, &records); err != nil {
-		writeError(w, http.StatusInternalServerError, "Could not read records")
-		return
+		return nil, err
 	}
-
 	namespaces := app.namespacesByID(ctx, appID)
 	out := make([]inspectedResource, 0, len(records))
 	for _, record := range records {
@@ -259,7 +171,114 @@ func (app *application) listBuilderAppResources(w http.ResponseWriter, r *http.R
 			UpdatedAt:     record.UpdatedAt,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	return out, nil
+}
+
+// deleteAppUserCascade removes a single end user from an app along with
+// everything scoped to them: their sessions, personal namespace, that
+// namespace's records, and their namespace memberships. It reports whether the
+// user existed so callers can return 404. Tenant-scoped by appId and shared by
+// the owner and operator consoles.
+func (app *application) deleteAppUserCascade(ctx context.Context, appID, userID bson.ObjectID) (bool, error) {
+	var target User
+	if err := app.database.Collection("_users").
+		FindOne(ctx, bson.M{"_id": userID, "appId": appID}).Decode(&target); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	// Remove the user's personal namespace and the records it holds.
+	var personal Namespace
+	if err := app.database.Collection(namespaceCollectionName).
+		FindOne(ctx, bson.M{"appId": appID, "kind": personalNamespaceKind, "ownerId": userID}).Decode(&personal); err == nil {
+		if _, err := app.database.Collection(resourceCollectionName).
+			DeleteMany(ctx, bson.M{"appId": appID, "namespaceId": personal.ID}); err != nil {
+			return false, err
+		}
+		if _, err := app.database.Collection(namespaceCollectionName).
+			DeleteOne(ctx, bson.M{"_id": personal.ID}); err != nil {
+			return false, err
+		}
+	} else if !errors.Is(err, mongo.ErrNoDocuments) {
+		return false, err
+	}
+
+	if _, err := app.database.Collection(namespaceMembershipCollection).
+		DeleteMany(ctx, bson.M{"appId": appID, "userId": userID}); err != nil {
+		return false, err
+	}
+	if _, err := app.database.Collection(sessionCollectionName).
+		DeleteMany(ctx, bson.M{"userId": userID}); err != nil {
+		return false, err
+	}
+	if _, err := app.database.Collection("_users").
+		DeleteOne(ctx, bson.M{"_id": userID, "appId": appID}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// listBuilderAppUsers returns an owned app's end users.
+func (app *application) listBuilderAppUsers(w http.ResponseWriter, r *http.Request, ownerID, appID bson.ObjectID) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	if _, err := app.ownedApp(ctx, ownerID, appID); err != nil {
+		app.writeOwnedAppLookupError(w, err, "Could not read users")
+		return
+	}
+	users, err := app.inspectAppUsers(ctx, appID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not read users")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": users})
+}
+
+// deleteBuilderAppUser removes a single end user from an owned app.
+func (app *application) deleteBuilderAppUser(w http.ResponseWriter, r *http.Request, ownerID, appID, userID bson.ObjectID) {
+	if !requireMethod(w, r, http.MethodDelete) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	if _, err := app.ownedApp(ctx, ownerID, appID); err != nil {
+		app.writeOwnedAppLookupError(w, err, "Could not delete user")
+		return
+	}
+	found, err := app.deleteAppUserCascade(ctx, appID, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not delete user")
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "User not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// listBuilderAppResources returns the records in an owned app.
+func (app *application) listBuilderAppResources(w http.ResponseWriter, r *http.Request, ownerID, appID bson.ObjectID) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	if _, err := app.ownedApp(ctx, ownerID, appID); err != nil {
+		app.writeOwnedAppLookupError(w, err, "Could not read records")
+		return
+	}
+	records, err := app.inspectAppResources(ctx, appID, r.URL.Query().Get("type"), r.URL.Query().Get("visibility"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not read records")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": records})
 }
 
 // deleteBuilderAppResource removes a single record from an owned app.

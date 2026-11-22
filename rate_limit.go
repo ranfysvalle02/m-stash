@@ -43,6 +43,18 @@ func ensureAuthRateLimitIndexes(ctx context.Context, database *mongo.Database) e
 	return nil
 }
 
+// allowWithLimit consumes one attempt against a caller-supplied ceiling instead
+// of the limiter's fixed one, so a runtime change to a daily cap takes effect
+// immediately. A zero or negative ceiling means unlimited.
+func (limiter *authRateLimiter) allowWithLimit(ctx context.Context, scope, key string, limit int) (bool, error) {
+	if limit <= 0 {
+		return true, nil
+	}
+	scoped := *limiter
+	scoped.limit = limit
+	return scoped.allow(ctx, scope, key)
+}
+
 // allow consumes one attempt in a fixed window shared by every service replica.
 func (limiter *authRateLimiter) allow(ctx context.Context, scope, key string) (bool, error) {
 	now := time.Now().UTC()

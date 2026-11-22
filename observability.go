@@ -179,9 +179,111 @@ func metricRoute(path string) string {
 		return "/v1/me/resources/{type}/{slug}"
 	case strings.HasPrefix(path, "/v1/public/"):
 		return "/v1/public/{username}/{type}/{slug}"
+	case path == "/v1/try":
+		return "/v1/try"
+	case path == "/skill.md":
+		return "/skill.md"
+	case path == "/v1/vibe":
+		return "/v1/vibe"
+	case path == "/v1/vibe/recipes":
+		return "/v1/vibe/recipes"
+	case strings.HasPrefix(path, "/v1/vibe/"):
+		return "/v1/vibe/{id}"
+	case path == "/v1/builder/auth/login" || path == "/v1/builder/auth/signup":
+		return path
+	case strings.HasPrefix(path, "/v1/builder/"):
+		return "/v1/builder/*"
+	case strings.HasPrefix(path, "/v1/admin/"):
+		return "/v1/admin/*"
 	default:
 		return "unmatched"
 	}
+}
+
+// routeMetric is one normalized route/status row in the telemetry snapshot.
+type routeMetric struct {
+	Method       string  `json:"method"`
+	Route        string  `json:"route"`
+	Status       int     `json:"status"`
+	Count        uint64  `json:"count"`
+	AvgLatencyMs float64 `json:"avgLatencyMs"`
+}
+
+// metricsSnapshot is a JSON-friendly view of the registry for the operator
+// console's live telemetry, derived from the same counters the Prometheus
+// endpoint exposes.
+type metricsSnapshot struct {
+	StartedAt      time.Time         `json:"startedAt"`
+	UptimeSeconds  float64           `json:"uptimeSeconds"`
+	InFlight       int               `json:"inFlight"`
+	TotalRequests  uint64            `json:"totalRequests"`
+	StatusClasses  map[string]uint64 `json:"statusClasses"`
+	AvgLatencyMs   float64           `json:"avgLatencyMs"`
+	Routes         []routeMetric     `json:"routes"`
+	RateLimited    uint64            `json:"rateLimited"`
+	SandboxPurged  uint64            `json:"sandboxesPurged"`
+	SandboxClaimed uint64            `json:"sandboxesClaimed"`
+	BuilderSignups uint64            `json:"builderSignups"`
+	TrySandboxes   uint64            `json:"trySandboxes"`
+	OutboxEvents   map[string]uint64 `json:"outboxEvents"`
+}
+
+// snapshot captures the current counters as a structured value for the operator
+// console. It mirrors prometheus() but returns JSON-friendly aggregates.
+func (registry *metricsRegistry) snapshot() metricsSnapshot {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+
+	snapshot := metricsSnapshot{
+		StartedAt:      registry.startedAt,
+		UptimeSeconds:  time.Since(registry.startedAt).Seconds(),
+		InFlight:       registry.inFlight,
+		StatusClasses:  map[string]uint64{"2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0},
+		RateLimited:    registry.rateLimited,
+		SandboxPurged:  registry.sandboxPurged,
+		SandboxClaimed: registry.sandboxClaimed,
+		BuilderSignups: registry.builderSignups,
+		TrySandboxes:   registry.trySandboxes,
+		OutboxEvents:   map[string]uint64{},
+	}
+	var totalDuration float64
+	routes := make([]routeMetric, 0, len(registry.requests))
+	for key, value := range registry.requests {
+		snapshot.TotalRequests += value.Count
+		totalDuration += value.DurationSeconds
+		switch {
+		case key.Status >= 500:
+			snapshot.StatusClasses["5xx"] += value.Count
+		case key.Status >= 400:
+			snapshot.StatusClasses["4xx"] += value.Count
+		case key.Status >= 300:
+			snapshot.StatusClasses["3xx"] += value.Count
+		default:
+			snapshot.StatusClasses["2xx"] += value.Count
+		}
+		avg := 0.0
+		if value.Count > 0 {
+			avg = (value.DurationSeconds / float64(value.Count)) * 1000
+		}
+		routes = append(routes, routeMetric{
+			Method:       key.Method,
+			Route:        key.Route,
+			Status:       key.Status,
+			Count:        value.Count,
+			AvgLatencyMs: avg,
+		})
+	}
+	if snapshot.TotalRequests > 0 {
+		snapshot.AvgLatencyMs = (totalDuration / float64(snapshot.TotalRequests)) * 1000
+	}
+	sort.Slice(routes, func(left, right int) bool {
+		return routes[left].Count > routes[right].Count
+	})
+	snapshot.Routes = routes
+	for eventType, count := range registry.outboxEvent {
+		snapshot.OutboxEvents[eventType] = count
+	}
+	return snapshot
 }
 
 func (app *application) handleMetrics(w http.ResponseWriter, r *http.Request) {

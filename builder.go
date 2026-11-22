@@ -23,14 +23,53 @@ const builderRole = "builder"
 // of apps a builder owns and stamps per-app quotas at creation time.
 const freePlan = "free"
 
-// authenticateBuilder admits only builder principals. Control-plane routes carry
-// no app context, so an app-scoped user or admin token is rejected by the role
-// check and can never reach app-management endpoints.
+// authenticateBuilder admits builder and operator principals. Control-plane
+// routes carry no app context, so an app-scoped user or admin token is rejected
+// by the role/appId check and can never reach app-management endpoints. The
+// operator is a super-builder: it manages its own apps through the same routes.
 func (app *application) authenticateBuilder(next func(w http.ResponseWriter, r *http.Request, claims *Claims)) http.HandlerFunc {
 	return app.authenticate(func(w http.ResponseWriter, r *http.Request, claims *Claims) {
-		if claims.Role != builderRole || (claims.AppID != "" && claims.AppID != bson.NilObjectID.Hex()) {
+		if !isControlPlaneRole(claims.Role) || (claims.AppID != "" && claims.AppID != bson.NilObjectID.Hex()) {
 			writeError(w, http.StatusForbidden, "Builder credentials are required")
 			return
+		}
+		next(w, r, claims)
+	})
+}
+
+// isControlPlaneRole reports whether a role belongs to a control-plane principal
+// (a builder or the deployment operator) rather than an app-scoped user.
+func isControlPlaneRole(role string) bool {
+	return role == builderRole || role == operatorRole
+}
+
+// authenticateOperator admits only the deployment super-operator. It layers on
+// authenticateBuilder's role/appId isolation and additionally re-checks the
+// stored role on every request, so demoting or deleting an operator in the
+// database revokes their control-plane access immediately.
+func (app *application) authenticateOperator(next func(w http.ResponseWriter, r *http.Request, claims *Claims)) http.HandlerFunc {
+	return app.authenticateBuilder(func(w http.ResponseWriter, r *http.Request, claims *Claims) {
+		if claims.Role != operatorRole {
+			writeError(w, http.StatusForbidden, "Operator credentials are required")
+			return
+		}
+		if app.database != nil {
+			ownerID, err := bson.ObjectIDFromHex(claims.UID)
+			if err != nil {
+				writeError(w, http.StatusForbidden, "Invalid operator identity")
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+			count, err := app.database.Collection("_users").CountDocuments(ctx, bson.M{"_id": ownerID, "role": operatorRole})
+			if err != nil {
+				writeError(w, http.StatusServiceUnavailable, "Could not verify operator")
+				return
+			}
+			if count == 0 {
+				writeError(w, http.StatusForbidden, "Operator credentials are required")
+				return
+			}
 		}
 		next(w, r, claims)
 	})
@@ -102,7 +141,7 @@ func (app *application) handleBuilderLogin(w http.ResponseWriter, r *http.Reques
 	defer cancel()
 	var builder User
 	err := app.database.Collection("_users").
-		FindOne(ctx, bson.M{"appId": bson.NilObjectID, "email": request.Email, "role": builderRole}).
+		FindOne(ctx, bson.M{"appId": bson.NilObjectID, "email": request.Email, "role": bson.M{"$in": bson.A{builderRole, operatorRole}}}).
 		Decode(&builder)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "Invalid email or password")
@@ -124,7 +163,7 @@ func (app *application) handleBuilderLogin(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token":   token,
-		"builder": map[string]any{"id": builder.ID.Hex(), "email": builder.Email},
+		"builder": map[string]any{"id": builder.ID.Hex(), "email": builder.Email, "operator": builder.Role == operatorRole},
 	})
 }
 
@@ -138,7 +177,8 @@ func (app *application) handleBuilderSignup(w http.ResponseWriter, r *http.Reque
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	if !app.config.BuilderSignupOpen {
+	settings := app.effectiveSettings(r.Context())
+	if !settings.BuilderSignupOpen {
 		writeError(w, http.StatusNotFound, "Self-serve builder signup is not enabled on this deployment")
 		return
 	}
@@ -159,9 +199,10 @@ func (app *application) handleBuilderSignup(w http.ResponseWriter, r *http.Reque
 	defer cancel()
 
 	// A global daily budget, on top of the per-IP limit, bounds how many new
-	// builders a single open deployment can mint in a day.
+	// builders a single open deployment can mint in a day. The ceiling is read
+	// live so an operator can tighten or lift it without a restart.
 	if app.builderSignupDailyLimiter != nil {
-		allowed, limitErr := app.builderSignupDailyLimiter.allow(ctx, "builder-signup-global", "global")
+		allowed, limitErr := app.builderSignupDailyLimiter.allowWithLimit(ctx, "builder-signup-global", "global", settings.BuilderSignupDailyLimit)
 		if limitErr != nil {
 			app.logger.Error("builder signup daily limit check failed", "request_id", requestIDFromContext(ctx), "error", limitErr)
 			writeError(w, http.StatusServiceUnavailable, "Signup is temporarily unavailable")
@@ -225,21 +266,24 @@ func (app *application) handleBuilderMe(w http.ResponseWriter, r *http.Request, 
 	defer cancel()
 
 	plan := ""
-	var builder User
+	isOperator := false
+	var principal User
 	if err := app.database.Collection("_users").
-		FindOne(ctx, bson.M{"_id": ownerID, "role": builderRole}).Decode(&builder); err == nil {
-		plan = builder.Plan
+		FindOne(ctx, bson.M{"_id": ownerID, "role": bson.M{"$in": bson.A{builderRole, operatorRole}}}).Decode(&principal); err == nil {
+		plan = principal.Plan
+		isOperator = principal.Role == operatorRole
 	}
 
-	data := map[string]any{"id": claims.UID, "email": claims.Email, "plan": plan}
+	data := map[string]any{"id": claims.UID, "email": claims.Email, "plan": plan, "operator": isOperator}
 	if appCount, err := app.database.Collection(appsCollectionName).
 		CountDocuments(ctx, bson.M{"ownerId": ownerID}); err == nil {
 		data["appCount"] = appCount
 	}
 	// Free-plan builders see their ceilings so the console can draw usage bars.
 	if plan == freePlan {
-		data["maxApps"] = app.config.FreeTierMaxApps
-		data["limits"] = freeTierLimits(app.config)
+		settings := app.effectiveSettings(ctx)
+		data["maxApps"] = settings.FreeTierMaxApps
+		data["limits"] = freeTierLimitsFromSettings(settings)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": data})
 }
@@ -249,7 +293,7 @@ func (app *application) handleBuilderMe(w http.ResponseWriter, r *http.Request, 
 func (app *application) builderPlan(ctx context.Context, ownerID bson.ObjectID) (string, error) {
 	var builder User
 	if err := app.database.Collection("_users").
-		FindOne(ctx, bson.M{"_id": ownerID, "role": builderRole}).Decode(&builder); err != nil {
+		FindOne(ctx, bson.M{"_id": ownerID, "role": bson.M{"$in": bson.A{builderRole, operatorRole}}}).Decode(&builder); err != nil {
 		return "", err
 	}
 	return builder.Plan, nil
@@ -258,7 +302,7 @@ func (app *application) builderPlan(ctx context.Context, ownerID bson.ObjectID) 
 // enforceFreeTierAppCap returns a non-zero HTTP status + message when a free-plan
 // builder is already at their app ceiling. A zero cap disables the limit.
 func (app *application) enforceFreeTierAppCap(ctx context.Context, ownerID bson.ObjectID) (int, string) {
-	maxApps := app.config.FreeTierMaxApps
+	maxApps := app.effectiveSettings(ctx).FreeTierMaxApps
 	if maxApps <= 0 {
 		return 0, ""
 	}
@@ -335,7 +379,7 @@ func (app *application) createBuilderApp(w http.ResponseWriter, r *http.Request,
 			writeError(w, status, message)
 			return
 		}
-		limits := freeTierLimits(app.config)
+		limits := freeTierLimitsFromSettings(app.effectiveSettings(ctx))
 		input.Limits = &limits
 	}
 
@@ -477,7 +521,7 @@ func (app *application) claimBuilderApp(w http.ResponseWriter, r *http.Request, 
 	// The token is single-use and the app no longer expires once it is live.
 	unset := bson.M{"expiresAt": "", "claimTokenHash": ""}
 	if plan == freePlan {
-		set["limits"] = freeTierLimits(app.config)
+		set["limits"] = freeTierLimitsFromSettings(app.effectiveSettings(ctx))
 	} else {
 		// Operator builders are unbounded, so drop the sandbox quotas entirely.
 		unset["limits"] = ""

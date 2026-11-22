@@ -105,10 +105,15 @@ func TestBuildVibeStarterZip(t *testing.T) {
 		handle.Close()
 		files[file.Name] = string(contents)
 	}
-	for _, name := range []string{"README.md", "AGENTS.md", "index.html", "app.js", "app.css", "views.js", "mstash.json"} {
+	for _, name := range []string{"README.md", "AGENTS.md", "SKILL.md", "index.html", "app.js", "app.css", "views.js", "mstash.json"} {
 		if _, ok := files["m-stash-starter/"+name]; !ok {
 			t.Fatalf("zip missing %s; got %v", name, keys(files))
 		}
+	}
+	// The flat SKILL.md is the spec-tailored agent skill; it must sit at the
+	// project root (not inside a .cursor/ folder) per the plug-and-play layout.
+	if _, nested := files["m-stash-starter/.cursor/skills/m-stash/SKILL.md"]; nested {
+		t.Fatal("starter SKILL.md must stay flat at the root, not nested under .cursor/")
 	}
 	index := files["m-stash-starter/index.html"]
 	if !strings.Contains(index, `"api":"https://example.test"`) {
@@ -129,6 +134,45 @@ func TestBuildVibeStarterZip(t *testing.T) {
 	// The owner password is never known to the share, so it can never land in the zip.
 	if strings.Contains(strings.ToLower(files["m-stash-starter/mstash.json"]), "password") {
 		t.Fatal("mstash.json must not contain any password field")
+	}
+}
+
+// TestVibeRecipeStartersStaySampleFree renders each recipe through the starter
+// and confirms the seeded owner samples (which exist only so the launched app
+// looks alive) never reach the embedded client config — it reads live records
+// over the API instead.
+func TestVibeRecipeStartersStaySampleFree(t *testing.T) {
+	// One unique token per recipe, drawn from its seeded owner samples.
+	leaks := map[string]string{
+		"leaderboard":          "ace_of_space",
+		"user-tickets":         "nominal",
+		"appointments":         "Okonkwo",
+		"barber-bookings":      "Skin Fade",
+		"real-estate-bookings": "Harbor View",
+		"storefront":           "Stratocaster",
+	}
+	for _, recipe := range vibeRecipes {
+		t.Run(recipe.ID, func(t *testing.T) {
+			record := &vibeShareRecord{
+				ID:        "abcdefghijkl",
+				Idea:      recipe.Name,
+				Spec:      finalizeRecipe(recipe.build()),
+				Version:   vibeShareVersion,
+				CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+				ExpiresAt: time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC),
+			}
+			page, err := renderVibeStarterIndex(record, vibeStarterConfig{App: "pk_test", Mode: "preview"}, "/v1/vibe/abcdefghijkl/")
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := string(page)
+			if strings.Contains(body, `"samples"`) {
+				t.Fatalf("%s: samples key leaked into client config:\n%s", recipe.ID, body)
+			}
+			if token := leaks[recipe.ID]; token != "" && strings.Contains(body, token) {
+				t.Fatalf("%s: seeded sample %q leaked into client config", recipe.ID, token)
+			}
+		})
 	}
 }
 

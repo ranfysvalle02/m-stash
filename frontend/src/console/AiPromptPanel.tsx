@@ -24,6 +24,23 @@ function originChips(): string[] {
   return base
 }
 
+// skillNameFor builds a valid agent-skill name (lowercase letters, numbers, and
+// single hyphens, max 64 chars) from the app's display name.
+function skillNameFor(displayName: string): string {
+  const slug = displayName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+  const name = `m-stash-${slug || "app"}`
+  return name.length > 64 ? name.slice(0, 64).replace(/-+$/, "") : name
+}
+
+// yamlQuote wraps a value as a YAML double-quoted scalar so punctuation such as
+// ':' in a description can never break the frontmatter.
+function yamlQuote(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
+}
+
 export function AiPromptPanel({ app, apiBase, onAddOrigin }: AiPromptPanelProps) {
   const toast = useToast()
   const chips = useMemo(() => originChips(), [])
@@ -45,8 +62,12 @@ export function AiPromptPanel({ app, apiBase, onAddOrigin }: AiPromptPanelProps)
         `- POST /v1/auth/signup  { email, password, username }  -> { token, user, namespace }`,
         `- POST /v1/auth/login   { email, password }            -> { token, user, namespace }`,
         `- GET  /v1/me/resources/{type}                         -> the signed-in user's records`,
-        `- POST /v1/me/resources/{type}  { title, content, visibility } -> create a record`,
+        `- POST /v1/me/resources/{type}  { slug, title, visibility, data } -> create a record`,
         `- GET  /v1/shared/resources/{type}                     -> app-wide shared records`,
+        `- GET  /v1/public/shared/resources/{type}              -> public app-wide records (no login)`,
+        ``,
+        `A record body is { slug, title, visibility, data }, where data is an object of your fields`,
+        `and visibility is "private" (default), "authenticated", or "public".`,
         ``,
         `After signup/login, keep the returned bearer token and send Authorization: Bearer <token>`,
         `on authed requests. NEVER put a secret key (sk_...) in frontend code — it is server-only.`,
@@ -83,14 +104,19 @@ export function AiPromptPanel({ app, apiBase, onAddOrigin }: AiPromptPanelProps)
         `- \`POST /v1/auth/signup\` \`{ email, password, username }\` -> \`{ token, user, namespace }\``,
         `- \`POST /v1/auth/login\` \`{ email, password }\` -> \`{ token, user, namespace }\``,
         `- \`GET /v1/me/resources/{type}\` -> the signed-in user's records`,
-        `- \`POST /v1/me/resources/{type}\` \`{ title, content, visibility }\` -> create`,
+        `- \`POST /v1/me/resources/{type}\` \`{ slug, title, visibility, data }\` -> create`,
         `- \`GET /v1/shared/resources/{type}\` -> app-wide shared records`,
+        `- \`GET /v1/public/shared/resources/{type}\` -> public app-wide records (no login)`,
+        ``,
+        `## A record body`,
+        ``,
+        `\`{ slug, title, visibility, data }\` — \`data\` is an object of your fields;`,
+        `\`visibility\` is "private" (default), "authenticated", or "public".`,
         ``,
         `## Rules (do not break)`,
         ``,
         `- NEVER put the secret key (\`sk_...\`) in frontend/browser code. It is server-only.`,
         `- The browser never chooses an owner; the server scopes records to the token's user.`,
-        `- \`visibility\` is one of "private" (default), "authenticated", or "public".`,
       ].join("\n"),
     [app.displayName, apiBase, pk],
   )
@@ -98,28 +124,50 @@ export function AiPromptPanel({ app, apiBase, onAddOrigin }: AiPromptPanelProps)
   const skill = useMemo(
     () =>
       [
-        `# m-stash integration`,
+        `---`,
+        `name: ${skillNameFor(app.displayName)}`,
+        `description: ${yamlQuote(
+          `Build and extend ${app.displayName} against the m-stash API for authentication and ownership-scoped data. Use when wiring sign-up, login, public app data, or private per-user records for this app.`,
+        )}`,
+        `---`,
         ``,
-        `Backend for **${app.displayName}**. Provides sign-up, login, and ownership-scoped`,
-        `data so this app never needs its own database or security rules.`,
+        `# ${app.displayName}`,
         ``,
-        `## Connection`,
+        `Backed by **m-stash** for sign-up, login, and ownership-scoped data (per-user`,
+        `and app-wide), so this app never needs its own database or security rules.`,
         ``,
-        `- Base URL: \`${apiBase}\``,
-        `- Publishable key (frontend-safe): \`${pk}\``,
-        `- Every request: \`?app=${pk}\` + header \`X-M-Stash-App: ${pk}\`, \`credentials: "omit"\`.`,
+        `## Connect`,
         ``,
-        `## Flow`,
+        `- API base: \`${apiBase}\``,
+        `- Publishable key (frontend-safe, names the app): \`${pk}\``,
+        `- Every request: append \`?app=${pk}\` or set header \`X-M-Stash-App: ${pk}\`, and call \`fetch(url, { credentials: "omit" })\`.`,
+        `- After signup/login keep the bearer \`token\`; send \`Authorization: Bearer <token>\` on authed calls.`,
         ``,
-        `1. \`POST /v1/auth/signup\` or \`/v1/auth/login\` -> returns \`{ token, user, namespace }\`.`,
-        `2. Store the token; send \`Authorization: Bearer <token>\` on authed calls.`,
-        `3. \`POST /v1/me/resources/{type}\` to save a record; \`GET\` the same path to read them back.`,
-        `4. \`GET /v1/shared/resources/{type}\` for app-wide shared/public data.`,
+        `## Endpoints`,
         ``,
-        `## Guardrails`,
+        `- \`POST /v1/auth/signup\` \`{ email, password, username }\` -> \`{ token, user, namespace }\``,
+        `- \`POST /v1/auth/login\` \`{ email, password }\` -> \`{ token, user, namespace }\``,
+        `- \`GET|POST /v1/me/resources/{type}\` and \`/{type}/{slug}\` — the signed-in user's private records.`,
+        `- \`GET|POST /v1/shared/resources/{type}\` — app-wide records (writes need an admin session or the secret key).`,
+        `- \`GET /v1/public/shared/resources/{type}\` — public app-wide records, no login.`,
         ``,
-        `- The secret key (\`sk_...\`) is server-only; never expose it to the browser.`,
-        `- The server enforces ownership — a user only ever sees their own private records.`,
+        `## A record body`,
+        ``,
+        '```json',
+        `{`,
+        `  "slug": "unique-slug",`,
+        `  "title": "Human title",`,
+        `  "visibility": "private",`,
+        `  "data": { "fieldKey": "value" }`,
+        `}`,
+        '```',
+        ``,
+        `Visibility is \`private\` (owner only), \`authenticated\` (any signed-in user; shared only), or \`public\` (anyone).`,
+        ``,
+        `## Rules (do not break)`,
+        ``,
+        `- Always send the publishable key (\`?app=\` or \`X-M-Stash-App\`). NEVER put a secret key (\`sk_...\`) in frontend code — it is server-only.`,
+        `- The server enforces ownership; a user only ever sees their own private records. Don't work around a 401/403 on the client — fix the auth or the visibility.`,
       ].join("\n"),
     [app.displayName, apiBase, pk],
   )

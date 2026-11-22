@@ -20,7 +20,8 @@ Every request identifies its app with the header `X-M-Stash-App: <publishableKey
 - `GET|POST /v1/shared/resources/{type}` and `/{type}/{slug}` — shared app data; writes require admin or the app secret key.
 - `GET /v1/public/shared/resources/{type}/{slug}` — read one public shared record (no auth).
 - `GET /v1/public/{username}/{type}/{slug}` — read one public personal record (no auth).
-- `GET /.well-known/m-stash.json` — machine-readable service manifest (also advertises whether try-it, builder signup, and claim are enabled).
+- `GET /.well-known/m-stash.json` — machine-readable service manifest (also advertises whether try-it, builder signup, claim, and the vibe lab are enabled).
+- `GET /v1/vibe/recipes` and `POST /v1/vibe` — the Vibe lab: curated recipe specs plus a provisioned live sandbox. Unlocked when `TRY_SANDBOX=on` or `GEMINI_API_KEY` is set; returns `404` when both are off.
 - `POST /v1/try` — start a blank live sandbox (when `TRY_SANDBOX=on`). Returns `{ publishableKey, expiresAt, apiBase, claim: { token } }`. The sandbox is a real, isolated app with tight limits that expires unless claimed.
 - `POST /v1/builder/auth/signup` — self-serve builder account (when `BUILDER_SIGNUP=open`). Body `{ email, password }`. Returns a session; the account is on the free plan.
 - `POST /v1/builder/apps/claim` — keep a sandbox as a live app. Builder session required. Body `{ publishableKey, claimToken, allowedOrigins?, displayName? }`. The `pk_` is unchanged and all data is kept; a new secret key is returned once. Only the claim token (returned once when the sandbox was created) authorizes this — the public share link never does.
@@ -53,6 +54,7 @@ curl -X POST "$API_URL/v1/me/resources/save" \
 
 ## Docs
 
+- Agent skill (plug-and-play `SKILL.md` for Cursor, Claude Code, and other coding agents, stamped with this deployment's origin): `/skill.md`
 - Quick build guide: https://github.com/ranfysvalle02/m-stash/blob/main/quick.md
 - Full integration reference: https://github.com/ranfysvalle02/m-stash/blob/main/integration.md
 - Deploy guide: https://github.com/ranfysvalle02/m-stash/blob/main/quickstart.md

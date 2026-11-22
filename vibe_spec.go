@@ -61,6 +61,10 @@ type vibeSection struct {
 	View     string           `json:"view" bson:"view"`
 	Fields   []vibeField      `json:"fields" bson:"fields"`
 	Samples  []map[string]any `json:"samples,omitempty" bson:"samples,omitempty"`
+	// ActionLabel, when set on an owner section, turns each public item into a
+	// cross-tab call to action (e.g. "Book this cut") that prefills a member
+	// composer. It is clamped and only ever carried for owner sections.
+	ActionLabel string `json:"actionLabel,omitempty" bson:"actionLabel,omitempty"`
 }
 
 type vibeSpec struct {
@@ -231,6 +235,11 @@ func validateVibeSection(section vibeSection, seenScopeType map[string]bool) (vi
 		Title:    sanitizeInline(section.Title, vibeLabelMaxLength),
 		Audience: audience,
 		View:     pick(section.View, defaultView, vibeViews),
+	}
+	// An action label only makes sense on owner sections, whose public items the
+	// member sections act on. It is clamped like any other inline copy.
+	if audience == vibeAudienceOwner {
+		cleaned.ActionLabel = sanitizeInline(section.ActionLabel, 24)
 	}
 	if cleaned.Title == "" {
 		cleaned.Title = strings.Title(strings.ReplaceAll(typeName, "-", " ")) //nolint:staticcheck // ASCII titles only
