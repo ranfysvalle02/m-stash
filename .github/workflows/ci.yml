@@ -55,7 +55,7 @@ jobs:
       # can never slip through to a v* release tag again. No QEMU: the Dockerfile
       # cross-compiles natively on the runner.
       - name: Verify multi-platform Docker build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: false
