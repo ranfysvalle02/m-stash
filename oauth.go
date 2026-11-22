@@ -865,7 +865,9 @@ func (app *application) handleMeIdentities(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusServiceUnavailable, "Could not list identities")
 		return
 	}
-	var docs []UserIdentity
+	// A non-nil slice serializes an empty result as [] rather than null, so the
+	// UI can map over it directly.
+	docs := []UserIdentity{}
 	if err := cursor.All(ctx, &docs); err != nil {
 		writeError(w, http.StatusServiceUnavailable, "Could not list identities")
 		return

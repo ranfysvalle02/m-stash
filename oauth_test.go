@@ -444,6 +444,65 @@ func TestOAuthTicketHashIsStable(t *testing.T) {
 	}
 }
 
+// --- /v1/me/identities routing + method guards -----------------------------
+
+func TestMeIdentitiesRejectsNonGet(t *testing.T) {
+	app := oauthTestApp()
+	request := httptest.NewRequest(http.MethodPost, "/v1/me/identities", nil)
+	recorder := httptest.NewRecorder()
+	app.handleMeIdentities(recorder, request, &Claims{})
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /v1/me/identities = %d, want 405", recorder.Code)
+	}
+}
+
+func TestMeIdentityActionsRoutingAndMethodGuards(t *testing.T) {
+	app := oauthTestApp() // no OAuth adapters configured
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		want   int
+	}{
+		{"start requires POST", http.MethodGet, "/v1/me/identities/start", http.StatusMethodNotAllowed},
+		{"start with no enabled provider", http.MethodPost, "/v1/me/identities/start", http.StatusNotFound},
+		{"unlink requires DELETE", http.MethodGet, "/v1/me/identities/github", http.StatusMethodNotAllowed},
+		{"nested path is not a route", http.MethodPost, "/v1/me/identities/github/extra", http.StatusNotFound},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			request := httptest.NewRequest(testCase.method, testCase.path, nil)
+			recorder := httptest.NewRecorder()
+			app.handleMeIdentityActions(recorder, request, &Claims{})
+			if recorder.Code != testCase.want {
+				t.Fatalf("%s %s = %d, want %d", testCase.method, testCase.path, recorder.Code, testCase.want)
+			}
+		})
+	}
+}
+
+func TestEmptyIdentityListEncodesAsArray(t *testing.T) {
+	// handleMeIdentities seeds a non-nil slice so an empty result serializes as
+	// [] (which the UI can map over directly) rather than null.
+	empty := []UserIdentity{}
+	body, err := json.Marshal(map[string]any{"data": map[string]any{"identities": empty}})
+	if err != nil {
+		t.Fatalf("marshal empty slice: %v", err)
+	}
+	if !strings.Contains(string(body), `"identities":[]`) {
+		t.Fatalf("empty identity list should encode as [], got %s", body)
+	}
+	// Guard against regressing to a nil slice, which would encode as null.
+	var nilSlice []UserIdentity
+	nilBody, err := json.Marshal(map[string]any{"identities": nilSlice})
+	if err != nil {
+		t.Fatalf("marshal nil slice: %v", err)
+	}
+	if !strings.Contains(string(nilBody), `"identities":null`) {
+		t.Fatalf("sanity: a nil slice should encode as null, got %s", nilBody)
+	}
+}
+
 func writeTestJSON(w http.ResponseWriter, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(payload)

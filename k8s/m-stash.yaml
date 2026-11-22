@@ -8,6 +8,9 @@ data:
   jwt_issuer: m-stash
   jwt_audience: m-stash
   trust_proxy: "false"
+  # Canonical public origin for OAuth callbacks and shared links. Leave blank to
+  # derive it from the request host.
+  public_base_url: ""
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -76,6 +79,39 @@ spec:
                 configMapKeyRef:
                   name: m-stash-config
                   key: trust_proxy
+            - name: PUBLIC_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: m-stash-config
+                  key: public_base_url
+                  optional: true
+            # Optional social login (OAuth2 + PKCE). Populate each provider's pair
+            # in m-stash-secrets to enable it; optional keys keep existing clusters
+            # (without these secret keys) booting unchanged.
+            - name: GITHUB_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: m-stash-secrets
+                  key: GITHUB_CLIENT_ID
+                  optional: true
+            - name: GITHUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: m-stash-secrets
+                  key: GITHUB_CLIENT_SECRET
+                  optional: true
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: m-stash-secrets
+                  key: GOOGLE_CLIENT_ID
+                  optional: true
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: m-stash-secrets
+                  key: GOOGLE_CLIENT_SECRET
+                  optional: true
           readinessProbe:
             httpGet:
               path: /readyz

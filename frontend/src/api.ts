@@ -422,6 +422,17 @@ export interface ServiceCapabilities {
   oauthProviders: string[]
 }
 
+// UserIdentity is one external provider linked to the signed-in user, as
+// returned by GET /v1/me/identities.
+export interface UserIdentity {
+  provider: string
+  email?: string
+  displayName?: string
+  avatarUrl?: string
+  createdAt: string
+  lastLoginAt: string
+}
+
 export interface Page<T> {
   data: T[]
   page: {
@@ -584,6 +595,30 @@ export const api = {
   async exchangeOAuthCode(code: string) {
     return request<{ token: string; user: { id: string; email: string; role: string }; namespace?: Namespace; isNewUser?: boolean }>('/v1/auth/oauth/exchange', {
       method: 'POST', body: { code }, retrySession: false,
+    })
+  },
+
+  // listIdentities returns the social providers linked to the signed-in user.
+  async listIdentities(): Promise<UserIdentity[]> {
+    const response = await request<{ data?: { identities?: UserIdentity[] } }>('/v1/me/identities')
+    return response.data?.identities ?? []
+  },
+
+  // startIdentityLink begins linking a provider to the signed-in user and returns
+  // the provider authorize URL to navigate to (the user id is sealed in state).
+  async startIdentityLink(provider: string, redirectUri: string): Promise<string> {
+    const params = new URLSearchParams({ provider, redirect_uri: redirectUri })
+    const response = await request<{ data?: { authorizeUrl?: string } }>(`/v1/me/identities/start?${params.toString()}`, {
+      method: 'POST', retrySession: false,
+    })
+    return response.data?.authorizeUrl ?? ''
+  },
+
+  // unlinkIdentity removes a linked provider. The server refuses to remove the
+  // user's only remaining sign-in method.
+  async unlinkIdentity(provider: string) {
+    return request<{ data?: { provider: string; unlinked: boolean } }>(`/v1/me/identities/${encodeURIComponent(provider)}`, {
+      method: 'DELETE', retrySession: false,
     })
   },
 

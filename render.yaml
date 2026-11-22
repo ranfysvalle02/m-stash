@@ -28,3 +28,16 @@ services:
         value: "on"
       - key: BUILDER_SIGNUP
         value: "open"
+      # Canonical origin for OAuth callbacks and shared links.
+      - key: PUBLIC_BASE_URL
+        sync: false
+      # Optional social login (OAuth2 + PKCE). Enter each provider's pair in the
+      # Render dashboard; leave blank to keep the provider disabled.
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false

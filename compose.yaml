@@ -54,6 +54,11 @@ services:
       WEBHOOK_DELIVERY: ${WEBHOOK_DELIVERY:-false}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      # Optional social login (OAuth2 + PKCE). Set each provider's pair together.
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
     depends_on:
       mongo-init:
         condition: service_completed_successfully

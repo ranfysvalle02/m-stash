@@ -73,6 +73,7 @@ import {
   type ResourcePreview,
   type ServiceCapabilities,
   type UserClaims,
+  type UserIdentity,
   type VibeOwner,
   type VibeRecipeMeta,
   type VibeSection,
@@ -268,17 +269,28 @@ function App() {
   );
 }
 
+// oauthProviderName renders a provider id (e.g. "github") as a display name.
+function oauthProviderName(provider: string) {
+  switch (provider) {
+    case "github":
+      return "GitHub";
+    case "google":
+      return "Google";
+    default:
+      return provider.charAt(0).toUpperCase() + provider.slice(1);
+  }
+}
+
 // oauthLabel renders a provider id (e.g. "github") as a human button label.
 function oauthLabel(provider: string) {
-  const name = provider.charAt(0).toUpperCase() + provider.slice(1);
-  return `Continue with ${name}`;
+  return `Continue with ${oauthProviderName(provider)}`;
 }
 
 // oauthErrorMessage maps the backend's oauth_error codes to friendly copy.
 function oauthErrorMessage(code: string) {
   switch (code) {
     case "account_exists_link_required":
-      return "An account with this email already exists. Sign in with your password, then link this provider from your settings.";
+      return "An account with this email already exists. Sign in with your password, then connect this provider from Connected accounts in your profile settings.";
     case "identity_already_linked":
       return "That provider account is already linked to another user.";
     case "email_unverified":
@@ -645,12 +657,12 @@ function SharedEditorRoute() {
 }
 
 function NamespaceSettingsRoute() {
-  const { namespace } = useWorkspace();
-  return namespace ? (
-    <NamespaceSettings />
-  ) : (
-    <Navigate replace to="/app/shared" />
-  );
+  const { namespace, claims } = useWorkspace();
+  if (namespace) return <NamespaceSettings />;
+  // Password admins have no personal namespace but still need Connected accounts
+  // to link or unlink social providers; everyone else goes back to app data.
+  if (claims.role === "admin") return <AccountSettings />;
+  return <Navigate replace to="/app/shared" />;
 }
 
 function WorkspaceShell({
@@ -711,9 +723,10 @@ function WorkspaceShell({
               <Database aria-hidden="true" size={18} /> App data
             </NavLink>
           )}
-          {namespace && (
+          {(namespace || claims.role === "admin") && (
             <NavLink onClick={() => setMenuOpen(false)} to="/app/namespace">
-              <Settings aria-hidden="true" size={18} /> Profile
+              <Settings aria-hidden="true" size={18} />{" "}
+              {namespace ? "Profile" : "Settings"}
             </NavLink>
           )}
           <NavLink onClick={() => setMenuOpen(false)} to="/app/guide">
@@ -1533,6 +1546,194 @@ function NamespaceResourceEditor({
   );
 }
 
+// ConnectedAccountsSection lets a signed-in user link or unlink social login
+// providers. It completes the provider redirect (?oauth_code) in place, scrubbing
+// the one-time ticket from the URL before exchanging it so it can't be replayed.
+function ConnectedAccountsSection() {
+  const [providers, setProviders] = useState<string[]>([]);
+  const [identities, setIdentities] = useState<UserIdentity[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyProvider, setBusyProvider] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const reload = useCallback(async () => {
+    const [manifest, linked] = await Promise.all([
+      api.getServiceManifest(),
+      api.listIdentities(),
+    ]);
+    setProviders(manifest.oauthProviders);
+    setIdentities(linked);
+  }, []);
+
+  // Load the deployment's enabled providers and the user's current links.
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const [manifest, linked] = await Promise.all([
+          api.getServiceManifest(),
+          api.listIdentities(),
+        ]);
+        if (!active) return;
+        setProviders(manifest.oauthProviders);
+        setIdentities(linked);
+      } catch (requestError) {
+        if (active) setError(messageFromError(requestError));
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Complete a provider link when the redirect lands back here with a one-time
+  // ?oauth_code (or ?oauth_error). The ticket is scrubbed from the URL first so
+  // it can't be replayed, bookmarked, or leaked via browser history.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("oauth_code");
+    const oauthError = params.get("oauth_error");
+    if (!code && !oauthError) return;
+    window.history.replaceState({}, "", window.location.pathname);
+    if (oauthError) {
+      // oxlint-disable-next-line react/set-state-in-effect -- syncing UI with the URL the provider redirected us back to.
+      setError(oauthErrorMessage(oauthError));
+      return;
+    }
+    if (!code) return;
+    // oxlint-disable-next-line react/set-state-in-effect -- syncing UI with the URL the provider redirected us back to.
+    setBusyProvider("__callback__");
+    api
+      .exchangeOAuthCode(code)
+      .then(() => reload())
+      .then(() => setNotice("Account connected."))
+      .catch((requestError) => setError(messageFromError(requestError)))
+      .finally(() => setBusyProvider(""));
+  }, [reload]);
+
+  function connect(provider: string) {
+    setError("");
+    setNotice("");
+    setBusyProvider(provider);
+    void api
+      .startIdentityLink(provider, `${window.location.origin}/app/namespace`)
+      .then((authorizeUrl) => {
+        if (!authorizeUrl) throw new Error("Could not start linking.");
+        window.location.assign(authorizeUrl);
+      })
+      .catch((requestError) => {
+        setError(messageFromError(requestError));
+        setBusyProvider("");
+      });
+  }
+
+  async function disconnect(provider: string) {
+    setError("");
+    setNotice("");
+    setBusyProvider(provider);
+    try {
+      await api.unlinkIdentity(provider);
+      await reload();
+      setNotice(`Disconnected ${oauthProviderName(provider)}.`);
+    } catch (requestError) {
+      setError(messageFromError(requestError));
+    } finally {
+      setBusyProvider("");
+    }
+  }
+
+  const linkedProviders = new Set(
+    identities.map((identity) => identity.provider),
+  );
+  const connectable = providers.filter(
+    (provider) => !linkedProviders.has(provider),
+  );
+  const busy = busyProvider !== "";
+
+  return (
+    <section className="connected-accounts">
+      <div className="connected-accounts-head">
+        <h2>Connected accounts</h2>
+        <p>
+          Link GitHub or Google to sign in without a password. You can disconnect
+          a provider as long as one sign-in method remains.
+        </p>
+      </div>
+      {notice && (
+        <p className="save-state">
+          <Check aria-hidden="true" size={16} /> {notice}
+        </p>
+      )}
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+      {loading ? (
+        <p className="identity-empty">Loading connected accounts…</p>
+      ) : providers.length === 0 && identities.length === 0 ? (
+        <p className="identity-empty">
+          Social login isn&rsquo;t enabled on this deployment.
+        </p>
+      ) : (
+        <ul className="identity-list">
+          {identities.map((identity) => (
+            <li className="identity-row" key={identity.provider}>
+              <div className="identity-meta">
+                <span className="identity-provider">
+                  {oauthProviderName(identity.provider)}
+                </span>
+                <span className="identity-detail">
+                  {identity.email || identity.displayName || "Connected"}
+                </span>
+              </div>
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => void disconnect(identity.provider)}
+                type="button"
+              >
+                {busyProvider === identity.provider ? (
+                  <LoaderCircle aria-hidden="true" className="spin" size={16} />
+                ) : (
+                  <Trash2 aria-hidden="true" size={16} />
+                )}
+                Disconnect
+              </button>
+            </li>
+          ))}
+          {connectable.map((provider) => (
+            <li className="identity-row" key={provider}>
+              <div className="identity-meta">
+                <span className="identity-provider">
+                  {oauthProviderName(provider)}
+                </span>
+                <span className="identity-detail">Not connected</span>
+              </div>
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => connect(provider)}
+                type="button"
+              >
+                {busyProvider === provider ? (
+                  <LoaderCircle aria-hidden="true" className="spin" size={16} />
+                ) : (
+                  <Link2 aria-hidden="true" size={16} />
+                )}
+                Connect
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function NamespaceSettings() {
   const [namespace, setNamespace] = useState<Namespace>();
   const [input, setInput] = useState<NamespaceIdentityInput>({
@@ -1666,6 +1867,23 @@ function NamespaceSettings() {
           </button>
         </div>
       </form>
+      <ConnectedAccountsSection />
+    </main>
+  );
+}
+
+// AccountSettings is the /app/namespace view for an admin who has no personal
+// namespace: it drops the profile form but keeps Connected accounts reachable so
+// password admins can still link and unlink social providers.
+function AccountSettings() {
+  return (
+    <main className="settings-page">
+      <div className="page-heading compact">
+        <p className="eyebrow">Account</p>
+        <h1>Settings</h1>
+        <p>Manage how you sign in to this deployment.</p>
+      </div>
+      <ConnectedAccountsSection />
     </main>
   );
 }
