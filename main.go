@@ -64,6 +64,9 @@ func main() {
 	if err := ensureVibeShareIndexes(ctx, database); err != nil {
 		log.Fatalf("Failed to create vibe share index: %v", err)
 	}
+	if err := ensureOAuthIndexes(ctx, database); err != nil {
+		log.Fatalf("Failed to create OAuth identity indexes: %v", err)
+	}
 	app := newApplication(appConfig, database, client)
 	log.Printf("✅ Connected to Mongo database: '%s'", appConfig.Database)
 	if uiAppKey, err := app.ensureDefaultApp(ctx); err != nil {
@@ -101,6 +104,7 @@ func main() {
 	app.builderSignupLimiter = newAuthRateLimiter(database, 5, time.Hour)
 	app.builderSignupDailyLimiter = newAuthRateLimiter(database, appConfig.BuilderSignupDailyLimit, 24*time.Hour)
 	app.tryLimiter = newAuthRateLimiter(database, 5, 10*time.Minute)
+	app.oauthLimiter = newAuthRateLimiter(database, 20, 5*time.Minute)
 	if app.vibeEnabled() {
 		log.Printf("✨ Vibe lab enabled (model %s, daily cap %d)", appConfig.GeminiModel, appConfig.VibeDailyLimit)
 	} else {

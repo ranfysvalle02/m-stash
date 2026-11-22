@@ -550,6 +550,8 @@ function PulsePanel() {
           <PostureItem label="Trust proxy" on={env.trustProxy} />
           <PostureItem label="Secure cookies" on={env.sessionCookieSecure} />
           <PostureItem label="Webhook worker" on={env.webhookRunning} detail={env.webhookRunning ? "running" : "stopped"} />
+          <PostureItem label="GitHub OAuth" on={env.githubOAuthConfigured} />
+          <PostureItem label="Google OAuth" on={env.googleOAuthConfigured} />
         </div>
         <dl className="op-posture-meta">
           <div>

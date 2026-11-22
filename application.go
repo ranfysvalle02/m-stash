@@ -24,6 +24,10 @@ type application struct {
 	builderSignupLimiter      *authRateLimiter
 	builderSignupDailyLimiter *authRateLimiter
 	tryLimiter                *authRateLimiter
+	oauthLimiter              *authRateLimiter
+	// oauthAdapters holds one entry per configured social-login provider. It is
+	// empty when no OAuth credentials are set, which disables the feature cleanly.
+	oauthAdapters map[string]OAuthAdapter
 	// settings is the live runtime overlay on top of the immutable .env config.
 	settings *runtimeSettingsStore
 	// webhooks drains the outbox; it can be toggled on and off at runtime.
@@ -44,6 +48,7 @@ func newApplication(appConfig Config, database *mongo.Database, client *mongo.Cl
 		logger:      slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 		appCache:    newAppKeyCache(30 * time.Second),
 	}
+	app.oauthAdapters = newOAuthAdapters(appConfig)
 	// The live settings overlay needs a database; unit tests pass nil and fall
 	// back to the immutable .env config via effectiveSettings.
 	if database != nil {
@@ -80,6 +85,14 @@ func (app *application) Handler(rateLimiter *authRateLimiter) http.Handler {
 	mux.HandleFunc("/v1/auth/refresh", app.resolveApp(app.corsMiddleware(app.handleSessionRefresh)))
 	mux.HandleFunc("/v1/auth/logout", app.resolveApp(app.corsMiddleware(app.handleSessionLogout)))
 	mux.HandleFunc("/v1/auth/verify", app.resolveApp(app.corsMiddleware(app.authenticate(handleTokenVerification))))
+	// Pluggable OAuth2 + PKCE social login. /providers advertises configured
+	// adapters; /oauth/{provider}/{start,callback} runs the redirect flow; the
+	// app-scoped /oauth/exchange trades a one-time ticket for an m-stash session.
+	mux.HandleFunc("/v1/auth/providers", app.corsMiddleware(app.handleOAuthProviders))
+	mux.HandleFunc("/v1/auth/oauth/exchange", app.resolveApp(app.corsMiddleware(app.rateLimitMiddleware(app.oauthLimiter, "oauth-exchange", app.handleOAuthExchange))))
+	mux.HandleFunc("/v1/auth/oauth/", app.corsMiddleware(app.rateLimitMiddleware(app.oauthLimiter, "oauth", app.handleOAuth)))
+	mux.HandleFunc("/v1/me/identities", app.resolveApp(app.corsMiddleware(app.authenticate(app.handleMeIdentities))))
+	mux.HandleFunc("/v1/me/identities/", app.resolveApp(app.corsMiddleware(app.authenticate(app.handleMeIdentityActions))))
 	mux.HandleFunc("/v1/me/namespace", app.resolveApp(app.corsMiddleware(app.authenticate(app.handleMeNamespace))))
 	mux.HandleFunc("/v1/me/resources/", app.resolveApp(app.corsMiddleware(app.authenticate(app.handleMeResources))))
 	mux.HandleFunc("/v1/shared/namespace", app.resolveApp(app.corsMiddleware(app.authenticate(app.handleSharedNamespace))))
@@ -148,6 +161,13 @@ func (app *application) handleServiceManifest(w http.ResponseWriter, r *http.Req
 				"aiEnabled":       app.vibeEnabled(),
 				"endpoint":        "/v1/vibe",
 				"recipesEndpoint": "/v1/vibe/recipes",
+			},
+			// oauth lists this deployment's configured social-login adapters so the
+			// UI can render the matching buttons. Empty when no provider is set.
+			"oauth": map[string]any{
+				"providers":        app.oauthProviderNames(),
+				"startEndpoint":    "/v1/auth/oauth/{provider}/start",
+				"exchangeEndpoint": "/v1/auth/oauth/exchange",
 			},
 			// A plug-and-play SKILL.md for coding agents (Cursor, Claude Code, ...),
 			// stamped with this deployment's origin.

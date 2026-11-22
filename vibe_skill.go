@@ -98,6 +98,7 @@ func genericVibeSkill(baseURL string, trySandbox bool) string {
 	b.WriteString("## Endpoints\n\n")
 	b.WriteString("- `POST /v1/auth/signup` `{ email, password, username }` -> `{ token, user, namespace }`. Your users sign up in your app.\n")
 	b.WriteString("- `POST /v1/auth/login` `{ email, password }` -> `{ token, user }`. The app owner (admin) signs in here too.\n")
+	b.WriteString("- Social login (only if `GET /v1/auth/providers` lists a provider): full-page navigate to `/v1/auth/oauth/{provider}/start?app=<key>&redirect_uri=<yourUrl>`; the user returns to `redirect_uri?oauth_code=otc_...`; within 60s call `POST /v1/auth/oauth/exchange` `{ code }` (with the `X-M-Stash-App` header) -> `{ token, user, namespace, isNewUser }`. Never place the JWT in a URL; the `otc_` code is single-use.\n")
 	b.WriteString("- `GET|POST /v1/me/resources/{type}` and `GET|PUT|PATCH|DELETE /v1/me/resources/{type}/{slug}` — the signed-in user's PRIVATE records. `PATCH` atomically increments a numeric `data.*` field.\n")
 	b.WriteString("- `GET|POST /v1/shared/resources/{type}` and `/{type}/{slug}` — app-wide records. Reads need any signed-in user; writes need an admin session or the app secret key (`sk_`, server only).\n")
 	b.WriteString("- `GET /v1/public/shared/resources/{type}[/{slug}]` — public app-wide records, no login.\n")

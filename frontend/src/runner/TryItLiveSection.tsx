@@ -27,7 +27,7 @@ export function TryItLiveSection() {
         if (active) setCapabilities(caps)
       })
       .catch(() => {
-        if (active) setCapabilities({ trySandbox: false, builderSignup: false, operatorConfigured: false, vibeEnabled: false, vibeAIEnabled: false })
+        if (active) setCapabilities({ trySandbox: false, builderSignup: false, operatorConfigured: false, vibeEnabled: false, vibeAIEnabled: false, oauthProviders: [] })
       })
     return () => {
       active = false

@@ -17,6 +17,21 @@ import (
 
 const bcryptCost = 12
 
+// dummyPasswordHash makes a failed login against a password-less (OAuth-only)
+// account cost the same bcrypt work as a real password check, so response
+// timing can't reveal which accounts have no password. Computed once at startup.
+var dummyPasswordHash = mustGenerateDummyPasswordHash()
+
+func mustGenerateDummyPasswordHash() []byte {
+	hash, err := bcrypt.GenerateFromPassword([]byte("m-stash-oauth-placeholder"), bcryptCost)
+	if err != nil {
+		// A bcrypt failure here is effectively impossible; fall back to a
+		// well-formed hash constant so comparisons still run (and reject).
+		return []byte("$2a$12$" + strings.Repeat("x", 53))
+	}
+	return hash
+}
+
 const sharedServiceRole = "service"
 
 type Claims struct {
@@ -31,7 +46,9 @@ type User struct {
 	ID           bson.ObjectID `bson:"_id,omitempty" json:"id"`
 	AppID        bson.ObjectID `bson:"appId" json:"-"`
 	Email        string        `bson:"email" json:"email"`
-	PasswordHash string        `bson:"password" json:"-"`
+	// PasswordHash is empty for OAuth-only accounts, which can never satisfy a
+	// password login. omitempty keeps password-less users out of the stored field.
+	PasswordHash string        `bson:"password,omitempty" json:"-"`
 	Role         string        `bson:"role" json:"role"`
 	// Plan applies to builder (control-plane) accounts: "free" for self-serve
 	// signups, empty for platform-provisioned builders which are unbounded.
@@ -238,6 +255,14 @@ func (app *application) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	var user User
 	if err := app.database.Collection("_users").FindOne(ctx, bson.M{"appId": appID, "email": request.Email}).Decode(&user); err != nil {
+		writeError(w, http.StatusUnauthorized, "Invalid email or password")
+		return
+	}
+	if user.PasswordHash == "" {
+		// OAuth-only account: it has no password to compare. Run a dummy bcrypt
+		// comparison anyway so the response timing matches a real check and can't
+		// be used to enumerate which accounts are password-less, then reject.
+		_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(request.Password))
 		writeError(w, http.StatusUnauthorized, "Invalid email or password")
 		return
 	}

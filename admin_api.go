@@ -220,6 +220,8 @@ func (app *application) environmentPosture() map[string]any {
 		"publicBaseURL":           app.config.PublicBaseURL,
 		"database":                app.config.Database,
 		"webhookRunning":          app.webhooks != nil && app.webhooks.Enabled(),
+		"githubOAuthConfigured":   app.config.GitHubClientID != "" && app.config.GitHubClientSecret != "",
+		"googleOAuthConfigured":   app.config.GoogleClientID != "" && app.config.GoogleClientSecret != "",
 	}
 }
 

@@ -371,7 +371,7 @@ func (app *application) purgeAppTenantData(ctx context.Context, appID bson.Objec
 	}
 
 	byAppID := bson.M{"appId": appID}
-	for _, collection := range []string{resourceCollectionName, namespaceCollectionName, namespaceMembershipCollection, webhookCollectionName, "_users"} {
+	for _, collection := range []string{resourceCollectionName, namespaceCollectionName, namespaceMembershipCollection, webhookCollectionName, identityCollectionName, oauthTicketCollectionName, "_users"} {
 		if _, err := app.database.Collection(collection).DeleteMany(ctx, byAppID); err != nil {
 			return err
 		}

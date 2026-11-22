@@ -32,7 +32,7 @@ const (
 var reservedNamespaceSlugs = map[string]struct{}{
 	"admin": {}, "api": {}, "app": {}, "console": {}, "discover": {}, "faq": {},
 	"guide": {}, "healthz": {}, "login": {}, "logout": {}, "metrics": {},
-	"privacy": {}, "public": {}, "readyz": {}, "signup": {}, "v1": {}, "vibe": {},
+	"oauth": {}, "privacy": {}, "public": {}, "readyz": {}, "signup": {}, "v1": {}, "vibe": {},
 	sharedNamespaceSlug: {},
 }
 

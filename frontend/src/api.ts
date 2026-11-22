@@ -290,6 +290,8 @@ export interface EnvironmentPosture {
   publicBaseURL: string
   database: string
   webhookRunning: boolean
+  githubOAuthConfigured: boolean
+  googleOAuthConfigured: boolean
 }
 
 export interface AdminSettings {
@@ -415,6 +417,9 @@ export interface ServiceCapabilities {
   // only a live sandbox); vibeAIEnabled is true only when a model is configured.
   vibeEnabled: boolean
   vibeAIEnabled: boolean
+  // oauthProviders lists the social-login adapters this deployment enabled (e.g.
+  // ["github", "google"]); empty when OAuth credentials are not configured.
+  oauthProviders: string[]
 }
 
 export interface Page<T> {
@@ -564,6 +569,24 @@ export const api = {
     })
   },
 
+  // oauthStartUrl is the full-page navigation target that begins a social login.
+  // The browser leaves the SPA here, so the app key and return URL ride in the
+  // query string rather than a header.
+  oauthStartUrl(provider: string, redirectUri: string) {
+    const params = new URLSearchParams({ redirect_uri: redirectUri })
+    const key = appKey()
+    if (key) params.set('app', key)
+    return `/v1/auth/oauth/${encodeURIComponent(provider)}/start?${params.toString()}`
+  },
+
+  // exchangeOAuthCode trades the one-time ticket from the callback redirect for
+  // an m-stash session (HttpOnly cookies) and returns the standard login payload.
+  async exchangeOAuthCode(code: string) {
+    return request<{ token: string; user: { id: string; email: string; role: string }; namespace?: Namespace; isNewUser?: boolean }>('/v1/auth/oauth/exchange', {
+      method: 'POST', body: { code }, retrySession: false,
+    })
+  },
+
   async logOut() {
     return request<void>('/v1/auth/logout', { method: 'POST', retrySession: false })
   },
@@ -687,8 +710,9 @@ export const api = {
 
   // getServiceManifest reports which optional features this deployment enabled.
   async getServiceManifest(): Promise<ServiceCapabilities> {
-    const response = await request<{ capabilities?: { trySandbox?: { enabled?: boolean }; builderSignup?: { enabled?: boolean }; operatorBootstrap?: { configured?: boolean }; vibe?: { enabled?: boolean; aiEnabled?: boolean } } }>('/.well-known/m-stash.json', { retrySession: false })
+    const response = await request<{ capabilities?: { trySandbox?: { enabled?: boolean }; builderSignup?: { enabled?: boolean }; operatorBootstrap?: { configured?: boolean }; vibe?: { enabled?: boolean; aiEnabled?: boolean }; oauth?: { providers?: string[] } } }>('/.well-known/m-stash.json', { retrySession: false })
     return {
+      oauthProviders: response.capabilities?.oauth?.providers ?? [],
       trySandbox: response.capabilities?.trySandbox?.enabled ?? false,
       builderSignup: response.capabilities?.builderSignup?.enabled ?? false,
       operatorConfigured: response.capabilities?.operatorBootstrap?.configured ?? false,

@@ -118,6 +118,12 @@ func clientIP(r *http.Request, trustProxy bool) string {
 
 func (app *application) rateLimitMiddleware(limiter *authRateLimiter, scope string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// A nil limiter means rate limiting is not wired (unit tests build the
+		// handler without a database); fall through rather than panic.
+		if limiter == nil {
+			next(w, r)
+			return
+		}
 		allowed, err := limiter.allow(r.Context(), scope, clientIP(r, app.config.TrustProxy))
 		if err != nil {
 			app.logger.Error("authentication rate-limit check failed", "request_id", requestIDFromContext(r.Context()), "scope", scope, "error", err)

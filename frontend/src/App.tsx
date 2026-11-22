@@ -27,6 +27,7 @@ import {
   Globe2,
   Link2,
   LoaderCircle,
+  LogIn,
   LogOut,
   Menu,
   PenLine,
@@ -267,6 +268,30 @@ function App() {
   );
 }
 
+// oauthLabel renders a provider id (e.g. "github") as a human button label.
+function oauthLabel(provider: string) {
+  const name = provider.charAt(0).toUpperCase() + provider.slice(1);
+  return `Continue with ${name}`;
+}
+
+// oauthErrorMessage maps the backend's oauth_error codes to friendly copy.
+function oauthErrorMessage(code: string) {
+  switch (code) {
+    case "account_exists_link_required":
+      return "An account with this email already exists. Sign in with your password, then link this provider from your settings.";
+    case "identity_already_linked":
+      return "That provider account is already linked to another user.";
+    case "email_unverified":
+      return "Your provider account has no verified email, so we can't sign you in.";
+    case "app_full":
+      return "This deployment has reached its user limit.";
+    case "provider_denied":
+      return "Sign-in was cancelled.";
+    default:
+      return "Social sign-in failed. Please try again.";
+  }
+}
+
 function AuthenticationPage({
   mode,
   onAuthenticated,
@@ -280,8 +305,58 @@ function AuthenticationPage({
   const [username, setUsername] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [providers, setProviders] = useState<string[]>([]);
+  const [oauthBusy, setOauthBusy] = useState(false);
   const isSignUp = mode === "signup";
   const usernameIssue = username ? usernameValidationMessage(username) : "";
+
+  // Discover which social-login adapters this deployment enabled so we only show
+  // buttons that will actually work.
+  useEffect(() => {
+    let active = true;
+    api
+      .getServiceManifest()
+      .then((manifest) => {
+        if (active) setProviders(manifest.oauthProviders);
+      })
+      .catch(() => {
+        if (active) setProviders([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Complete a social login when the provider redirect lands back here with a
+  // one-time ?oauth_code (or ?oauth_error). The ticket is scrubbed from the URL
+  // immediately so it can't be replayed, bookmarked, or leaked via history.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("oauth_code");
+    const oauthError = params.get("oauth_error");
+    if (!code && !oauthError) return;
+    window.history.replaceState({}, "", window.location.pathname);
+    if (oauthError) {
+      // oxlint-disable-next-line react/set-state-in-effect -- syncing UI with the URL the provider redirected us back to.
+      setError(oauthErrorMessage(oauthError));
+      return;
+    }
+    if (!code) return;
+    // oxlint-disable-next-line react/set-state-in-effect -- syncing UI with the URL the provider redirected us back to.
+    setOauthBusy(true);
+    api
+      .exchangeOAuthCode(code)
+      .then(async () => {
+        await onAuthenticated();
+        navigate("/app/resources/record");
+      })
+      .catch((requestError) => {
+        setError(messageFromError(requestError));
+      })
+      .finally(() => {
+        setOauthBusy(false);
+      });
+  }, [navigate, onAuthenticated]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -401,6 +476,34 @@ function AuthenticationPage({
             {isSignUp ? "Create demo user" : "Sign in to demo"}
           </button>
         </form>
+        {providers.length > 0 && (
+          <div className="oauth-options">
+            <div className="oauth-divider">
+              <span>or continue with</span>
+            </div>
+            {providers.map((provider) => (
+              <button
+                key={provider}
+                className="button secondary full-width"
+                disabled={oauthBusy || submitting}
+                onClick={() => {
+                  const redirectUri = `${window.location.origin}/${isSignUp ? "signup" : "login"}`;
+                  window.location.assign(
+                    api.oauthStartUrl(provider, redirectUri),
+                  );
+                }}
+                type="button"
+              >
+                {oauthBusy ? (
+                  <LoaderCircle aria-hidden="true" className="spin" size={17} />
+                ) : (
+                  <LogIn aria-hidden="true" size={17} />
+                )}
+                {oauthLabel(provider)}
+              </button>
+            ))}
+          </div>
+        )}
         <p className="auth-switch">
           {isSignUp ? "Already tried the demo?" : "New to the demo?"} {" "}
           <Link to={isSignUp ? "/login" : "/signup"}>
@@ -3878,7 +3981,7 @@ function ConsolePage() {
         if (active) setCapabilities(caps);
       })
       .catch(() => {
-        if (active) setCapabilities({ trySandbox: false, builderSignup: false, operatorConfigured: false, vibeEnabled: false, vibeAIEnabled: false });
+        if (active) setCapabilities({ trySandbox: false, builderSignup: false, operatorConfigured: false, vibeEnabled: false, vibeAIEnabled: false, oauthProviders: [] });
       });
     return () => {
       active = false;

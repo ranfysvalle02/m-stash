@@ -36,6 +36,13 @@ type Config struct {
 	VibeShareTTL        time.Duration
 	VibeMaxSandboxes    int
 	PublicBaseURL       string
+	// OAuth client credentials for social-login adapters. A provider is enabled
+	// only when both its ID and secret are set; a half-configured pair fails boot.
+	// Secrets live only in the environment, never in MongoDB.
+	GitHubClientID     string
+	GitHubClientSecret string
+	GoogleClientID     string
+	GoogleClientSecret string
 	// BuilderSignupOpen enables self-serve builder account creation. When false,
 	// builder accounts can only be bootstrapped with the platform token.
 	BuilderSignupOpen       bool
@@ -137,6 +144,16 @@ func loadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	githubClientID := strings.TrimSpace(getEnv("GITHUB_CLIENT_ID", ""))
+	githubClientSecret := strings.TrimSpace(getEnv("GITHUB_CLIENT_SECRET", ""))
+	googleClientID := strings.TrimSpace(getEnv("GOOGLE_CLIENT_ID", ""))
+	googleClientSecret := strings.TrimSpace(getEnv("GOOGLE_CLIENT_SECRET", ""))
+	if err := validateOAuthPair("GITHUB", githubClientID, githubClientSecret); err != nil {
+		return Config{}, err
+	}
+	if err := validateOAuthPair("GOOGLE", googleClientID, googleClientSecret); err != nil {
+		return Config{}, err
+	}
 	loadedConfig := Config{
 		Port:                getEnv("PORT", "4000"),
 		MongoURI:            getEnv("MONGO_URI", "mongodb://localhost:27017"),
@@ -164,6 +181,11 @@ func loadConfig() (Config, error) {
 		VibeShareTTL:        vibeShareTTL,
 		VibeMaxSandboxes:    vibeMaxSandboxes,
 		PublicBaseURL:       getEnv("PUBLIC_BASE_URL", ""),
+
+		GitHubClientID:     githubClientID,
+		GitHubClientSecret: githubClientSecret,
+		GoogleClientID:     googleClientID,
+		GoogleClientSecret: googleClientSecret,
 
 		BuilderSignupOpen:       builderSignupOpen,
 		BuilderSignupDailyLimit: builderSignupDailyLimit,
@@ -278,6 +300,16 @@ func validateBootstrapAdminCredentials(email, password string) (string, error) {
 		return "", fmt.Errorf("invalid bootstrap admin credentials: %w", err)
 	}
 	return email, nil
+}
+
+// validateOAuthPair ensures an OAuth provider is either fully configured (both
+// client id and secret) or fully absent; a half-configured provider is a
+// misconfiguration that would silently disable social login.
+func validateOAuthPair(provider, clientID, clientSecret string) error {
+	if (clientID == "") != (clientSecret == "") {
+		return fmt.Errorf("%s_CLIENT_ID and %s_CLIENT_SECRET must be set together", provider, provider)
+	}
+	return nil
 }
 
 func getAllowedOrigins() []string {

@@ -16,6 +16,9 @@ Every request identifies its app with the header `X-M-Stash-App: <publishableKey
 - `POST /v1/apps` — provision an app (needs the platform token). Returns a publishable key (`pk_...`, safe in the browser) and a one-time secret key (`sk_...`, backend only).
 - `POST /v1/auth/signup` — body `{ email, password, username }`. Your users sign up in your app.
 - `POST /v1/auth/login` — body `{ email, password }`. Browser flows also set HttpOnly session cookies.
+- `GET /v1/auth/providers` — list the social-login providers this deployment enabled, e.g. `{ "data": { "providers": ["github","google"] } }`. Empty when no OAuth credentials are set.
+- OAuth2 + PKCE social login (only when a provider is configured): send the browser to `GET /v1/auth/oauth/{provider}/start?app={pk_...}&redirect_uri={yourUrl}` (full-page navigation, not fetch). After consent the user is redirected to `redirect_uri?oauth_code=otc_...` (or `?oauth_error=...`). Exchange the one-time code within 60s with `POST /v1/auth/oauth/exchange` body `{ code }` (include the `X-M-Stash-App` header). It returns `{ token, user, namespace, isNewUser }` and sets the same HttpOnly session cookies as password login. Never put the JWT in a URL; `redirect_uri` must be same-origin or an allowed origin. OAuth client IDs/secrets live only in deployment env vars.
+- `GET /v1/me/identities`, `POST /v1/me/identities/start?provider={provider}`, `DELETE /v1/me/identities/{provider}` — authenticated: list, link (returns `{ data: { authorizeUrl } }` to navigate to), and unlink social providers. Unlinking your only sign-in method is refused.
 - `GET|POST /v1/me/resources/{type}` and `GET|PUT|DELETE /v1/me/resources/{type}/{slug}` — personal data. Body `{ slug, title, data, visibility }`.
 - `GET|POST /v1/shared/resources/{type}` and `/{type}/{slug}` — shared app data; writes require admin or the app secret key.
 - `GET /v1/public/shared/resources/{type}/{slug}` — read one public shared record (no auth).
