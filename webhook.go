@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"strings"
 	"time"
 
@@ -41,6 +43,9 @@ func (input *webhookInput) normalizeAndValidate() error {
 	if !isAbsoluteHTTPURL(input.URL) {
 		return errors.New("url must be an absolute http(s) URL")
 	}
+	if err := validateWebhookURLHost(input.URL); err != nil {
+		return err
+	}
 	if len(input.EventTypes) == 0 || len(input.EventTypes) > 20 {
 		return errors.New("eventTypes must contain 1-20 entries")
 	}
@@ -50,6 +55,29 @@ func (input *webhookInput) normalizeAndValidate() error {
 			return errors.New("eventTypes entries must be event type patterns like m-stash.resources or m-stash.resources.increment.v1")
 		}
 		input.EventTypes[index] = pattern
+	}
+	return nil
+}
+
+// validateWebhookURLHost rejects a webhook URL whose host is a loopback name or a
+// literal non-public IP. It is a fast fail at registration time; the dialer's
+// connect-time Control hook (isBlockedWebhookAddr) remains the real SSRF boundary,
+// because a hostname can still resolve (or later rebind) to a private address.
+func validateWebhookURLHost(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return errors.New("url must be an absolute http(s) URL")
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return errors.New("url must include a host")
+	}
+	lowerHost := strings.ToLower(host)
+	if lowerHost == "localhost" || strings.HasSuffix(lowerHost, ".localhost") {
+		return errors.New("url must not target localhost")
+	}
+	if addr, parseErr := netip.ParseAddr(host); parseErr == nil && isBlockedWebhookAddr(addr) {
+		return errors.New("url must not target a private, loopback, or link-local address")
 	}
 	return nil
 }

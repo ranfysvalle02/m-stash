@@ -323,6 +323,9 @@ func (sweeper *sandboxSweeper) sweep(ctx context.Context) {
 			sweeper.app.logger.Error("sandbox purge failed", "error", err, "app", record.ID.Hex())
 		}
 	}
+	// Reclaim any cached keys that have expired, so an idle deployment's cache
+	// never retains stale sandbox entries between lookups.
+	sweeper.app.appCache.sweepExpired(time.Now().UTC())
 }
 
 // purgeSandboxApp deactivates a sandbox tenant and deletes every document it owns

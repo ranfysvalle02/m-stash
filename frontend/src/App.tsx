@@ -56,6 +56,8 @@ import {
 import {
   APIError,
   api,
+  normalizeSameOriginUrl,
+  toSameOriginPath,
   type AppLimits,
   type BuilderApp,
   type BuilderAppInput,
@@ -2019,12 +2021,15 @@ function storefrontHost(rawUrl: string) {
 }
 
 // The embedded starter reads a `#owner=<emailEnc>:<passwordEnc>` fragment to
-// offer one-click owner sign-in. The fragment never reaches the server.
+// offer one-click owner sign-in. The fragment never reaches the server. The
+// preview is same-origin, so collapse it to a relative path first: an https page
+// can then never try to frame an http:// URL a misconfigured proxy stamped.
 function vibePreviewSrc(previewUrl: string, owner: VibeOwner | null) {
-  if (!owner) return previewUrl;
+  const src = toSameOriginPath(previewUrl);
+  if (!owner) return src;
   const email = encodeURIComponent(owner.email);
   const password = encodeURIComponent(owner.password);
-  return `${previewUrl}#owner=${email}:${password}`;
+  return `${src}#owner=${email}:${password}`;
 }
 
 function sectionAudienceLabel(audience: VibeSection["audience"]) {
@@ -2338,11 +2343,14 @@ function VibeSkillActions({ skillUrl }: { skillUrl?: string }) {
   if (!skillUrl) {
     return null;
   }
-  const downloadHref = skillUrl + (skillUrl.includes("?") ? "&" : "?") + "download=1";
+  // Same-origin: fetch and download against a relative path so a proxy scheme
+  // mismatch never trips Mixed Content or the console's connect-src 'self' CSP.
+  const skillPath = toSameOriginPath(skillUrl);
+  const downloadHref = skillPath + (skillPath.includes("?") ? "&" : "?") + "download=1";
   async function copySkill() {
     setFailed(false);
     try {
-      const res = await fetch(skillUrl!, { credentials: "omit" });
+      const res = await fetch(skillPath, { credentials: "omit" });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
@@ -2404,7 +2412,11 @@ function VibeSidePanel({
   const claimed = share.claimed ?? false;
   const [copied, setCopied] = useState(false);
   const [hoodOpen, setHoodOpen] = useState(false);
-  const shareLink = share.url || window.location.href;
+  // Keep the copyable link absolute, but upgrade a same-host http:// link a
+  // misconfigured proxy may have stamped to this document's own origin.
+  const shareLink = share.url
+    ? normalizeSameOriginUrl(share.url)
+    : window.location.href;
 
   async function copyShareLink() {
     try {
@@ -2423,7 +2435,7 @@ function VibeSidePanel({
       <VibeOwnerCard owner={owner} />
 
       <div className="vibe-side-actions">
-        <a className="button primary full-width" download href={share.zipUrl}>
+        <a className="button primary full-width" download href={toSameOriginPath(share.zipUrl)}>
           <Download aria-hidden="true" size={16} /> Download starter
         </a>
         <button
@@ -2569,7 +2581,7 @@ function VibeCapacity({
       </div>
 
       <div className="vibe-capacity-actions">
-        <a className="button primary" download href={share.zipUrl}>
+        <a className="button primary" download href={toSameOriginPath(share.zipUrl)}>
           <Download aria-hidden="true" size={16} /> Download starter
         </a>
         <span className="vibe-expiry">

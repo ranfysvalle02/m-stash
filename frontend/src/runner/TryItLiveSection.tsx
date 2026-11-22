@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { ArrowUpRight, Sparkles } from "lucide-react"
-import { APIError, api } from "../api"
+import { APIError, api, normalizeSameOriginUrl } from "../api"
 import type { ServiceCapabilities, TrySandboxResult } from "../api"
 import { ApiLoopRunner } from "./ApiLoopRunner"
 import { saveClaimToken } from "./claimStorage"
@@ -38,13 +38,13 @@ export function TryItLiveSection() {
   // claim token) so later runs and the "Keep this app" link reuse the same app.
   async function ensureSandbox() {
     if (sandbox) {
-      return { pk: sandbox.publishableKey, base: sandbox.apiBase || window.location.origin, expiresAt: sandbox.expiresAt }
+      return { pk: sandbox.publishableKey, base: normalizeSameOriginUrl(sandbox.apiBase || window.location.origin), expiresAt: sandbox.expiresAt }
     }
     try {
       const result = await api.startTrySandbox()
       saveClaimToken(result.publishableKey, result.claim.token)
       setSandbox(result)
-      return { pk: result.publishableKey, base: result.apiBase || window.location.origin, expiresAt: result.expiresAt }
+      return { pk: result.publishableKey, base: normalizeSameOriginUrl(result.apiBase || window.location.origin), expiresAt: result.expiresAt }
     } catch (error) {
       if (error instanceof APIError && error.status === 503) {
         throw new Error("The playground is full right now. Please try again in a few minutes.")

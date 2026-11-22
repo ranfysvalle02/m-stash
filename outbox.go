@@ -16,6 +16,10 @@ import (
 const (
 	outboxCollectionName = "_m_stash_outbox"
 	outboxSchemaVersion  = "v1"
+	// outboxDeliveredTTL is how long a delivered event lingers before a MongoDB
+	// TTL index reaps it. Only delivered rows carry delivery.expiresAt, so
+	// pending, retry, sending, and dead-lettered events are never auto-expired.
+	outboxDeliveredTTL = 7 * 24 * time.Hour
 )
 
 type outboxActor struct {
@@ -32,6 +36,9 @@ type outboxDelivery struct {
 	State       string    `bson:"state" json:"state"`
 	Attempts    int       `bson:"attempts" json:"attempts"`
 	AvailableAt time.Time `bson:"availableAt" json:"availableAt"`
+	// ExpiresAt is set only once an event is delivered, so the TTL index reclaims
+	// delivered rows after outboxDeliveredTTL while leaving undelivered work alone.
+	ExpiresAt *time.Time `bson:"expiresAt,omitempty" json:"expiresAt,omitempty"`
 }
 
 // outboxEvent is an internal, immutable contract for independently deployed workers.
@@ -79,6 +86,9 @@ func ensureOutboxIndexes(ctx context.Context, database *mongo.Database) error {
 		{Keys: bson.D{{Key: "delivery.state", Value: 1}, {Key: "delivery.availableAt", Value: 1}, {Key: "_id", Value: 1}}},
 		{Keys: bson.D{{Key: "appId", Value: 1}, {Key: "occurredAt", Value: -1}, {Key: "_id", Value: -1}}},
 		{Keys: bson.D{{Key: "requestId", Value: 1}}},
+		// TTL on the delivered-only timestamp: documents without delivery.expiresAt
+		// (pending, retry, sending, dead) are never expired by this index.
+		{Keys: bson.D{{Key: "delivery.expiresAt", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	})
 	if err != nil {
 		return fmt.Errorf("create outbox indexes: %w", err)

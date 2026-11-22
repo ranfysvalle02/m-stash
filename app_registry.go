@@ -100,11 +100,18 @@ func ensureAppIndexes(ctx context.Context, database *mongo.Database) error {
 	return err
 }
 
+// defaultAppCacheMaxEntries bounds how many publishable keys the cache holds, so
+// a burst of short-lived sandbox keys can never grow it without limit between
+// restarts. Past the cap, put sweeps expired entries first, then evicts the
+// soonest-to-expire entry to make room.
+const defaultAppCacheMaxEntries = 2048
+
 // appKeyCache memoizes publishable-key lookups so hot paths avoid a Mongo round trip per request.
 type appKeyCache struct {
-	mu      sync.RWMutex
-	entries map[string]appCacheEntry
-	ttl     time.Duration
+	mu         sync.Mutex
+	entries    map[string]appCacheEntry
+	ttl        time.Duration
+	maxEntries int
 }
 
 type appCacheEntry struct {
@@ -113,14 +120,26 @@ type appCacheEntry struct {
 }
 
 func newAppKeyCache(ttl time.Duration) *appKeyCache {
-	return &appKeyCache{entries: make(map[string]appCacheEntry), ttl: ttl}
+	return newAppKeyCacheWithCap(ttl, defaultAppCacheMaxEntries)
+}
+
+func newAppKeyCacheWithCap(ttl time.Duration, maxEntries int) *appKeyCache {
+	if maxEntries < 1 {
+		maxEntries = defaultAppCacheMaxEntries
+	}
+	return &appKeyCache{entries: make(map[string]appCacheEntry), ttl: ttl, maxEntries: maxEntries}
 }
 
 func (cache *appKeyCache) get(key string) (*AppRecord, bool) {
-	cache.mu.RLock()
-	defer cache.mu.RUnlock()
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
 	entry, ok := cache.entries[key]
-	if !ok || time.Now().After(entry.expiresAt) {
+	if !ok {
+		return nil, false
+	}
+	// Evict a stale hit so an expired key never lingers past its TTL.
+	if time.Now().After(entry.expiresAt) {
+		delete(cache.entries, key)
 		return nil, false
 	}
 	return entry.record, true
@@ -129,7 +148,14 @@ func (cache *appKeyCache) get(key string) (*AppRecord, bool) {
 func (cache *appKeyCache) put(key string, record *AppRecord) {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
-	cache.entries[key] = appCacheEntry{record: record, expiresAt: time.Now().Add(cache.ttl)}
+	now := time.Now()
+	if _, exists := cache.entries[key]; !exists && len(cache.entries) >= cache.maxEntries {
+		cache.sweepExpiredLocked(now)
+		if len(cache.entries) >= cache.maxEntries {
+			cache.evictSoonestLocked()
+		}
+	}
+	cache.entries[key] = appCacheEntry{record: record, expiresAt: now.Add(cache.ttl)}
 }
 
 // delete evicts a memoized app so a key rotation or origin change takes effect
@@ -138,6 +164,39 @@ func (cache *appKeyCache) delete(key string) {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 	delete(cache.entries, key)
+}
+
+// sweepExpired removes every entry past its cache TTL or whose sandbox has
+// expired. The sandbox sweeper calls it so idle deployments also reclaim stale
+// keys without waiting for the next put at capacity.
+func (cache *appKeyCache) sweepExpired(now time.Time) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	cache.sweepExpiredLocked(now)
+}
+
+func (cache *appKeyCache) sweepExpiredLocked(now time.Time) {
+	for key, entry := range cache.entries {
+		if now.After(entry.expiresAt) || entry.record.expired(now) {
+			delete(cache.entries, key)
+		}
+	}
+}
+
+// evictSoonestLocked drops the entry with the earliest expiry, making room when
+// the cache is full of still-live entries.
+func (cache *appKeyCache) evictSoonestLocked() {
+	var oldestKey string
+	var oldest time.Time
+	for key, entry := range cache.entries {
+		if oldestKey == "" || entry.expiresAt.Before(oldest) {
+			oldestKey = key
+			oldest = entry.expiresAt
+		}
+	}
+	if oldestKey != "" {
+		delete(cache.entries, oldestKey)
+	}
 }
 
 func (app *application) lookupApp(ctx context.Context, publishableKey string) (*AppRecord, error) {

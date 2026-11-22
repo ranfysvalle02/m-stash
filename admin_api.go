@@ -1175,13 +1175,18 @@ func (app *application) handleAdminOutboxItem(w http.ResponseWriter, r *http.Req
 	}
 }
 
-// outboxRetryUpdate resets an event to pending for immediate redelivery.
+// outboxRetryUpdate resets an event to pending for immediate redelivery. It also
+// clears delivery.expiresAt so a previously delivered event that is being retried
+// is not reaped by the TTL index while it waits to be redelivered.
 func outboxRetryUpdate() bson.M {
-	return bson.M{"$set": bson.M{
-		"delivery.state":       "pending",
-		"delivery.attempts":    0,
-		"delivery.availableAt": time.Now().UTC(),
-	}}
+	return bson.M{
+		"$set": bson.M{
+			"delivery.state":       "pending",
+			"delivery.attempts":    0,
+			"delivery.availableAt": time.Now().UTC(),
+		},
+		"$unset": bson.M{"delivery.expiresAt": ""},
+	}
 }
 
 func (app *application) retryOutboxEvent(ctx context.Context, w http.ResponseWriter, eventID bson.ObjectID) {

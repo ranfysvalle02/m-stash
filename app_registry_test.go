@@ -29,6 +29,50 @@ func TestLookupAppTreatsExpiredSandboxAsUnknown(t *testing.T) {
 	}
 }
 
+func TestAppKeyCacheSweepsExpiredEntries(t *testing.T) {
+	cache := newAppKeyCacheWithCap(time.Minute, 8)
+	now := time.Now()
+	cache.put("pk_live", &AppRecord{PublishableKey: "pk_live"})
+	// A TTL-expired entry (written with a past expiry) must be swept.
+	cache.entries["pk_stale"] = appCacheEntry{record: &AppRecord{PublishableKey: "pk_stale"}, expiresAt: now.Add(-time.Minute)}
+	// A sandbox whose own ExpiresAt has passed must be swept even if its cache TTL is fresh.
+	past := now.UTC().Add(-time.Hour)
+	cache.entries["pk_sandbox"] = appCacheEntry{record: &AppRecord{PublishableKey: "pk_sandbox", Sandbox: true, ExpiresAt: &past}, expiresAt: now.Add(time.Minute)}
+
+	cache.sweepExpired(now.UTC())
+
+	if _, ok := cache.get("pk_live"); !ok {
+		t.Fatal("live entry must survive the sweep")
+	}
+	if _, present := cache.entries["pk_stale"]; present {
+		t.Fatal("TTL-expired entry must be swept")
+	}
+	if _, present := cache.entries["pk_sandbox"]; present {
+		t.Fatal("expired sandbox entry must be swept")
+	}
+}
+
+func TestAppKeyCacheEvictsWhenFull(t *testing.T) {
+	cache := newAppKeyCacheWithCap(time.Minute, 2)
+	now := time.Now()
+	// Two still-live entries at capacity, pk_a the soonest to expire.
+	cache.entries["pk_a"] = appCacheEntry{record: &AppRecord{PublishableKey: "pk_a"}, expiresAt: now.Add(10 * time.Second)}
+	cache.entries["pk_b"] = appCacheEntry{record: &AppRecord{PublishableKey: "pk_b"}, expiresAt: now.Add(20 * time.Second)}
+
+	// Inserting a third with no expired entries evicts the soonest-to-expire (pk_a).
+	cache.put("pk_c", &AppRecord{PublishableKey: "pk_c"})
+
+	if len(cache.entries) != 2 {
+		t.Fatalf("cache size = %d, want 2 (capacity enforced)", len(cache.entries))
+	}
+	if _, ok := cache.get("pk_a"); ok {
+		t.Fatal("soonest-to-expire entry (pk_a) should have been evicted")
+	}
+	if _, ok := cache.get("pk_c"); !ok {
+		t.Fatal("newest entry (pk_c) must be present")
+	}
+}
+
 func TestAppKeyFromRequestPrefersHeaderThenQuery(t *testing.T) {
 	headerRequest := httptest.NewRequest(http.MethodGet, "/v1/public/ada?app=pk_query", nil)
 	headerRequest.Header.Set(appKeyHeader, "pk_header")

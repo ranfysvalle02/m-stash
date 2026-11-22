@@ -29,7 +29,7 @@ import {
   Users,
   Zap,
 } from "lucide-react"
-import { APIError, api } from "../api"
+import { APIError, api, normalizeSameOriginUrl } from "../api"
 import type {
   AdminAppPatch,
   AdminAppView,
@@ -1233,7 +1233,7 @@ function OutboxPanel() {
 function TinkerPanel() {
   const ensureSandbox = useCallback(async () => {
     const result = await api.adminTinkerSandbox()
-    return { pk: result.publishableKey, base: result.apiBase, expiresAt: result.expiresAt }
+    return { pk: result.publishableKey, base: normalizeSameOriginUrl(result.apiBase), expiresAt: result.expiresAt }
   }, [])
 
   return (

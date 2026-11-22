@@ -17,6 +17,9 @@ func TestSecurityHeadersAreAppliedToApplicationResponses(t *testing.T) {
 	if contentSecurityPolicy := response.Header().Get("Content-Security-Policy"); !strings.Contains(contentSecurityPolicy, "frame-ancestors 'none'") {
 		t.Fatalf("Content-Security-Policy = %q", contentSecurityPolicy)
 	}
+	if contentSecurityPolicy := response.Header().Get("Content-Security-Policy"); !strings.Contains(contentSecurityPolicy, "frame-src 'self'") {
+		t.Fatalf("Content-Security-Policy missing explicit frame-src: %q", contentSecurityPolicy)
+	}
 	if response.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatal("X-Content-Type-Options was not set")
 	}

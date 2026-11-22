@@ -38,8 +38,28 @@ export function joinBase(base: string, path: string): string {
   return `${trimmedBase}${trimmedPath}`
 }
 
+/**
+ * Build the request URL, collapsing a same-origin base to a relative path so the
+ * browser resolves it against the document's own origin. This keeps the live
+ * call working even when a reverse proxy stamped the base with the wrong scheme
+ * (e.g. http:// behind HTTPS termination). A cross-origin base is joined as-is.
+ */
+export function runnerURL(base: string, pathWithQuery: string): string {
+  if (typeof window !== "undefined") {
+    try {
+      const parsed = new URL(base, window.location.origin)
+      if (parsed.host === window.location.host) {
+        return pathWithQuery.startsWith("/") ? pathWithQuery : `/${pathWithQuery}`
+      }
+    } catch {
+      // Fall through to the absolute join below.
+    }
+  }
+  return joinBase(base, pathWithQuery)
+}
+
 export async function runnerFetch(input: RunnerFetchInput): Promise<RunnerResult> {
-  const url = joinBase(input.base, withAppQuery(input.path, input.pk))
+  const url = runnerURL(input.base, withAppQuery(input.path, input.pk))
   const headers: Record<string, string> = {
     // Every request names its app; the server derives ownership from the token.
     "X-M-Stash-App": input.pk,

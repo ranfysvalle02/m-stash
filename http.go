@@ -13,7 +13,7 @@ const maxPayloadBytes = 1024 * 1024
 
 func (app *application) securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https:; object-src 'none'; script-src 'self'; style-src 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; frame-src 'self'; img-src 'self' data: https:; object-src 'none'; script-src 'self'; style-src 'self'")
 		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 		w.Header().Set("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")

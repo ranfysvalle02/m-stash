@@ -7,13 +7,111 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
+	"syscall"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
+
+// webhookDialTimeout bounds the TCP connect for a single webhook delivery.
+const webhookDialTimeout = 10 * time.Second
+
+// webhookMaxResponseBytes caps how much of an endpoint's response body we drain;
+// receivers are expected to ack with a small body, so this is only a safety net
+// against a hostile endpoint streaming megabytes back at the worker.
+const webhookMaxResponseBytes = 64 * 1024
+
+// errWebhookBlockedAddr rejects a webhook target that resolves to a non-public
+// address at connect time. Vetting the resolved socket address (not the hostname)
+// is the DNS-rebinding-proof SSRF boundary.
+var errWebhookBlockedAddr = errors.New("webhook target resolves to a blocked address")
+
+// errWebhookRedirect refuses any HTTP redirect on a webhook delivery, so a 3xx
+// can never bounce a signed payload to an attacker-chosen or internal host.
+var errWebhookRedirect = errors.New("webhook redirects are not allowed")
+
+// blockedWebhookPrefixes are ranges a tenant webhook may never reach but that
+// netip's own predicates do not cover: carrier-grade NAT, IETF protocol
+// assignments, benchmarking, documentation, and reserved/future-use blocks.
+// Loopback, private (RFC 1918 / IPv6 ULA), link-local, multicast, and the
+// unspecified address are handled by the predicate calls in isBlockedWebhookAddr.
+var blockedWebhookPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("100.64.0.0/10"),   // RFC 6598 carrier-grade NAT / internal meshes
+	netip.MustParsePrefix("192.0.0.0/24"),    // RFC 6890 IETF protocol assignments
+	netip.MustParsePrefix("192.0.2.0/24"),    // TEST-NET-1 documentation
+	netip.MustParsePrefix("198.18.0.0/15"),   // RFC 2544 benchmarking
+	netip.MustParsePrefix("198.51.100.0/24"), // TEST-NET-2 documentation
+	netip.MustParsePrefix("203.0.113.0/24"),  // TEST-NET-3 documentation
+	netip.MustParsePrefix("240.0.0.0/4"),     // reserved / future use
+	netip.MustParsePrefix("100::/64"),        // IPv6 discard-only
+	netip.MustParsePrefix("2001:db8::/32"),   // IPv6 documentation
+}
+
+// isBlockedWebhookAddr reports whether addr is anything other than a public
+// unicast address. It unmaps IPv4-in-IPv6 first so ::ffff:127.0.0.1 and
+// ::ffff:169.254.169.254 are judged as their embedded IPv4 address. The cloud
+// metadata endpoint (169.254.169.254) is link-local unicast, so it is caught by
+// IsLinkLocalUnicast without a dedicated prefix.
+func isBlockedWebhookAddr(addr netip.Addr) bool {
+	if !addr.IsValid() {
+		return true
+	}
+	addr = addr.Unmap()
+	if addr.IsLoopback() || addr.IsPrivate() || addr.IsUnspecified() ||
+		addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() ||
+		addr.IsInterfaceLocalMulticast() || addr.IsMulticast() {
+		return true
+	}
+	for _, prefix := range blockedWebhookPrefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// webhookDialControl runs after DNS resolution with the concrete remote address,
+// so it blocks loopback, private, link-local, metadata, and other non-public
+// targets even when a public hostname rebinds to an internal IP.
+func webhookDialControl(_, address string, _ syscall.RawConn) error {
+	addrPort, err := netip.ParseAddrPort(address)
+	if err != nil {
+		return fmt.Errorf("parse webhook dial address %q: %w", address, err)
+	}
+	if isBlockedWebhookAddr(addrPort.Addr()) {
+		return fmt.Errorf("%w: %s", errWebhookBlockedAddr, addrPort.Addr())
+	}
+	return nil
+}
+
+// newWebhookHTTPClient builds the delivery client. It never honors ambient proxy
+// settings, refuses redirects, and vets every resolved socket address against
+// isBlockedWebhookAddr in the dialer's Control hook — after DNS resolution but
+// before connect(2) — so a hostname that rebinds to a private IP is still caught.
+func newWebhookHTTPClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{Timeout: webhookDialTimeout, Control: webhookDialControl}
+	transport := &http.Transport{
+		Proxy:                 nil,
+		DialContext:           dialer.DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return errWebhookRedirect
+		},
+	}
+}
 
 // webhookWorker drains the transactional outbox and delivers signed events to registered
 // endpoints. Delivery is at-least-once: receivers dedupe on the event id. Claims are atomic,
@@ -34,7 +132,7 @@ type webhookWorker struct {
 func newWebhookWorker(app *application) *webhookWorker {
 	return &webhookWorker{
 		app:         app,
-		client:      &http.Client{Timeout: 10 * time.Second},
+		client:      newWebhookHTTPClient(10 * time.Second),
 		interval:    app.config.WebhookPollInterval,
 		claimTTL:    time.Minute,
 		baseBackoff: 10 * time.Second,
@@ -120,7 +218,7 @@ func (worker *webhookWorker) deliver(ctx context.Context, event outboxEvent) {
 		return
 	}
 	if len(endpoints) == 0 {
-		worker.setState(ctx, event.ID, bson.M{"$set": bson.M{"delivery.state": "delivered", "delivery.availableAt": time.Now().UTC()}})
+		worker.setState(ctx, event.ID, deliveredOutboxUpdate(time.Now().UTC()))
 		return
 	}
 	payload, err := json.Marshal(event)
@@ -137,7 +235,7 @@ func (worker *webhookWorker) deliver(ctx context.Context, event outboxEvent) {
 		}
 	}
 	if delivered {
-		worker.setState(ctx, event.ID, bson.M{"$set": bson.M{"delivery.state": "delivered", "delivery.availableAt": time.Now().UTC()}})
+		worker.setState(ctx, event.ID, deliveredOutboxUpdate(time.Now().UTC()))
 		return
 	}
 	worker.reschedule(ctx, event, "delivery failed")
@@ -182,7 +280,7 @@ func (worker *webhookWorker) post(ctx context.Context, endpoint webhookEndpoint,
 		return err
 	}
 	defer response.Body.Close()
-	_, _ = io.Copy(io.Discard, response.Body)
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, webhookMaxResponseBytes))
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("endpoint returned status %d", response.StatusCode)
 	}
@@ -208,4 +306,15 @@ func (worker *webhookWorker) setState(ctx context.Context, id bson.ObjectID, upd
 	if _, err := worker.app.database.Collection(outboxCollectionName).UpdateByID(ctx, id, update); err != nil {
 		worker.app.logger.Error("webhook state update failed", "error", err, "eventId", id.Hex())
 	}
+}
+
+// deliveredOutboxUpdate marks an event delivered and stamps delivery.expiresAt so
+// the TTL index reclaims it after outboxDeliveredTTL. Undelivered states never
+// carry that field, so only delivered rows are ever auto-expired.
+func deliveredOutboxUpdate(now time.Time) bson.M {
+	return bson.M{"$set": bson.M{
+		"delivery.state":       "delivered",
+		"delivery.availableAt": now,
+		"delivery.expiresAt":   now.Add(outboxDeliveredTTL),
+	}}
 }

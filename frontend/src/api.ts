@@ -444,6 +444,42 @@ export class APIError extends Error {
   }
 }
 
+// toSameOriginPath collapses a server-stamped absolute URL to a relative,
+// same-origin path when it points at this very host, so the browser resolves it
+// against the document's own origin. This makes framing, fetching, and
+// downloading immune to a reverse proxy that stamps the wrong scheme (e.g. an
+// http:// base URL behind HTTPS termination). URLs on a different host (a
+// configured PUBLIC_BASE_URL pointing elsewhere) are returned unchanged.
+export function toSameOriginPath(rawUrl: string): string {
+  if (!rawUrl) return rawUrl
+  try {
+    const parsed = new URL(rawUrl, window.location.origin)
+    if (parsed.host === window.location.host) {
+      return parsed.pathname + parsed.search + parsed.hash
+    }
+    return rawUrl
+  } catch {
+    return rawUrl
+  }
+}
+
+// normalizeSameOriginUrl keeps an absolute URL (needed for copyable links and
+// displayed cURL bases) but upgrades a same-host http:// URL to the document's
+// own origin so a proxy scheme mismatch never yields an insecure or broken link.
+// Cross-host URLs are returned unchanged.
+export function normalizeSameOriginUrl(rawUrl: string): string {
+  if (!rawUrl) return rawUrl
+  try {
+    const parsed = new URL(rawUrl, window.location.origin)
+    if (parsed.host === window.location.host) {
+      return window.location.origin + parsed.pathname + parsed.search + parsed.hash
+    }
+    return rawUrl
+  } catch {
+    return rawUrl
+  }
+}
+
 function csrfToken() {
   const prefix = 'm_stash_csrf='
   const cookie = document.cookie.split('; ').find((entry) => entry.startsWith(prefix))

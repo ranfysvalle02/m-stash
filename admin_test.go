@@ -50,6 +50,13 @@ func TestOutboxRetryUpdateResetsToPending(t *testing.T) {
 	if _, present := set["delivery.availableAt"]; !present {
 		t.Fatal("retry update must set delivery.availableAt for immediate redelivery")
 	}
+	unset, ok := outboxRetryUpdate()["$unset"].(bson.M)
+	if !ok {
+		t.Fatal("retry update must carry a $unset document")
+	}
+	if _, present := unset["delivery.expiresAt"]; !present {
+		t.Fatal("retry update must clear delivery.expiresAt so a retried event is not TTL-reaped")
+	}
 }
 
 func TestAllowWithLimitUnlimited(t *testing.T) {
