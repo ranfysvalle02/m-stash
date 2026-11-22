@@ -202,14 +202,24 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+// getEnvBool reads a boolean flag. It accepts the Go literals true/false (and
+// 1/0/t/f) plus the friendly on/off and yes/no vocabulary the docs, compose
+// file, and /admin toggles use, so DEMO_DATA=on no longer crash-loops the app.
 func getEnvBool(key string, fallback bool) (bool, error) {
 	rawValue, exists := os.LookupEnv(key)
-	if !exists || rawValue == "" {
+	if !exists || strings.TrimSpace(rawValue) == "" {
 		return fallback, nil
 	}
-	value, err := strconv.ParseBool(rawValue)
+	normalized := strings.ToLower(strings.TrimSpace(rawValue))
+	switch normalized {
+	case "on", "yes":
+		return true, nil
+	case "off", "no":
+		return false, nil
+	}
+	value, err := strconv.ParseBool(normalized)
 	if err != nil {
-		return false, fmt.Errorf("%s must be true or false", key)
+		return false, fmt.Errorf("%s must be a boolean (true/false, on/off, or yes/no)", key)
 	}
 	return value, nil
 }

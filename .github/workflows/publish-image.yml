@@ -13,6 +13,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: m-stash
     steps:
       - name: Check out source
@@ -39,11 +40,10 @@ jobs:
       - name: Verify Go source
         run: |
           go vet ./...
-          go test ./...
+          go test -race ./...
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
+      # No QEMU: the Dockerfile builds the frontend and cross-compiles Go on the
+      # native runner architecture, so multi-arch images need no CPU emulation.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 

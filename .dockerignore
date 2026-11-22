@@ -1,4 +1,6 @@
 .git
+.github
+.cursor
 .env
 *.md
 *.ipynb

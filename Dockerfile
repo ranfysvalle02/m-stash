@@ -1,23 +1,38 @@
-FROM node:22-alpine AS frontend-build
+# syntax=docker/dockerfile:1
+
+# Build the browser assets once on the builder's native architecture. The output
+# (frontend/dist) is static and architecture-independent, so BuildKit reuses it
+# for every target platform instead of re-running Node under slow, crash-prone
+# QEMU emulation.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-build
 
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
-FROM golang:1.27-alpine AS build
+# Compile the Go binary on the builder's native architecture and cross-compile
+# for the requested target with the toolchain's own cross support (CGO off).
+# This keeps every RUN step native, so multi-arch builds never touch QEMU.
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
+RUN apk add --no-cache ca-certificates
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend-build /src/frontend/dist ./frontend/dist
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/m-stash .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+	go build -trimpath -ldflags="-s -w" -o /out/m-stash .
 
+# The runtime image is the only target-architecture layer, and it is assembled
+# with COPY alone (no RUN), so it requires zero emulation to produce.
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/m-stash /usr/local/bin/m-stash
 
 WORKDIR /app
