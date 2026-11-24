@@ -14,11 +14,12 @@ The secret is shown once, when it is issued, and stored only as a hash — m-sta
 
 ## 2. Set up a project
 
-The build kit already contains `mstash.js` and `.env.example`. Starting from scratch instead:
+The build kit already contains `mstash.js`, its TypeScript types (`mstash.d.ts`), and `.env.example`. Starting from scratch instead:
 
 ```sh
 mkdir stash-worker && cd stash-worker
 curl -O {{API}}/mstash.js
+curl -O {{API}}/mstash.d.ts   # optional: TypeScript types
 cat > .env <<'ENV'
 M_STASH_API={{API}}
 M_STASH_APP_KEY=pk_your_publishable_key

@@ -60,7 +60,7 @@ curl -X POST "$API_URL/v1/me/resources/save" \
 ## Docs
 
 - Hosted demo: https://m-stash.com/discover
-- Client: `/mstash.js` — zero-dependency ES module for browsers and Node 18+, importable from any origin. `createClient({ api, app, token? })` with `signup`, `login`, `me.*`, `shared.*`, `public.*`, and atomic `increment`.
+- Client: `/mstash.js` — zero-dependency ES module for browsers and Node 18+, importable from any origin. `createClient({ api, app, token? })` with `signup`, `login`, `me.*`, `shared.*`, `public.*`, and atomic `increment`. TypeScript declarations: `/mstash.d.ts` (save next to `mstash.js`; `get<T>`, `create<T>`, and friends type your record `data`).
 - Tutorials: `/tutorials` (human) and `/v1/tutorials/{slug}.md` (raw Markdown, stamped with this deployment's origin). Index at `/v1/tutorials`.
 - Public stats: `GET /v1/stats` — aggregate counts (stashers, live apps, records, recent vibes) when enabled.
 - Agent skill (plug-and-play `SKILL.md` for Cursor, Claude Code, and other coding agents, stamped with this deployment's origin): `/skill.md`

@@ -109,6 +109,7 @@ func (app *application) Handler(rateLimiter *authRateLimiter) http.Handler {
 	mux.HandleFunc("/.well-known/m-stash.json", app.corsMiddleware(app.handleServiceManifest))
 	mux.HandleFunc("/skill.md", app.corsMiddleware(app.handleSkill))
 	mux.HandleFunc("/mstash.js", app.handleClientScript)
+	mux.HandleFunc("/mstash.d.ts", app.handleClientScript)
 	mux.HandleFunc("/v1/stats", app.corsMiddleware(app.handlePublicStats))
 	mux.HandleFunc("/v1/tutorials", app.corsMiddleware(app.handleTutorials))
 	mux.HandleFunc("/v1/tutorials/", app.corsMiddleware(app.handleTutorials))
@@ -188,6 +189,7 @@ func (app *application) handleServiceManifest(w http.ResponseWriter, r *http.Req
 			// client is the zero-dependency JS client, importable from any origin.
 			"client": map[string]any{
 				"endpoint": "/mstash.js",
+				"types":    "/mstash.d.ts",
 			},
 			"tutorials": map[string]any{
 				"endpoint": "/v1/tutorials",

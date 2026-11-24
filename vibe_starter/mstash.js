@@ -1,3 +1,4 @@
+// @ts-self-types="./mstash.d.ts"
 // mstash.js — a zero-dependency m-stash client for browsers and Node 18+.
 //
 //   import { createClient } from "./mstash.js";
@@ -8,6 +9,7 @@
 //
 // Server-side shared writes: createClient({ api, app, token: process.env.M_STASH_SECRET_KEY }).
 // Never ship a secret key (sk_…) to a browser; the publishable key (pk_…) is safe there.
+// TypeScript: keep mstash.d.ts next to this file and the types are picked up automatically.
 
 export class MStashError extends Error {
   constructor(status, body) {

@@ -400,6 +400,10 @@ func buildVibeStarterZip(record *vibeShareRecord, baseURL string, claimed bool) 
 	if err != nil {
 		return nil, err
 	}
+	clientTypes, err := vibeStarterFiles.ReadFile("vibe_starter/mstash.d.ts")
+	if err != nil {
+		return nil, err
+	}
 	specJSON, err := json.MarshalIndent(record.Spec, "", "  ")
 	if err != nil {
 		return nil, err
@@ -419,6 +423,7 @@ func buildVibeStarterZip(record *vibeShareRecord, baseURL string, claimed bool) 
 		{"app.css", appCSS},
 		{"views.js", viewsJS},
 		{"mstash.js", clientJS},
+		{"mstash.d.ts", clientTypes},
 		{"mstash.json", specJSON},
 		{".env.example", []byte(kitEnvExample(baseURL, publishableKey))},
 		{".gitignore", []byte(".env\n.env.*\n!.env.example\nnode_modules/\n")},
@@ -618,6 +623,7 @@ func vibeStarterAgents(record *vibeShareRecord, baseURL string) string {
 
 	b.WriteString("## Tools in this folder\n\n")
 	b.WriteString("- `mstash.js` — zero-dependency client (`createClient({ api, app })`) for browsers and Node 18+. Prefer it over hand-written fetch calls.\n")
+	b.WriteString("- `mstash.d.ts` — TypeScript types for `mstash.js`; keep it next to the client and `import { createClient } from \"./mstash.js\"` is fully typed.\n")
 	b.WriteString("- `mstash.json` — the app's data model. The UI renders from the `m-stash-config` block in `index.html`; keep the two in sync.\n")
 	b.WriteString("- `verify.sh` — run it after every change; it must print `m-stash verify: OK`.\n")
 	b.WriteString("- `.env.example` — API base and publishable key for server code. The secret key stays blank here and never goes in frontend files.\n\n")

@@ -105,7 +105,7 @@ func TestBuildVibeStarterZip(t *testing.T) {
 		handle.Close()
 		files[file.Name] = string(contents)
 	}
-	for _, name := range []string{"README.md", "AGENTS.md", "SKILL.md", "index.html", "app.js", "app.css", "views.js", "mstash.json", "mstash.js", ".env.example", ".gitignore", "verify.sh"} {
+	for _, name := range []string{"README.md", "AGENTS.md", "SKILL.md", "index.html", "app.js", "app.css", "views.js", "mstash.json", "mstash.js", "mstash.d.ts", ".env.example", ".gitignore", "verify.sh"} {
 		if _, ok := files["m-stash-starter/"+name]; !ok {
 			t.Fatalf("zip missing %s; got %v", name, keys(files))
 		}

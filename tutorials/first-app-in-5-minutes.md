@@ -55,6 +55,7 @@ Open <http://localhost:8000>. It is the same app, now in your own folder. Then p
 | --- | --- |
 | `index.html`, `app.js`, `views.js`, `app.css` | The app itself — plain HTML, CSS, and JS, no build step. |
 | `mstash.js` | A zero-dependency client for your own frontend or backend. |
+| `mstash.d.ts` | TypeScript types for `mstash.js`, picked up automatically. |
 | `mstash.json` | The app's data model. |
 | `.env.example` | API base and publishable key for server code. |
 | `SKILL.md`, `AGENTS.md` | Rules for your AI coding agent. |

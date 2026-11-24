@@ -85,6 +85,17 @@ func TestClientScriptIsImportableFromAnyOrigin(t *testing.T) {
 		!strings.HasPrefix(rec.Header().Get("Content-Type"), "text/javascript") || !strings.Contains(rec.Body.String(), "export function createClient") {
 		t.Fatalf("status=%d headers=%v", rec.Code, rec.Header())
 	}
+	if rec.Header().Get("X-TypeScript-Types") != "/mstash.d.ts" {
+		t.Fatalf("X-TypeScript-Types = %q", rec.Header().Get("X-TypeScript-Types"))
+	}
+
+	rec = httptest.NewRecorder()
+	(&application{}).handleClientScript(rec, httptest.NewRequest(http.MethodGet, "/mstash.d.ts", nil))
+	if rec.Code != http.StatusOK || rec.Header().Get("Access-Control-Allow-Origin") != "*" ||
+		!strings.HasPrefix(rec.Header().Get("Content-Type"), "application/typescript") ||
+		!strings.Contains(rec.Body.String(), "export declare function createClient") {
+		t.Fatalf("types: status=%d headers=%v", rec.Code, rec.Header())
+	}
 }
 
 // A server holding the secret key must be able to bump a shared counter
