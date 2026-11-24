@@ -35,7 +35,9 @@ type Config struct {
 	VibeDailyLimit      int
 	VibeShareTTL        time.Duration
 	VibeMaxSandboxes    int
-	PublicBaseURL       string
+	// VibeLearn lets claimed vibe apps serve (structure only) as reference designs for new generations.
+	VibeLearn     bool
+	PublicBaseURL string
 	// OAuth client credentials for social-login adapters. A provider is enabled
 	// only when both its ID and secret are set; a half-configured pair fails boot.
 	// Secrets live only in the environment, never in MongoDB.
@@ -85,6 +87,10 @@ func loadConfig() (Config, error) {
 		return Config{}, err
 	}
 	webhookDelivery, err := getEnvBool("WEBHOOK_DELIVERY", false)
+	if err != nil {
+		return Config{}, err
+	}
+	vibeLearn, err := getEnvBool("VIBE_LEARN", true)
 	if err != nil {
 		return Config{}, err
 	}
@@ -180,6 +186,7 @@ func loadConfig() (Config, error) {
 		VibeDailyLimit:      vibeDailyLimit,
 		VibeShareTTL:        vibeShareTTL,
 		VibeMaxSandboxes:    vibeMaxSandboxes,
+		VibeLearn:           vibeLearn,
 		PublicBaseURL:       getEnv("PUBLIC_BASE_URL", ""),
 
 		GitHubClientID:     githubClientID,

@@ -34,6 +34,7 @@ var settingOverrideBSONKeys = map[string]string{
 	"vibeMaxSandboxes":        "vibeMaxSandboxes",
 	"vibeDailyLimit":          "vibeDailyLimit",
 	"vibeShareTTL":            "vibeShareTTL",
+	"vibeLearn":               "vibeLearn",
 }
 
 // appExists loads any app by id, regardless of owner. Operator routes use this
@@ -142,9 +143,14 @@ func (app *application) handleAdminOverview(w http.ResponseWriter, r *http.Reque
 
 	recordsByVisibility, _ := app.groupCount(ctx, resourceCollectionName, "visibility")
 	outboxByState, _ := app.groupCount(ctx, outboxCollectionName, "delivery.state")
+	vibeFunnel, err := app.cachedVibeFunnel(ctx)
+	if err != nil {
+		app.logger.Error("vibe funnel report failed", "request_id", requestIDFromContext(ctx), "error", err)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data": map[string]any{
+			"vibeFunnel":          vibeFunnel,
 			"counts":              counts,
 			"recordsByVisibility": recordsByVisibility,
 			"outboxByState":       outboxByState,
@@ -172,6 +178,7 @@ type adminSettingsPatch struct {
 	VibeMaxSandboxes        *int     `json:"vibeMaxSandboxes"`
 	VibeDailyLimit          *int     `json:"vibeDailyLimit"`
 	VibeShareTTL            *string  `json:"vibeShareTTL"`
+	VibeLearn               *bool    `json:"vibeLearn"`
 	ResetKeys               []string `json:"resetKeys"`
 	ResetAll                bool     `json:"resetAll"`
 }
@@ -266,6 +273,7 @@ func (app *application) patchAdminSettings(w http.ResponseWriter, r *http.Reques
 		"builderSignupOpen": patch.BuilderSignupOpen,
 		"demoSeed":          patch.DemoSeed,
 		"webhookDelivery":   patch.WebhookDelivery,
+		"vibeLearn":         patch.VibeLearn,
 	} {
 		if value != nil {
 			set[key] = *value

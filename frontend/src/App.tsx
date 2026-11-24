@@ -75,6 +75,7 @@ import {
   type UserClaims,
   type UserIdentity,
   type VibeOwner,
+  type VibeResult,
   type VibeRecipeMeta,
   type VibeSection,
   type VibeShare,
@@ -2851,6 +2852,65 @@ function VibeSidePanel({
   );
 }
 
+// VibeRefineBar turns the live app into a conversation: describe a change and
+// the lab rebuilds it as a fresh sandbox through the same validated pipeline.
+function VibeRefineBar({
+  onRefine,
+  refinements,
+  claimed,
+}: {
+  onRefine: (instruction: string) => Promise<boolean>;
+  refinements: string[];
+  claimed: boolean;
+}) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const instruction = text.trim();
+    if (!instruction || busy) return;
+    setBusy(true);
+    const applied = await onRefine(instruction);
+    setBusy(false);
+    if (applied) setText("");
+  }
+  return (
+    <div className="vibe-refine">
+      <form className="vibe-refine-form" onSubmit={(event) => void submit(event)}>
+        <Wand2 aria-hidden="true" size={16} />
+        <input
+          aria-label="Describe a change"
+          disabled={busy}
+          maxLength={250}
+          onChange={(event) => setText(event.target.value)}
+          placeholder="Change it — e.g. “add reviews with a 1-5 rating” or “make bookings a timeline”"
+          value={text}
+        />
+        <button className="button primary" disabled={busy || !text.trim()} type="submit">
+          {busy ? (
+            <LoaderCircle aria-hidden="true" className="spin" size={15} />
+          ) : (
+            <Sparkles aria-hidden="true" size={15} />
+          )}{" "}
+          {busy ? "Rebuilding…" : "Refine"}
+        </button>
+      </form>
+      {claimed && (
+        <p className="vibe-refine-note">
+          Each change builds a fresh sandbox — the app you kept stays exactly as it is.
+        </p>
+      )}
+      {refinements.length > 0 && (
+        <ol className="vibe-refine-history" aria-label="Changes so far">
+          {refinements.map((step, index) => (
+            <li key={`${index}-${step}`}>{step}</li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 function VibeStorefront({
   spec,
   share,
@@ -2859,6 +2919,9 @@ function VibeStorefront({
   publishableKey,
   claimToken,
   onNewIdea,
+  onRefine,
+  refinements,
+  refineError,
 }: {
   spec: VibeSpec;
   share: VibeShare;
@@ -2867,6 +2930,9 @@ function VibeStorefront({
   publishableKey: string | null;
   claimToken: string | null;
   onNewIdea: () => void;
+  onRefine?: (instruction: string) => Promise<boolean>;
+  refinements: string[];
+  refineError: string;
 }) {
   const previewUrl = share.previewUrl ?? "";
   const previewSrc = vibePreviewSrc(previewUrl, owner);
@@ -2887,6 +2953,15 @@ function VibeStorefront({
           <PenLine aria-hidden="true" size={15} /> New idea
         </button>
       </header>
+
+      {onRefine && (
+        <VibeRefineBar claimed={share.claimed ?? false} onRefine={onRefine} refinements={refinements} />
+      )}
+      {refineError && (
+        <p className="form-error" role="alert">
+          {refineError}
+        </p>
+      )}
 
       <div className="vibe-live-grid">
         <div className="vibe-live-main">
@@ -2993,6 +3068,8 @@ function VibePage() {
   const [claimToken, setClaimToken] = useState<string | null>(null);
   const [errorText, setErrorText] = useState("");
   const [loadedShareId, setLoadedShareId] = useState<string | null>(null);
+  const [refinements, setRefinements] = useState<string[]>([]);
+  const [refineError, setRefineError] = useState("");
 
   useEffect(() => {
     if (!shareId || shareId === loadedShareId) return;
@@ -3005,6 +3082,8 @@ function VibePage() {
         setShare(result.share ?? null);
         setSnippets(result.snippets ?? []);
         setIdea(result.idea ?? "");
+        setRefinements(result.refinements ?? []);
+        setRefineError("");
         setPublishableKey(result.publishableKey ?? null);
         // The claim token is never returned on GET either; read back the once-shown
         // copy the create response saved on this device. Absent elsewhere, which is
@@ -3050,34 +3129,45 @@ function VibePage() {
   // runVibe drives both the recipe launch and the free-text idea paths through
   // one shared result-handling flow. Wrapped in useCallback so the auto-launch
   // effect can depend on a stable reference.
+  // applyVibeResult adopts a freshly created (or refined) app as the page's
+  // current one. Create and refine share it so both persist the one-time owner
+  // login and claim token the same way.
+  const applyVibeResult = useCallback(
+    (result: VibeResult) => {
+      setSpec(result.spec);
+      setShare(result.share ?? null);
+      setSnippets(result.snippets ?? []);
+      setOwner(result.owner ?? null);
+      setPublishableKey(result.publishableKey ?? null);
+      setRefinements(result.refinements ?? []);
+      setRefineError("");
+      // The claim token arrives only once, on create — persist it per
+      // publishable key so this device can later keep the sandbox as a live app.
+      if (result.publishableKey && result.claim) {
+        saveClaimToken(result.publishableKey, result.claim.token);
+        setClaimToken(result.claim.token);
+      } else {
+        setClaimToken(null);
+      }
+      setState("done");
+      if (result.share) {
+        // Owner creds arrive only once, on create — persist them so a reload or
+        // deep link on this device keeps one-click owner sign-in available.
+        if (result.owner) saveVibeOwner(result.share.id, result.owner);
+        setLoadedShareId(result.share.id);
+        navigate(`/vibe/${result.share.id}`);
+      }
+    },
+    [navigate],
+  );
+
   const runVibe = useCallback(
     async (input: string | { recipe: string }, launchId?: string) => {
       if (launchId) setLaunchingId(launchId);
       setState("loading");
       setErrorText("");
       try {
-        const result = await api.vibe(input);
-        setSpec(result.spec);
-        setShare(result.share ?? null);
-        setSnippets(result.snippets ?? []);
-        setOwner(result.owner ?? null);
-        setPublishableKey(result.publishableKey ?? null);
-        // The claim token arrives only once, on create — persist it per
-        // publishable key so this device can later keep the sandbox as a live app.
-        if (result.publishableKey && result.claim) {
-          saveClaimToken(result.publishableKey, result.claim.token);
-          setClaimToken(result.claim.token);
-        } else {
-          setClaimToken(null);
-        }
-        setState("done");
-        if (result.share) {
-          // Owner creds arrive only once, on create — persist them so a reload or
-          // deep link on this device keeps one-click owner sign-in available.
-          if (result.owner) saveVibeOwner(result.share.id, result.owner);
-          setLoadedShareId(result.share.id);
-          navigate(`/vibe/${result.share.id}`);
-        }
+        applyVibeResult(await api.vibe(input));
       } catch (requestError) {
         setErrorText(messageFromError(requestError));
         setState("error");
@@ -3085,8 +3175,22 @@ function VibePage() {
         setLaunchingId(null);
       }
     },
-    [navigate],
+    [applyVibeResult],
   );
+
+  // refineVibe keeps the current app on screen while the change is built, and
+  // only swaps to the new app once it exists. Returns whether it was applied.
+  async function refineVibe(instruction: string): Promise<boolean> {
+    if (!share) return false;
+    setRefineError("");
+    try {
+      applyVibeResult(await api.vibe({ idea: instruction, parent: share.id }));
+      return true;
+    } catch (requestError) {
+      setRefineError(messageFromError(requestError));
+      return false;
+    }
+  }
 
   // A ?recipe=<id> deep link (from the /discover strip) auto-launches once. A
   // ref guard — not state — avoids a synchronous setState inside the effect; a
@@ -3125,6 +3229,8 @@ function VibePage() {
     setPublishableKey(null);
     setClaimToken(null);
     setIdea("");
+    setRefinements([]);
+    setRefineError("");
     setErrorText("");
     setLoadedShareId(null);
     setState("idle");
@@ -3142,8 +3248,11 @@ function VibePage() {
             <VibeStorefront
               claimToken={claimToken}
               onNewIdea={newIdea}
+              onRefine={aiEnabled ? refineVibe : undefined}
               owner={owner}
               publishableKey={publishableKey}
+              refineError={refineError}
+              refinements={refinements}
               share={share}
               snippets={snippets}
               spec={spec}
@@ -5220,6 +5329,25 @@ function ConsoleAppRow({
           >
             <Database aria-hidden="true" size={15} /> {showInspector ? "Hide data" : "Inspect data"}
           </button>
+          {app.vibe && (
+            <>
+              <a
+                className="button secondary"
+                download
+                href={`/v1/builder/apps/${encodeURIComponent(app.id)}/starter.zip`}
+              >
+                <Download aria-hidden="true" size={15} /> Starter
+              </a>
+              <a
+                className="button secondary"
+                download
+                href={`/v1/builder/apps/${encodeURIComponent(app.id)}/skill.md?download=1`}
+                title="Agent skill tailored to this app, for Cursor, Claude Code, or Codex"
+              >
+                <Sparkles aria-hidden="true" size={15} /> SKILL.md
+              </a>
+            </>
+          )}
           <ConfirmButton
             className="button secondary danger-button"
             disabled={busy !== ""}

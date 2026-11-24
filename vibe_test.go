@@ -328,7 +328,7 @@ func TestGenerateVibeSpecStopsOnAccountFailure(t *testing.T) {
 		w.WriteHeader(http.StatusPaymentRequired)
 	})
 	app := &application{config: Config{GeminiAPIKey: "k", GeminiModel: "gemini-3.5-flash-lite"}}
-	_, err := app.generateVibeSpec(context.Background(), "a notes app")
+	_, err := app.generateVibeSpec(context.Background(), vibeAsk{Idea: "a notes app"})
 	if !errors.Is(err, errVibeAccount) {
 		t.Fatalf("err = %v, want errVibeAccount", err)
 	}
@@ -347,12 +347,15 @@ func TestGenerateVibeSpecFallsBackOnRateLimit(t *testing.T) {
 		_, _ = w.Write(geminiResponseWithText(validSpec))
 	})
 	app := &application{config: Config{GeminiAPIKey: "k", GeminiModel: "gemini-3.5-flash-lite"}}
-	spec, err := app.generateVibeSpec(context.Background(), "a notes app")
+	generation, err := app.generateVibeSpec(context.Background(), vibeAsk{Idea: "a notes app"})
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if spec.Name != "ok" || len(*calls) != 2 {
-		t.Fatalf("spec = %#v, calls = %v", spec, *calls)
+	if generation.Spec.Name != "ok" || len(*calls) != 2 {
+		t.Fatalf("spec = %#v, calls = %v", generation.Spec, *calls)
+	}
+	if generation.Model != "gemini-3.5-flash-lite" && generation.Model != vibeFallbackModels[1] {
+		t.Fatalf("model = %q", generation.Model)
 	}
 }
 

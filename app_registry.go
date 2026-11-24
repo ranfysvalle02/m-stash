@@ -49,8 +49,11 @@ type AppRecord struct {
 	// authorises turning the sandbox into an owned live app and is cleared on claim.
 	ClaimTokenHash string     `bson:"claimTokenHash,omitempty" json:"-"`
 	ClaimedAt      *time.Time `bson:"claimedAt,omitempty" json:"claimedAt,omitempty"`
-	CreatedAt      time.Time  `bson:"createdAt" json:"createdAt"`
-	UpdatedAt      time.Time  `bson:"updatedAt" json:"updatedAt"`
+	// Vibe is the spec a vibe-lab app was generated from. It rides along on claim,
+	// so the app keeps its starter, agent skill, and lineage after the share expires.
+	Vibe      *appVibe  `bson:"vibe,omitempty" json:"vibe,omitempty"`
+	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
+	UpdatedAt time.Time `bson:"updatedAt" json:"updatedAt"`
 }
 
 // expired reports whether a sandbox tenant has passed its lifetime. Non-sandbox
@@ -366,6 +369,7 @@ type provisionAppInput struct {
 	ExpiresAt      *time.Time    `json:"-"`
 	Limits         *AppLimits    `json:"-"`
 	ClaimTokenHash string        `json:"-"`
+	Vibe           *appVibe      `json:"-"`
 }
 
 func (input *provisionAppInput) normalizeAndValidate() error {
@@ -459,6 +463,7 @@ func (app *application) provisionApp(ctx context.Context, input provisionAppInpu
 		ExpiresAt:      input.ExpiresAt,
 		Limits:         input.Limits,
 		ClaimTokenHash: input.ClaimTokenHash,
+		Vibe:           input.Vibe,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}

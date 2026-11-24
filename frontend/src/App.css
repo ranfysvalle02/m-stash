@@ -422,6 +422,14 @@ input, textarea { transition: border-color .2s ease, box-shadow .25s ease, backg
 .vibe-live-title h1 { font-size: clamp(2rem, 4vw, 3.1rem); line-height: 1.02; margin: .4rem 0 .45rem; }
 .vibe-live-title p { color: var(--muted); font-family: Georgia, 'Times New Roman', serif; font-size: 1.12rem; line-height: 1.45; margin: 0; max-width: 48ch; }
 
+.vibe-refine { display: flex; flex-direction: column; gap: .55rem; }
+.vibe-refine-form { align-items: center; background: rgba(3, 17, 23, .72); border: 1px solid var(--line); border-radius: 14px; display: flex; gap: .6rem; padding: .4rem .45rem .4rem .9rem; }
+.vibe-refine-form:focus-within { border-color: var(--vibe-accent); }
+.vibe-refine-form > svg { color: var(--vibe-accent); flex: 0 0 auto; }
+.vibe-refine-form input { background: transparent; border: 0; color: var(--text); flex: 1; font: inherit; min-width: 0; outline: none; padding: .45rem 0; }
+.vibe-refine-note { color: var(--muted); font-size: .8rem; margin: 0; padding: 0 .2rem; }
+.vibe-refine-history { color: var(--muted); display: flex; flex-wrap: wrap; font-size: .8rem; gap: .35rem .9rem; list-style: decimal inside; margin: 0; padding: 0 .2rem; }
+
 .vibe-live-grid { align-items: start; display: grid; gap: clamp(1.2rem, 2.5vw, 2rem); grid-template-columns: minmax(0, 1fr) clamp(18rem, 27%, 22rem); }
 .vibe-live-main { min-width: 0; }
 

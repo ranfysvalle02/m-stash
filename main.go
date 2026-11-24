@@ -64,6 +64,9 @@ func main() {
 	if err := ensureVibeShareIndexes(ctx, database); err != nil {
 		log.Fatalf("Failed to create vibe share index: %v", err)
 	}
+	if err := ensureVibeRunIndexes(ctx, database); err != nil {
+		log.Fatalf("Failed to create vibe run indexes: %v", err)
+	}
 	if err := ensureOAuthIndexes(ctx, database); err != nil {
 		log.Fatalf("Failed to create OAuth identity indexes: %v", err)
 	}

@@ -94,6 +94,16 @@ See [integration.md](integration.md) for request examples and [quickstart.md](qu
 
 Everything is URL-powered. Share the link, download a `.zip` starter, or open the plan behind the floating `</>` button. Shares (link, live demo, and starter) expire on their own — `72h` by default, capped at 5 days — and MongoDB reclaims them with a TTL index. The app idea is length-limited and sanitized, and the model is told to treat it as untrusted input, so the prompt-injection surface stays small. If the model is unavailable or past the daily cap, the lab answers from built-in blueprints instead of erroring out.
 
+### The vibe flywheel
+
+Every generation feeds the next one:
+
+- **Self-repair** — the validator records every fix it had to make (a dropped section, an unknown field kind, an owner section with no samples, ...). When it finds any, the model gets one repair turn with those findings, and whichever spec has fewer issues ships. A repair can only improve the result.
+- **Reference designs** — each idea is matched against the curated recipes and, while `VIBE_LEARN` is on, the apps people actually claimed. The best one or two matches go into the prompt as examples. Claimed apps contribute section and field structure only: never names, ideas, or records.
+- **Refine** — on a live vibe, describe a change ("add reviews with a 1-5 rating"). `POST /v1/vibe` with `{ "parent": "<shareId>", "idea": "<change>" }` rebuilds the app as a new sandbox through the same validated pipeline, keeping existing field keys so saved data still fits. Refine needs `GEMINI_API_KEY` and returns `503` rather than guessing.
+- **Durable spec** — a vibe app stores its spec and provenance on the app record, so it survives a claim. Builders can download a claimed app's starter and tailored `SKILL.md` from `/console` (`GET /v1/builder/apps/{id}/starter.zip` and `/skill.md`) long after the share link expires.
+- **Measured** — a run ledger (`_m_stash_vibe_runs`, kept 180 days, never storing idea text) tracks each generation's mode, source, model, prompt version, and repairs, plus whether its app was previewed, downloaded, handed to an agent, refined, or claimed. `/admin` shows the 30-day funnel per cohort and the most common repairs, so prompt and model changes are judged on what people keep.
+
 ## Try it, run it, keep it
 
 Every m-stash app is either a **sandbox** (no owner, expires, tight limits, carries a one-time claim token) or a **live** app (owned, no expiry, limits set by the owner's plan). A visitor can try the service against a real backend, then keep that exact app — the publishable key never changes, so a downloaded `.zip` or pasted cURL keeps working.
@@ -124,6 +134,7 @@ Every m-stash app is either a **sandbox** (no owner, expires, tight limits, carr
 | `GEMINI_MODEL` | No | Model for the vibe lab. Defaults to `gemini-3.5-flash-lite`. |
 | `VIBE_DAILY_LIMIT` | No | Global daily cap on model generations (plus a per-IP limit). Past the cap, or whenever the model fails, the lab answers from built-in blueprints. Defaults to `500`. |
 | `VIBE_SHARE_TTL` | No | How long a vibe's share link, live demo, and `.zip` starter stay available before MongoDB expires them. Defaults to `72h`; capped at `120h` (5 days). |
+| `VIBE_LEARN` | No | Let claimed vibe apps act as reference designs for similar new ideas. Only their section and field structure is used, never names, ideas, or records. Curated recipes are always used. Defaults to `on`; can be toggled live in `/admin`. |
 | `VIBE_MAX_SANDBOXES` | No | Global cap on live sandbox tenants (vibe + try-it). Past it the lab still returns a spec and snippets, just without a live demo. Defaults to `1000`. |
 | `TRY_SANDBOX` | No | Set `on` to enable the blank `POST /v1/try` sandbox used by the guide and console, and to unlock the Vibe lab's instant recipes and blueprints (no `GEMINI_API_KEY` needed). Defaults to `off` (endpoint returns 404). |
 | `TRY_SANDBOX_TTL` | No | How long a try-it sandbox lives before the sweeper deletes it and its data. Defaults to `24h`; capped at `120h`. |

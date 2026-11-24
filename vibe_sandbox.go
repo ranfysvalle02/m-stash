@@ -75,8 +75,9 @@ type sandboxOptions struct {
 	TTL time.Duration
 	// WithAdmin provisions a one-time owner admin login for the sandbox.
 	WithAdmin bool
-	// Spec, when set, seeds the owner-section samples so the tenant looks alive.
-	Spec *vibeSpec
+	// Vibe, when set, is stored on the app and its spec's owner-section samples
+	// are seeded so the tenant looks alive.
+	Vibe *appVibe
 }
 
 // sandboxProvision is the result of creating a sandbox tenant.
@@ -127,6 +128,7 @@ func (app *application) provisionSandbox(ctx context.Context, opts sandboxOption
 		Sandbox:        true,
 		ExpiresAt:      &expiresAt,
 		ClaimTokenHash: hashClaimToken(claimToken),
+		Vibe:           opts.Vibe,
 	}
 
 	var owner *vibeOwnerLogin
@@ -149,8 +151,8 @@ func (app *application) provisionSandbox(ctx context.Context, opts sandboxOption
 		return nil, err
 	}
 
-	if opts.Spec != nil {
-		if err := app.seedVibeSandbox(ctx, record.ID, *opts.Spec); err != nil {
+	if opts.Vibe != nil {
+		if err := app.seedVibeSandbox(ctx, record.ID, opts.Vibe.Spec); err != nil {
 			app.logger.Error("vibe sandbox seed failed", "error", err, "app", record.ID.Hex())
 		}
 	}
@@ -160,11 +162,11 @@ func (app *application) provisionSandbox(ctx context.Context, opts sandboxOption
 
 // provisionVibeSandbox creates a short-lived tenant whose admin is the visitor
 // (the "owner") and seeds its owner-authored sections with the spec's samples.
-func (app *application) provisionVibeSandbox(ctx context.Context, spec vibeSpec) (*vibeSandbox, error) {
+func (app *application) provisionVibeSandbox(ctx context.Context, origin appVibe) (*vibeSandbox, error) {
 	provision, err := app.provisionSandbox(ctx, sandboxOptions{
-		DisplayName: spec.Name,
+		DisplayName: origin.Spec.Name,
 		WithAdmin:   true,
-		Spec:        &spec,
+		Vibe:        &origin,
 	})
 	if err != nil {
 		return nil, err

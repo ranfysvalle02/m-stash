@@ -561,6 +561,7 @@ func (app *application) claimBuilderApp(w http.ResponseWriter, r *http.Request, 
 	// The publishable key is unchanged; only the cached record and the secret move.
 	app.appCache.delete(record.PublishableKey)
 	app.metrics.recordSandboxClaim()
+	app.markVibeRun(ctx, bson.M{"appId": record.ID.Hex()}, vibeEventClaim)
 	// The secret key is returned once, at claim time, and never stored in plaintext.
 	writeJSON(w, http.StatusOK, map[string]any{"data": record, "secretKey": secretKey})
 }
@@ -614,6 +615,8 @@ func (app *application) handleBuilderApp(w http.ResponseWriter, r *http.Request,
 		app.rotateBuilderAppSecret(w, r, ownerID, appID)
 	case len(segments) == 2 && segments[1] == "usage":
 		app.builderAppUsage(w, r, ownerID, appID)
+	case len(segments) == 2 && (segments[1] == "skill.md" || segments[1] == "starter.zip"):
+		app.builderAppVibeAsset(w, r, ownerID, appID, segments[1])
 	case len(segments) == 2 && segments[1] == "users":
 		app.listBuilderAppUsers(w, r, ownerID, appID)
 	case len(segments) == 3 && segments[1] == "users":

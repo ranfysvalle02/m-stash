@@ -196,8 +196,10 @@ func TestVibeAppSkillEmbedsKeyAndStaysSampleFree(t *testing.T) {
 	if !strings.Contains(skill, "sk_") {
 		t.Fatalf("app skill should warn never to ship the secret key:\n%s", skill)
 	}
-	lower := strings.ToLower(skill)
-	for _, forbidden := range []string{"password", "claim"} {
+	// The verify script's throwaway signup is the only credential-shaped text
+	// allowed; it is a fixed placeholder, never a stored value.
+	lower := strings.ReplaceAll(strings.ToLower(skill), `"password":"verify-password-123"`, "")
+	for _, forbidden := range []string{"password", "claim", "@sandbox.invalid"} {
 		if strings.Contains(lower, forbidden) {
 			t.Fatalf("app skill leaked forbidden token %q:\n%s", forbidden, skill)
 		}
@@ -286,5 +288,35 @@ func TestHandleSkillServesGenericMarkdown(t *testing.T) {
 	app.handleSkill(post, httptest.NewRequest(http.MethodPost, "http://m-stash.example/skill.md", nil))
 	if post.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST /skill.md status = %d, want 405", post.Code)
+	}
+}
+
+// Records require visibility; the skill once called private "the default",
+// which sent agents straight into a 400.
+func TestGenericSkillStatesVisibilityIsRequired(t *testing.T) {
+	skill := genericVibeSkill("https://live.example", false)
+	if strings.Contains(skill, "the default)") {
+		t.Fatalf("skill must not claim a default visibility:\n%s", skill)
+	}
+	if !strings.Contains(skill, "`visibility` is REQUIRED") || !strings.Contains(skill, "## When a call fails") {
+		t.Fatalf("skill must state the record contract and failure fixes:\n%s", skill)
+	}
+}
+
+// The verify script is pasted into a shell, so model-chosen labels (which may
+// contain an apostrophe) must never break out of the single-quoted body.
+func TestAppSkillVerifyScriptQuotesBodies(t *testing.T) {
+	record := testVibeShareRecord()
+	record.PublishableKey = "pk_live_store_123"
+	record.Spec.Sections[1].Fields = []vibeField{{Key: "note", Label: "Owner's note", Kind: "text"}}
+	skill := vibeAppSkill(record, "https://live.example")
+	if !strings.Contains(skill, "## Verify a change") || !strings.Contains(skill, `/v1/me/resources/wishlist`) {
+		t.Fatalf("verify section missing:\n%s", skill)
+	}
+	if !strings.Contains(skill, `owner'\''s note`) {
+		t.Fatalf("apostrophe in a body must be shell-escaped:\n%s", skill)
+	}
+	if !strings.Contains(skill, `"visibility":"private"`) {
+		t.Fatalf("member writes must send their visibility:\n%s", skill)
 	}
 }

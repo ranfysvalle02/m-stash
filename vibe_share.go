@@ -40,6 +40,8 @@ var vibeStarterFiles embed.FS
 type vibeShareRecord struct {
 	ID             string    `bson:"_id"`
 	Idea           string    `bson:"idea"`
+	Refinements    []string  `bson:"refinements,omitempty"`
+	ParentID       string    `bson:"parentId,omitempty"`
 	Spec           vibeSpec  `bson:"spec"`
 	SandboxAppID   string    `bson:"sandboxAppId,omitempty"`
 	PublishableKey string    `bson:"publishableKey,omitempty"`
@@ -121,7 +123,16 @@ func (app *application) describeVibeShare(record vibeShareRecord, baseURL string
 	return share
 }
 
-func (app *application) saveVibeShare(ctx context.Context, idea string, spec vibeSpec, sandboxAppID string, publishableKey string, baseURL string) (*vibeShare, error) {
+type vibeShareInput struct {
+	Idea           string
+	Refinements    []string
+	ParentID       string
+	Spec           vibeSpec
+	SandboxAppID   string
+	PublishableKey string
+}
+
+func (app *application) saveVibeShare(ctx context.Context, input vibeShareInput, baseURL string) (*vibeShare, error) {
 	id, err := newVibeShareID()
 	if err != nil {
 		return nil, err
@@ -129,10 +140,12 @@ func (app *application) saveVibeShare(ctx context.Context, idea string, spec vib
 	now := time.Now().UTC()
 	record := vibeShareRecord{
 		ID:             id,
-		Idea:           idea,
-		Spec:           spec,
-		SandboxAppID:   sandboxAppID,
-		PublishableKey: publishableKey,
+		Idea:           input.Idea,
+		Refinements:    input.Refinements,
+		ParentID:       input.ParentID,
+		Spec:           input.Spec,
+		SandboxAppID:   input.SandboxAppID,
+		PublishableKey: input.PublishableKey,
 		Version:        vibeShareVersion,
 		CreatedAt:      now,
 		ExpiresAt:      now.Add(app.vibeShareTTL()),
@@ -231,6 +244,9 @@ func (app *application) handleVibeShare(w http.ResponseWriter, r *http.Request) 
 		if record.PublishableKey != "" {
 			payload["publishableKey"] = record.PublishableKey
 		}
+		if len(record.Refinements) > 0 {
+			payload["refinements"] = record.Refinements
+		}
 		writeJSON(w, http.StatusOK, payload)
 	case "preview":
 		if record.PublishableKey == "" {
@@ -249,6 +265,7 @@ func (app *application) handleVibeShare(w http.ResponseWriter, r *http.Request) 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write(page)
+		app.markVibeShare(ctx, record.ID, vibeEventPreview)
 	case "zip":
 		archive, err := buildVibeStarterZip(record, baseURL, app.shareClaimed(ctx, record.PublishableKey))
 		if err != nil {
@@ -260,10 +277,12 @@ func (app *application) handleVibeShare(w http.ResponseWriter, r *http.Request) 
 		w.Header().Set("Content-Disposition", `attachment; filename="m-stash-starter-`+record.ID+`.zip"`)
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write(archive)
+		app.markVibeShare(ctx, record.ID, vibeEventZip)
 	case "skill.md":
 		// The spec-tailored agent skill: safe to serve for any valid share since it
 		// carries only the publishable key and section shapes, never secrets.
 		writeSkill(w, r, vibeAppSkill(record, baseURL))
+		app.markVibeShare(ctx, record.ID, vibeEventSkill)
 	}
 }
 
@@ -437,6 +456,13 @@ func vibeStarterReadme(record *vibeShareRecord, baseURL string, claimed bool) st
 		fmt.Fprintf(&b, "> %s\n\n", spec.Tagline)
 	}
 	fmt.Fprintf(&b, "A ready-to-run starter the m-stash vibe lab generated from this idea:\n\n> %s\n\n", record.Idea)
+	if len(record.Refinements) > 0 {
+		b.WriteString("Then refined with:\n\n")
+		for _, refinement := range record.Refinements {
+			fmt.Fprintf(&b, "1. %s\n", refinement)
+		}
+		b.WriteString("\n")
+	}
 	if claimed {
 		b.WriteString("It's plain HTML, CSS, and JavaScript — no build step, no install. It points at your **live m-stash app**, so it works the moment you open it: browse the public pages, create a user account, or sign in as the app owner to manage the shared data.\n\n")
 	} else {
@@ -560,4 +586,59 @@ func vibeStarterAgents(record *vibeShareRecord, baseURL string) string {
 	b.WriteString("```json\n{\n  \"slug\": \"unique-slug\",\n  \"title\": \"Human title\",\n  \"visibility\": \"public\",\n  \"data\": { \"fieldKey\": \"value\" }\n}\n```\n\n")
 	fmt.Fprintf(&b, "Full machine-readable reference: %s/llms.txt\n", baseURL)
 	return b.String()
+}
+
+// vibeRecordFromApp rebuilds a share-shaped record from the spec stored on an
+// app, so a claimed app's starter and skill outlive its share link.
+func vibeRecordFromApp(record AppRecord) *vibeShareRecord {
+	return &vibeShareRecord{
+		Idea:           record.Vibe.Idea,
+		Refinements:    record.Vibe.Refinements,
+		Spec:           record.Vibe.Spec,
+		PublishableKey: record.PublishableKey,
+		CreatedAt:      record.Vibe.CreatedAt,
+		ExpiresAt:      derefTime(record.ExpiresAt),
+	}
+}
+
+func derefTime(value *time.Time) time.Time {
+	if value == nil {
+		return time.Time{}
+	}
+	return *value
+}
+
+// builderAppVibeAsset serves an owned app's tailored SKILL.md or starter .zip
+// from the spec stored on the app itself. Neither carries a secret.
+func (app *application) builderAppVibeAsset(w http.ResponseWriter, r *http.Request, ownerID, appID bson.ObjectID, asset string) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	record, err := app.ownedApp(ctx, ownerID, appID)
+	if err != nil {
+		app.writeOwnedAppLookupError(w, err, "Could not load application")
+		return
+	}
+	if record.Vibe == nil {
+		writeError(w, http.StatusNotFound, "This app wasn't created in the vibe lab")
+		return
+	}
+	baseURL := app.publicBaseURL(r)
+	share := vibeRecordFromApp(record)
+	if asset == "skill.md" {
+		writeSkill(w, r, vibeAppSkill(share, baseURL))
+		return
+	}
+	archive, err := buildVibeStarterZip(share, baseURL, !record.Sandbox)
+	if err != nil {
+		app.logger.Error("builder starter zip failed", "request_id", requestIDFromContext(ctx), "error", err)
+		writeError(w, http.StatusInternalServerError, "Could not build the starter project")
+		return
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="m-stash-starter-`+record.Slug+`.zip"`)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(archive)
 }

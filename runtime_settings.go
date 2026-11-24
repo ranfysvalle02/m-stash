@@ -37,6 +37,7 @@ type settingsOverrides struct {
 	VibeMaxSandboxes        *int    `bson:"vibeMaxSandboxes,omitempty" json:"vibeMaxSandboxes,omitempty"`
 	VibeDailyLimit          *int    `bson:"vibeDailyLimit,omitempty" json:"vibeDailyLimit,omitempty"`
 	VibeShareTTL            *string `bson:"vibeShareTTL,omitempty" json:"vibeShareTTL,omitempty"`
+	VibeLearn               *bool   `bson:"vibeLearn,omitempty" json:"vibeLearn,omitempty"`
 }
 
 // resolvedSettings is the effective configuration a request should honor right
@@ -56,6 +57,7 @@ type resolvedSettings struct {
 	VibeMaxSandboxes        int           `json:"vibeMaxSandboxes"`
 	VibeDailyLimit          int           `json:"vibeDailyLimit"`
 	VibeShareTTL            time.Duration `json:"-"`
+	VibeLearn               bool          `json:"vibeLearn"`
 	// String mirrors of the durations so the admin API can serialize them.
 	TrySandboxTTLString string `json:"trySandboxTTL"`
 	VibeShareTTLString  string `json:"vibeShareTTL"`
@@ -175,6 +177,7 @@ func mergeSettings(c Config, o settingsOverrides) resolvedSettings {
 		VibeMaxSandboxes:        intOr(o.VibeMaxSandboxes, c.VibeMaxSandboxes),
 		VibeDailyLimit:          intOr(o.VibeDailyLimit, c.VibeDailyLimit),
 		VibeShareTTL:            durationOr(o.VibeShareTTL, c.VibeShareTTL),
+		VibeLearn:               boolOr(o.VibeLearn, c.VibeLearn),
 	}
 	resolved.TrySandboxTTL = clampSandboxTTL(resolved.TrySandboxTTL, 24*time.Hour)
 	resolved.VibeShareTTL = clampSandboxTTL(resolved.VibeShareTTL, 72*time.Hour)

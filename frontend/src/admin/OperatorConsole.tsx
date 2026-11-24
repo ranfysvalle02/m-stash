@@ -35,6 +35,7 @@ import type {
   AdminAppView,
   AdminBuilderView,
   AdminOverview,
+  VibeFunnel,
   AdminSettings,
   AdminSettingsPatch,
   OutboxEvent,
@@ -166,6 +167,7 @@ type SettingsDraft = {
   builderSignupOpen: boolean
   demoSeed: boolean
   webhookDelivery: boolean
+  vibeLearn: boolean
   trySandboxTTL: string
   vibeShareTTL: string
   builderSignupDailyLimit: number
@@ -177,7 +179,7 @@ type SettingsDraft = {
   vibeDailyLimit: number
 }
 
-const BOOLEAN_KEYS = ["trySandbox", "builderSignupOpen", "demoSeed", "webhookDelivery"] as const
+const BOOLEAN_KEYS = ["trySandbox", "builderSignupOpen", "demoSeed", "webhookDelivery", "vibeLearn"] as const
 const DURATION_KEYS = ["trySandboxTTL", "vibeShareTTL"] as const
 const NUMBER_KEYS = [
   "builderSignupDailyLimit",
@@ -195,6 +197,7 @@ function draftFrom(effective: ResolvedSettings): SettingsDraft {
     builderSignupOpen: effective.builderSignupOpen,
     demoSeed: effective.demoSeed,
     webhookDelivery: effective.webhookDelivery,
+    vibeLearn: effective.vibeLearn,
     trySandboxTTL: effective.trySandboxTTL,
     vibeShareTTL: effective.vibeShareTTL,
     builderSignupDailyLimit: effective.builderSignupDailyLimit,
@@ -502,6 +505,8 @@ function PulsePanel() {
         )}
       </section>
 
+      <VibeFunnelSection funnel={overview.vibeFunnel} />
+
       <section className="op-section">
         <div className="op-section-head">
           <h2>
@@ -521,6 +526,7 @@ function PulsePanel() {
           {boolRow("builderSignupOpen", "Builder signup", "Allow self-serve builder accounts")}
           {boolRow("demoSeed", "Demo data", "Seed the storytelling demo on the default app")}
           {boolRow("webhookDelivery", "Webhook delivery", "Run the outbox delivery worker")}
+          {boolRow("vibeLearn", "Vibe learning", "Use claimed apps' structure (never names or data) as reference designs for similar ideas")}
           {durationRow("trySandboxTTL", "Try-it TTL", "Lifetime of a try-it sandbox, e.g. 24h")}
           {durationRow("vibeShareTTL", "Vibe share TTL", "Lifetime of a vibe sandbox, e.g. 72h")}
           {numberRow("builderSignupDailyLimit", "Signup / day", "0 = unlimited")}
@@ -583,6 +589,68 @@ function PulsePanel() {
         )}
       </section>
     </div>
+  )
+}
+
+// VibeFunnelSection shows whether vibe-lab apps get used and kept, per prompt
+// version and model, plus the validator repairs the model needs most often.
+function VibeFunnelSection({ funnel }: { funnel?: VibeFunnel }) {
+  if (!funnel || funnel.cohorts.length === 0) return null
+  const pct = (part: number, whole: number) => (whole > 0 ? `${Math.round((part / whole) * 100)}%` : "—")
+  return (
+    <section className="op-section">
+      <h2>
+        <Zap aria-hidden="true" size={16} /> Vibe flywheel · last {funnel.windowDays} days
+      </h2>
+      <table className="op-table">
+        <thead>
+          <tr>
+            <th>Cohort</th>
+            <th>Runs</th>
+            <th title="Validator had to repair the spec (after any repair turn)">Issues</th>
+            <th title="A repair turn produced a cleaner spec">Repaired</th>
+            <th title="Model failed; served a blueprint">Fallback</th>
+            <th>Previewed</th>
+            <th>Zip</th>
+            <th>Skill</th>
+            <th>Refined</th>
+            <th>Claimed</th>
+          </tr>
+        </thead>
+        <tbody>
+          {funnel.cohorts.map((row) => (
+            <tr key={`${row.mode}-${row.source}-${row.model}-${row.promptVersion}`}>
+              <td>
+                <code>
+                  {row.mode}/{row.source}
+                  {row.model ? ` · ${row.model}` : ""} · {row.promptVersion}
+                </code>
+              </td>
+              <td>{fmtNum(row.runs)}</td>
+              <td>{pct(row.withIssues, row.runs)}</td>
+              <td>{fmtNum(row.repaired)}</td>
+              <td>{fmtNum(row.fallbacks)}</td>
+              <td>{pct(row.previewed, row.runs)}</td>
+              <td>{pct(row.downloaded, row.runs)}</td>
+              <td>{pct(row.skilled, row.runs)}</td>
+              <td>{pct(row.refined, row.runs)}</td>
+              <td>
+                <strong>{pct(row.claimed, row.runs)}</strong>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {funnel.topIssues.length > 0 && (
+        <div className="op-status-pills">
+          {funnel.topIssues.map((issue) => (
+            <span className="op-pill" key={issue.code} title="Validator repair code">
+              {issue.code}: {fmtNum(issue.count)}
+            </span>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 

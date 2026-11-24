@@ -178,10 +178,42 @@ func pick(value, fallback string, allowed map[string]bool) string {
 	return fallback
 }
 
+// vibeIssue is one repair the validator had to make. Code is a stable,
+// aggregatable identifier (stored in the run ledger); Detail is the
+// human-readable explanation fed back to the model on a repair turn.
+type vibeIssue struct {
+	Code   string `json:"code" bson:"code"`
+	Detail string `json:"detail" bson:"detail"`
+}
+
+type vibeIssues []vibeIssue
+
+func (issues *vibeIssues) add(code, format string, args ...any) {
+	*issues = append(*issues, vibeIssue{Code: code, Detail: fmt.Sprintf(format, args...)})
+}
+
+func (issues vibeIssues) codes() []string {
+	codes := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		codes = append(codes, issue.Code)
+	}
+	return codes
+}
+
 // validateVibeSpec bounds and normalizes everything a model returned, dropping
 // anything that would not survive the real API and defaulting the rest. It never
 // errors: a hollow spec is still a usable (if minimal) app.
 func validateVibeSpec(spec vibeSpec) vibeSpec {
+	cleaned, _ := validateVibeSpecReport(spec)
+	return cleaned
+}
+
+// validateVibeSpecReport is validateVibeSpec plus a record of every repair it
+// made and every quality gap it found. The cleaned spec is identical either way;
+// the issues let the generator ask the model for a fix and let the run ledger
+// measure how often each failure happens.
+func validateVibeSpecReport(spec vibeSpec) (vibeSpec, vibeIssues) {
+	issues := vibeIssues{}
 	cleaned := vibeSpec{
 		Name:    sanitizeInline(spec.Name, vibeNameMaxLength),
 		Tagline: sanitizeInline(spec.Tagline, vibeTaglineMaxLength),
@@ -191,14 +223,16 @@ func validateVibeSpec(spec vibeSpec) vibeSpec {
 	}
 	if cleaned.Name == "" {
 		cleaned.Name = "Your app"
+		issues.add("name.missing", "the app has no name")
 	}
 
 	seenScopeType := map[string]bool{}
 	for _, section := range spec.Sections {
 		if len(cleaned.Sections) >= vibeSpecMaxSections {
+			issues.add("sections.too-many", "only the first %d sections were kept", vibeSpecMaxSections)
 			break
 		}
-		cleanSection, ok := validateVibeSection(section, seenScopeType)
+		cleanSection, ok := validateVibeSection(section, seenScopeType, &issues)
 		if !ok {
 			continue
 		}
@@ -206,22 +240,41 @@ func validateVibeSpec(spec vibeSpec) vibeSpec {
 	}
 	if len(cleaned.Sections) == 0 {
 		cleaned.Sections = append(cleaned.Sections, defaultVibeSection())
+		issues.add("spec.no-sections", "no usable section survived validation, so a generic one was substituted")
 	}
-	return cleaned
+
+	hasMember := len(cleaned.memberSections()) > 0
+	for _, section := range cleaned.Sections {
+		if section.Audience != vibeAudienceOwner {
+			continue
+		}
+		if len(section.Samples) == 0 {
+			issues.add("owner.no-samples", "owner section %q has no sample records, so the live app starts empty", section.Type)
+		}
+		if section.ActionLabel != "" && !hasMember {
+			issues.add("action.no-target", "owner section %q has actionLabel %q but there is no member section for it to prefill", section.Type, section.ActionLabel)
+		}
+	}
+	return cleaned, issues
 }
 
-func validateVibeSection(section vibeSection, seenScopeType map[string]bool) (vibeSection, bool) {
+func validateVibeSection(section vibeSection, seenScopeType map[string]bool, issues *vibeIssues) (vibeSection, bool) {
 	typeName := normalizeVibeType(section.Type)
 	if validateResourceType(typeName) != nil {
+		issues.add("section.invalid-type", "section %q was dropped: type must be 3-32 lowercase letters, digits, or single hyphens", clampString(section.Type, 40))
 		return vibeSection{}, false
 	}
 	audience := pick(section.Audience, vibeAudienceMember, vibeAudiences)
+	if audience != strings.ToLower(strings.TrimSpace(section.Audience)) {
+		issues.add("section.audience-defaulted", "section %q had audience %q, which is not owner, member, or member-public; it became member", typeName, clampString(section.Audience, 24))
+	}
 	scope := "personal"
 	if audience == vibeAudienceOwner {
 		scope = "shared"
 	}
 	scopeType := scope + "/" + typeName
 	if seenScopeType[scopeType] {
+		issues.add("section.duplicate", "section %q was dropped: another %s section already uses that type", typeName, audience)
 		return vibeSection{}, false
 	}
 	seenScopeType[scopeType] = true
@@ -236,6 +289,9 @@ func validateVibeSection(section vibeSection, seenScopeType map[string]bool) (vi
 		Audience: audience,
 		View:     pick(section.View, defaultView, vibeViews),
 	}
+	if cleaned.View != strings.ToLower(strings.TrimSpace(section.View)) {
+		issues.add("section.view-defaulted", "section %q had view %q, which is not grid, list, checklist, timeline, or ranked", typeName, clampString(section.View, 24))
+	}
 	// An action label only makes sense on owner sections, whose public items the
 	// member sections act on. It is clamped like any other inline copy.
 	if audience == vibeAudienceOwner {
@@ -248,10 +304,16 @@ func validateVibeSection(section vibeSection, seenScopeType map[string]bool) (vi
 	seenKey := map[string]bool{}
 	for _, field := range section.Fields {
 		if len(cleaned.Fields) >= vibeSectionMaxFields {
+			issues.add("fields.too-many", "section %q: only the first %d fields were kept", typeName, vibeSectionMaxFields)
 			break
 		}
 		key := normalizeVibeFieldKey(field.Key)
-		if key == "" || seenKey[key] {
+		if key == "" {
+			issues.add("field.invalid-key", "section %q: a field with key %q was dropped (use snake_case letters and digits)", typeName, clampString(field.Key, 32))
+			continue
+		}
+		if seenKey[key] {
+			issues.add("field.duplicate-key", "section %q: duplicate field key %q was dropped", typeName, key)
 			continue
 		}
 		seenKey[key] = true
@@ -259,6 +321,9 @@ func validateVibeSection(section vibeSection, seenScopeType map[string]bool) (vi
 			Key:   key,
 			Label: sanitizeInline(field.Label, vibeLabelMaxLength),
 			Kind:  pick(field.Kind, "text", vibeFieldKinds),
+		}
+		if cleanField.Kind != strings.ToLower(strings.TrimSpace(field.Kind)) {
+			issues.add("field.kind-defaulted", "section %q field %q had kind %q, which is not text, longtext, number, price, toggle, date, or tag", typeName, key, clampString(field.Kind, 24))
 		}
 		if cleanField.Label == "" {
 			cleanField.Label = strings.Title(strings.ReplaceAll(key, "_", " ")) //nolint:staticcheck // ASCII labels only
@@ -275,6 +340,7 @@ func validateVibeSection(section vibeSection, seenScopeType map[string]bool) (vi
 	}
 	if len(cleaned.Fields) == 0 {
 		cleaned.Fields = []vibeField{{Key: "title", Label: "Title", Kind: "text"}}
+		issues.add("section.no-fields", "section %q had no usable fields, so a single title field was substituted", typeName)
 	}
 
 	// Samples only make sense for owner sections, which the sandbox seeds publicly.
@@ -285,6 +351,8 @@ func validateVibeSection(section vibeSection, seenScopeType map[string]bool) (vi
 			}
 			if coerced := coerceSample(cleaned.Fields, sample); len(coerced) > 0 {
 				cleaned.Samples = append(cleaned.Samples, coerced)
+			} else {
+				issues.add("sample.dropped", "section %q: a sample record was dropped because none of its keys match the section's field keys", typeName)
 			}
 		}
 	}

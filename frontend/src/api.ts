@@ -134,6 +134,7 @@ export interface VibeResult {
   owner?: VibeOwner
   claim?: { token: string }
   publishableKey?: string
+  refinements?: string[]
 }
 
 export interface BuilderApp {
@@ -143,6 +144,9 @@ export interface BuilderApp {
   publishableKey: string
   allowedOrigins?: string[]
   active: boolean
+  // vibe is present when the app was generated in the vibe lab; its spec powers
+  // the starter and agent-skill downloads long after the share link expires.
+  vibe?: { idea: string; refinements?: string[]; source: string; createdAt: string }
   createdAt: string
   updatedAt: string
 }
@@ -231,7 +235,34 @@ export interface MetricsSnapshot {
   outboxEvents: Record<string, number>
 }
 
+// VibeFunnelCohort is one group of vibe runs (same mode, source, model, and
+// prompt version) and how far its apps got, from GET /v1/admin/overview.
+export interface VibeFunnelCohort {
+  mode: string
+  source: string
+  model: string
+  promptVersion: string
+  runs: number
+  withIssues: number
+  repaired: number
+  fallbacks: number
+  exemplared: number
+  previewed: number
+  downloaded: number
+  skilled: number
+  refined: number
+  claimed: number
+  claimRate: number
+}
+
+export interface VibeFunnel {
+  windowDays: number
+  cohorts: VibeFunnelCohort[]
+  topIssues: { code: string; count: number }[]
+}
+
 export interface AdminOverview {
+  vibeFunnel?: VibeFunnel
   counts: Record<string, number>
   recordsByVisibility: Record<string, number>
   outboxByState: Record<string, number>
@@ -253,6 +284,7 @@ export interface ResolvedSettings {
   freeTierMaxRecordBytes: number
   vibeMaxSandboxes: number
   vibeDailyLimit: number
+  vibeLearn: boolean
   trySandboxTTL: string
   vibeShareTTL: string
 }
@@ -273,6 +305,7 @@ export interface SettingsOverrides {
   vibeMaxSandboxes?: number
   vibeDailyLimit?: number
   vibeShareTTL?: string
+  vibeLearn?: boolean
 }
 
 // EnvironmentPosture reports read-only, boot-fixed deployment configuration. No
@@ -315,6 +348,7 @@ export interface AdminSettingsPatch {
   vibeMaxSandboxes?: number
   vibeDailyLimit?: number
   vibeShareTTL?: string
+  vibeLearn?: boolean
   resetKeys?: string[]
   resetAll?: boolean
 }
@@ -731,10 +765,12 @@ export const api = {
   // vibe launches an app either from a curated recipe id or a free-text idea. A
   // recipe is instant (no model); an idea uses the model when configured and
   // falls back to a deterministic blueprint otherwise.
-  async vibe(input: string | { recipe?: string; idea?: string }): Promise<VibeResult> {
+  // vibe creates an app from an idea or recipe, or (with parent) refines an
+  // existing share into a new app with the requested change applied.
+  async vibe(input: string | { recipe?: string; idea?: string; parent?: string }): Promise<VibeResult> {
     const body = typeof input === 'string' ? { idea: input } : input
-    const response = await request<APIEnvelope<VibeSpec> & { share?: VibeShare; snippets?: VibeSnippet[]; owner?: VibeOwner; claim?: { token: string }; publishableKey?: string }>('/v1/vibe', { method: 'POST', body, retrySession: false })
-    return { spec: response.data, share: response.share, snippets: response.snippets, owner: response.owner, claim: response.claim, publishableKey: response.publishableKey }
+    const response = await request<APIEnvelope<VibeSpec> & { share?: VibeShare; snippets?: VibeSnippet[]; owner?: VibeOwner; claim?: { token: string }; publishableKey?: string; refinements?: string[] }>('/v1/vibe', { method: 'POST', body, retrySession: false })
+    return { spec: response.data, share: response.share, snippets: response.snippets, owner: response.owner, claim: response.claim, publishableKey: response.publishableKey, refinements: response.refinements }
   },
 
   // listVibeRecipes returns the curated launchpad cards.
@@ -763,8 +799,8 @@ export const api = {
   },
 
   async getVibeShare(id: string): Promise<VibeResult> {
-    const response = await request<APIEnvelope<VibeSpec> & { share: VibeShare; idea: string; snippets?: VibeSnippet[]; publishableKey?: string }>(`/v1/vibe/${encodeURIComponent(id)}`, { retrySession: false })
-    return { spec: response.data, share: response.share, idea: response.idea, snippets: response.snippets, publishableKey: response.publishableKey }
+    const response = await request<APIEnvelope<VibeSpec> & { share: VibeShare; idea: string; snippets?: VibeSnippet[]; publishableKey?: string; refinements?: string[] }>(`/v1/vibe/${encodeURIComponent(id)}`, { retrySession: false })
+    return { spec: response.data, share: response.share, idea: response.idea, snippets: response.snippets, publishableKey: response.publishableKey, refinements: response.refinements }
   },
 
   async builderLogin(email: string, password: string) {

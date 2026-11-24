@@ -37,6 +37,10 @@ type application struct {
 	sweeper *sandboxSweeper
 	// vibeCooldownUntil (unix nanos) skips the model after a key-level failure so requests don't each pay for a doomed call.
 	vibeCooldownUntil atomic.Int64
+	// vibeExemplars caches claimed-app reference designs for prompt assembly.
+	vibeExemplars vibeExemplarCache
+	// vibeFunnel caches the operator funnel report between overview polls.
+	vibeFunnel vibeFunnelCache
 }
 
 func newApplication(appConfig Config, database *mongo.Database, client *mongo.Client) *application {

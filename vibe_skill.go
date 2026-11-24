@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -106,7 +107,7 @@ func genericVibeSkill(baseURL string, trySandbox bool) string {
 
 	b.WriteString("## A record body\n\n")
 	b.WriteString("```json\n{\n  \"slug\": \"unique-slug\",\n  \"title\": \"Human title\",\n  \"visibility\": \"private\",\n  \"data\": { \"fieldKey\": \"value\" }\n}\n```\n\n")
-	b.WriteString("Visibility is `private` (owner only, the default), `authenticated` (any signed-in user; shared resources only), or `public` (anyone).\n\n")
+	writeSkillRecordRules(&b)
 
 	if trySandbox {
 		b.WriteString("## Zero-setup sandbox\n\n")
@@ -120,6 +121,8 @@ func genericVibeSkill(baseURL string, trySandbox bool) string {
 	b.WriteString("- NEVER put a secret key (`sk_...`), platform token, or MongoDB credentials in browser/frontend code — they are server-only.\n")
 	b.WriteString("- The browser never chooses an owner; the server scopes every record to the token's user. Don't work around a 401/403 on the client — fix the auth or the visibility.\n")
 	b.WriteString("- Default new records to `private`; choose `public` only for data meant for everyone.\n\n")
+
+	writeSkillFailures(&b, true)
 
 	fmt.Fprintf(&b, "## Reference\n\nFull machine-readable API reference: %s/llms.txt\n", baseURL)
 	return b.String()
@@ -181,7 +184,10 @@ func vibeAppSkill(record *vibeShareRecord, baseURL string) string {
 
 	b.WriteString("## A record body\n\n")
 	b.WriteString("```json\n{\n  \"slug\": \"unique-slug\",\n  \"title\": \"Human title\",\n  \"visibility\": \"private\",\n  \"data\": { \"fieldKey\": \"value\" }\n}\n```\n\n")
-	b.WriteString("Visibility: `private` (owner only), `authenticated` (any signed-in user; shared only), or `public` (anyone).\n\n")
+	writeSkillRecordRules(&b)
+	writeAppSkillProcedures(&b)
+	writeAppSkillVerify(&b, spec, baseURL, publishableKey)
+	writeSkillFailures(&b, false)
 
 	b.WriteString("## Rules (do not break)\n\n")
 	b.WriteString("- Always send `X-M-Stash-App` with the publishable key above.\n")
@@ -190,4 +196,90 @@ func vibeAppSkill(record *vibeShareRecord, baseURL string) string {
 
 	fmt.Fprintf(&b, "Full machine-readable reference: %s/llms.txt\n", baseURL)
 	return b.String()
+}
+
+// writeSkillRecordRules states the record contract exactly as the server
+// enforces it, so an agent's first write succeeds.
+func writeSkillRecordRules(b *strings.Builder) {
+	b.WriteString("Every create needs `slug` (3-64 lowercase letters, digits, or hyphens; unique per type), `title` (1-200 chars), and `visibility`; `data` is free-form JSON. `visibility` is REQUIRED and must be `private` (owner only), `authenticated` (any signed-in user; shared resources only), or `public` (anyone).\n\n")
+}
+
+// writeSkillFailures maps the API's real failure responses to their fixes.
+// Agents hit these constantly; a lookup table beats guessing. The app-tailored
+// skill omits the credential row so it never carries credential wording.
+func writeSkillFailures(b *strings.Builder, includeCredentials bool) {
+	b.WriteString("## When a call fails\n\n")
+	b.WriteString("| Status | Message contains | Fix |\n| --- | --- | --- |\n")
+	b.WriteString("| 400 | `Missing X-M-Stash-App` | Send the `X-M-Stash-App` header (or `?app=`) on every request. |\n")
+	b.WriteString("| 400 | `visibility must be` | Send `visibility`: `private`, `public`, or (shared only) `authenticated`. |\n")
+	b.WriteString("| 400 | `title must be` / `resource slug must` | Send a non-empty `title` and a 3-64 char lowercase-hyphen `slug`. |\n")
+	if includeCredentials {
+		b.WriteString("| 400 | `password must be` | Passwords are 12-72 characters. |\n")
+	}
+	b.WriteString("| 401 | `Unknown application key` | Wrong `pk_` key, or the sandbox expired. Keep it from the console before it expires, or provision a new one. |\n")
+	b.WriteString("| 401 | `Missing or invalid Authorization` | Send `Authorization: Bearer <token>` from signup/login. |\n")
+	b.WriteString("| 403 | `Invalid or expired token` | Sign in again and replace the stored token. |\n")
+	b.WriteString("| 403 | `Only administrators can write shared` | Members write to `/v1/me/resources/...`; shared data is written by the owner (admin login) or a server holding `sk_`. |\n")
+	b.WriteString("| 409 | `already exists` | Pick a different slug, email, or username. |\n")
+	b.WriteString("| 413 / 429 | `too large` / `limit` / `full` | A quota was reached: smaller records, fewer records, or keep the app from the console for higher limits. |\n\n")
+}
+
+// writeAppSkillProcedures is the "how to change this app" playbook. The
+// starter renders entirely from its config, so most features are a data edit.
+func writeAppSkillProcedures(b *strings.Builder) {
+	b.WriteString("## Change the app\n\n")
+	b.WriteString("The starter renders entirely from the JSON in the `<script id=\"m-stash-config\">` block of `index.html` (`sections` -> `fields`). `mstash.json` is the full spec, with seed samples, for reference; keep the two in sync. Most features are a config edit, not new code:\n\n")
+	b.WriteString("1. **Add a field**: append `{ \"key\": \"snake_case\", \"label\": \"Label\", \"kind\": \"text\" }` to a section's `fields`. Kinds: `text`, `longtext`, `number`, `price`, `toggle`, `date`, `tag`. Add `\"options\": [\"a\", \"b\"]` for a dropdown. `data` is free-form, so there is no migration; older records just lack the key.\n")
+	b.WriteString("2. **Add a section**: give it a new `type` (3-32 lowercase letters, digits, or single hyphens; it becomes the URL segment), an `audience` (`owner` = app-wide data the owner writes and everyone reads; `member` = private per user; `member-public` = per user, public on their page), a `view` (`grid`, `list`, `checklist`, `timeline`, `ranked`), and fields. No server setup is needed.\n")
+	b.WriteString("3. **Counters** (likes, votes, stock): `PATCH` the record with `{ \"op\": \"increment\", \"field\": \"data.likes\", \"by\": 1 }`; it is atomic, so never read-modify-write.\n")
+	b.WriteString("4. **Never rename** an existing field `key` or section `type` that already holds records; add a new one instead. Labels and titles are safe to change.\n")
+	b.WriteString("5. **Custom UI** beyond the built-in views: keep calling the same endpoints with `fetch`; the server enforces ownership whatever the frontend does.\n\n")
+}
+
+// writeAppSkillVerify gives a concrete, copy-paste check for this app's own
+// sections so an agent can prove a change works instead of assuming it does.
+func writeAppSkillVerify(b *strings.Builder, spec vibeSpec, baseURL, publishableKey string) {
+	b.WriteString("## Verify a change\n\n")
+	b.WriteString("Run this after any change (it creates one throwaway user; use a sandbox or dev app). Every call must return 2xx; `curl -f` exits non-zero otherwise.\n\n")
+	b.WriteString("```bash\n")
+	fmt.Fprintf(b, "API=%s\nKEY=%s\n", shellQuote(baseURL), shellQuote(publishableKey))
+	for _, section := range spec.ownerSections() {
+		fmt.Fprintf(b, "# Public %s are readable without login\n", section.Type)
+		fmt.Fprintf(b, `curl -fsS "$API/v1/public/shared/resources/%s" -H "X-M-Stash-App: $KEY"`+"\n", section.Type)
+	}
+	if members := spec.memberSections(); len(members) > 0 {
+		b.WriteString("# A new member can sign up, then write and read their own records\n")
+		b.WriteString("SUFFIX=$RANDOM$RANDOM\n")
+		b.WriteString(`TOKEN=$(curl -fsS -X POST "$API/v1/auth/signup" -H "X-M-Stash-App: $KEY" -H 'Content-Type: application/json' \` + "\n")
+		b.WriteString(`  -d '{"email":"verify-'"$SUFFIX"'@example.com","password":"verify-password-123","username":"verify-'"$SUFFIX"'"}' | jq -r .token)` + "\n")
+		for _, section := range members {
+			body, err := json.Marshal(map[string]any{
+				"slug":       "verify-" + section.Type,
+				"title":      "Verify",
+				"visibility": section.visibility(),
+				"data":       exampleData(section.Fields),
+			})
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(b, `curl -fsS -X POST "$API/v1/me/resources/%s" -H "X-M-Stash-App: $KEY" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \`+"\n", section.Type)
+			fmt.Fprintf(b, "  -d %s\n", shellQuote(string(body)))
+			fmt.Fprintf(b, `curl -fsS "$API/v1/me/resources/%s" -H "X-M-Stash-App: $KEY" -H "Authorization: Bearer $TOKEN"`+"\n", section.Type)
+		}
+	}
+	b.WriteString("```\n\n")
+}
+
+// shellQuote wraps a value in single quotes for POSIX shells.
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+// exampleData builds one plausible value per field for the verify script.
+func exampleData(fields []vibeField) map[string]any {
+	data := map[string]any{}
+	for _, field := range fields {
+		data[field.Key] = exampleForKind(field)
+	}
+	return data
 }
