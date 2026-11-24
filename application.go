@@ -71,6 +71,7 @@ func (app *application) Handler(rateLimiter *authRateLimiter) http.Handler {
 	mux.HandleFunc("/v1/builder/auth/signup", app.corsMiddleware(app.rateLimitMiddleware(app.builderSignupLimiter, "builder-signup", app.handleBuilderSignup)))
 	mux.HandleFunc("/v1/builder/auth/refresh", app.corsMiddleware(app.handleSessionRefresh))
 	mux.HandleFunc("/v1/builder/auth/logout", app.corsMiddleware(app.handleSessionLogout))
+	mux.HandleFunc("/v1/builder/auth/oauth/exchange", app.corsMiddleware(app.rateLimitMiddleware(app.oauthLimiter, "builder-oauth-exchange", app.handleBuilderOAuthExchange)))
 	mux.HandleFunc("/v1/builder/me", app.corsMiddleware(app.authenticateBuilder(app.handleBuilderMe)))
 	mux.HandleFunc("/v1/builder/apps", app.corsMiddleware(app.authenticateBuilder(app.handleBuilderApps)))
 	mux.HandleFunc("/v1/builder/apps/", app.corsMiddleware(app.authenticateBuilder(app.handleBuilderApp)))

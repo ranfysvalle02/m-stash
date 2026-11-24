@@ -1,0 +1,304 @@
+/*
+ * Polish layer: lighting, depth, and micro-motion on top of the base styles.
+ * Everything here is decorative. Motion is disabled under
+ * prefers-reduced-motion, and features that need newer CSS (@property,
+ * scroll-driven animations) degrade to the static look.
+ */
+
+@property --keep-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+:root {
+  --ease-out-expo: cubic-bezier(.16, 1, .3, 1);
+  --shadow-rest: 0 1px 0 rgba(255, 255, 255, .03) inset, 0 10px 28px rgba(0, 0, 0, .28);
+  --shadow-lift: 0 1px 0 rgba(255, 255, 255, .05) inset, 0 22px 48px rgba(0, 0, 0, .38), 0 0 0 1px rgba(104, 242, 255, .16);
+}
+
+/* ---------------------------------------------------------------- ambient light */
+
+.public-shell { isolation: isolate; position: relative; }
+.public-shell::before {
+  animation: aurora-drift 28s ease-in-out infinite alternate;
+  background:
+    radial-gradient(38rem 26rem at 12% 8%, rgba(66, 245, 141, .14), transparent 70%),
+    radial-gradient(34rem 24rem at 88% 2%, rgba(104, 242, 255, .12), transparent 70%),
+    radial-gradient(30rem 22rem at 70% 38%, rgba(255, 107, 197, .07), transparent 70%);
+  content: "";
+  filter: blur(18px);
+  height: min(120vh, 70rem);
+  inset: 0 0 auto 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+/* Headline: a slow band of light passes across it. */
+.discover-intro h1,
+.tutorial-head h1 {
+  -webkit-background-clip: text;
+  background-clip: text;
+  background-image: linear-gradient(105deg, var(--text) 0 40%, #d7fff0 48%, #9dffd0 50%, #d7fff0 52%, var(--text) 60% 100%);
+  background-size: 260% 100%;
+  color: transparent;
+  filter: drop-shadow(0 0 34px rgba(66, 245, 141, .14));
+  animation: headline-sheen 9s var(--ease-out-expo) 1.2s infinite;
+}
+.discover-intro h1::selection,
+.tutorial-head h1::selection { -webkit-text-fill-color: var(--ink); background: var(--mongo); }
+
+/* Header links get an underline that grows from the left. */
+.public-header nav > a:not(.button):not(.nav-accent),
+.public-footer nav a {
+  background-image: linear-gradient(90deg, var(--mongo), var(--aqua));
+  background-position: 0 100%;
+  background-repeat: no-repeat;
+  background-size: 0 2px;
+  padding-bottom: 2px;
+  transition: background-size .35s var(--ease-out-expo), color .2s ease;
+}
+.public-header nav > a:not(.button):not(.nav-accent):hover,
+.public-footer nav a:hover { background-size: 100% 2px; color: var(--text); }
+
+/* ------------------------------------------------------------------ buttons */
+
+.button { isolation: isolate; overflow: hidden; position: relative; }
+.button.primary::after {
+  background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, .5) 50%, transparent 70%);
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  transform: translateX(-130%);
+  z-index: 1;
+}
+@media (hover: hover) {
+  .button.primary:hover:not(:disabled)::after { transform: translateX(130%); transition: transform .75s var(--ease-out-expo); }
+}
+/* The keep button glints on its own every few seconds: it's the one action
+   that turns a visitor into a builder. */
+.vibe-keep-card .button.primary::after { animation: cta-glint 5.5s ease-in-out 1.5s infinite; }
+
+/* -------------------------------------------------------------------- cards */
+
+.recipe-card,
+.recipe-chip,
+.tutorial-card,
+.console-app-card,
+.vibe-keep-card,
+.vibe-owner-card,
+.console-claim,
+.stash-stats {
+  isolation: isolate;
+  position: relative;
+}
+.recipe-card,
+.recipe-chip,
+.tutorial-card,
+.console-app-card {
+  box-shadow: var(--shadow-rest);
+  transition: transform .35s var(--ease-out-expo), box-shadow .35s var(--ease-out-expo), border-color .25s ease;
+}
+
+/* Spotlight: a soft light follows the pointer (position from spotlight.ts). */
+.recipe-card::after,
+.recipe-chip::after,
+.tutorial-card::after,
+.console-app-card::after,
+.vibe-keep-card::after,
+.vibe-owner-card::after,
+.console-claim::after,
+.stash-stats::after {
+  background: radial-gradient(22rem circle at var(--mx, 50%) var(--my, -30%), rgba(104, 242, 255, .13), rgba(66, 245, 141, .05) 35%, transparent 60%);
+  border-radius: inherit;
+  content: "";
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transition: opacity .35s ease;
+  z-index: -1;
+}
+
+@media (hover: hover) {
+  .recipe-card:hover::after,
+  .recipe-chip:hover::after,
+  .tutorial-card:hover::after,
+  .console-app-card:hover::after,
+  .vibe-keep-card:hover::after,
+  .vibe-owner-card:hover::after,
+  .console-claim:hover::after,
+  .stash-stats:hover::after { opacity: 1; }
+
+  .recipe-card:hover,
+  .recipe-chip:hover,
+  .tutorial-card:hover { box-shadow: var(--shadow-lift); transform: translateY(-4px); }
+  .console-app-card:hover { box-shadow: var(--shadow-lift); }
+  .tutorial-card:hover .tutorial-step { letter-spacing: .16em; }
+}
+.tutorial-step { transition: letter-spacing .35s var(--ease-out-expo); }
+
+/* Cards arrive in a short cascade. Fill is "backwards", not "both": a fill
+   that outlives the animation would pin transform and kill the hover lift. */
+.recipe-grid > *,
+.recipe-strip-track > *,
+.tutorial-grid > li,
+.console-app-list > li {
+  animation: card-rise .6s var(--ease-out-expo) backwards;
+}
+.recipe-grid > :nth-child(2), .recipe-strip-track > :nth-child(2), .tutorial-grid > li:nth-child(2) { animation-delay: .05s; }
+.recipe-grid > :nth-child(3), .recipe-strip-track > :nth-child(3), .tutorial-grid > li:nth-child(3) { animation-delay: .1s; }
+.recipe-grid > :nth-child(4), .recipe-strip-track > :nth-child(4), .tutorial-grid > li:nth-child(4) { animation-delay: .15s; }
+.recipe-grid > :nth-child(5), .recipe-strip-track > :nth-child(5), .tutorial-grid > li:nth-child(5) { animation-delay: .2s; }
+.recipe-grid > :nth-child(n + 6), .recipe-strip-track > :nth-child(n + 6), .tutorial-grid > li:nth-child(n + 6) { animation-delay: .25s; }
+
+/* ------------------------------------------------- keep + secret: lit borders */
+
+/* A slow beam of light travels around the keep card's border. */
+.vibe-keep-card:not(.claimed) {
+  animation: keep-orbit 7s linear infinite;
+  background:
+    linear-gradient(155deg, rgba(10, 34, 34, .96), rgba(6, 22, 28, .96)) padding-box,
+    conic-gradient(from var(--keep-angle), rgba(66, 245, 141, .08), rgba(66, 245, 141, .85) 12%, rgba(104, 242, 255, .5) 18%, rgba(66, 245, 141, .08) 30% 100%) border-box;
+  border: 1px solid transparent;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .35), 0 0 32px rgba(66, 245, 141, .08);
+}
+.vibe-keep-card.claimed { box-shadow: 0 0 0 1px rgba(104, 242, 255, .25), 0 0 28px rgba(104, 242, 255, .1); }
+
+.console-secret {
+  animation: secret-arrive .7s var(--ease-out-expo) backwards, secret-glow 3.2s ease-in-out .7s 3;
+  box-shadow: 0 0 0 1px rgba(104, 242, 255, .2), 0 24px 60px rgba(0, 0, 0, .4);
+}
+.console-claim { box-shadow: 0 0 0 1px rgba(66, 245, 141, .15), 0 20px 50px rgba(0, 0, 0, .35), 0 0 40px rgba(66, 245, 141, .08); }
+.console-owner { animation: card-rise .45s var(--ease-out-expo) backwards; }
+
+/* The live preview frame breathes in the app's accent color. */
+.vibe-browser {
+  animation: frame-breathe 6s ease-in-out infinite alternate;
+  transition: transform .5s var(--ease-out-expo);
+}
+
+/* ------------------------------------------------------------ live counters */
+
+.stash-stats {
+  backdrop-filter: blur(8px);
+  background: linear-gradient(135deg, rgba(66, 245, 141, .09), rgba(104, 242, 255, .04));
+  border: 1px solid rgba(66, 245, 141, .28);
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .02) inset, 0 12px 30px rgba(0, 0, 0, .25), 0 0 26px rgba(66, 245, 141, .08);
+  padding: .55rem 1.1rem;
+  width: fit-content;
+}
+.stash-stats-headline strong { text-shadow: 0 0 18px rgba(66, 245, 141, .45); }
+.stash-stats-list li { position: relative; }
+.stash-stats-list li + li::before { color: rgba(192, 222, 217, .35); content: "·"; left: -.65rem; position: absolute; }
+
+/* ------------------------------------------------------- Runs on MongoDB */
+
+.public-footer .mongo-badge {
+  align-items: center;
+  background: rgba(0, 237, 100, .07);
+  border: 1px solid rgba(0, 237, 100, .3);
+  border-radius: 999px;
+  color: var(--mongo);
+  display: inline-flex;
+  font-size: .78rem;
+  font-weight: 700;
+  gap: .4rem;
+  letter-spacing: .02em;
+  padding: .3rem .75rem .3rem .55rem;
+  text-decoration: none;
+  transition: box-shadow .3s ease, transform .3s var(--ease-out-expo), background .3s ease;
+}
+.mongo-badge svg { filter: drop-shadow(0 0 6px rgba(0, 237, 100, .5)); transition: transform .4s var(--ease-out-expo); }
+@media (hover: hover) {
+  .mongo-badge:hover { background: rgba(0, 237, 100, .13); box-shadow: 0 0 22px rgba(0, 237, 100, .25); transform: translateY(-1px); }
+  .mongo-badge:hover svg { transform: rotate(-8deg) scale(1.12); }
+}
+
+/* -------------------------------------------- scroll reveal (where supported) */
+
+@supports (animation-timeline: view()) {
+  .discovery-page > section,
+  .tutorial-body > h2,
+  .tutorial-body > .markdown-code {
+    animation: scroll-reveal linear both;
+    animation-range: entry 0% cover 22%;
+    animation-timeline: view();
+  }
+}
+
+/* --------------------------------------------------------------- keyframes */
+
+@keyframes aurora-drift {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-2%, 1.5%, 0) scale(1.04); }
+  100% { transform: translate3d(2%, -1%, 0) scale(1.02); }
+}
+@keyframes headline-sheen {
+  0% { background-position: 100% 0; }
+  45%, 100% { background-position: 0 0; }
+}
+@keyframes cta-glint {
+  0%, 70% { transform: translateX(-130%); }
+  85%, 100% { transform: translateX(130%); }
+}
+@keyframes card-rise {
+  from { opacity: 0; transform: translateY(14px) scale(.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes keep-orbit { to { --keep-angle: 360deg; } }
+@keyframes secret-arrive {
+  from { opacity: 0; transform: translateY(-8px) scale(.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes secret-glow {
+  50% { box-shadow: 0 0 0 1px rgba(104, 242, 255, .55), 0 24px 60px rgba(0, 0, 0, .4), 0 0 46px rgba(104, 242, 255, .22); }
+}
+@keyframes frame-breathe {
+  from { box-shadow: 0 34px 90px rgba(0, 0, 0, .55), 0 0 0 1px rgba(104, 242, 255, .05), 0 0 0 rgba(0, 0, 0, 0); }
+  to { box-shadow: 0 34px 90px rgba(0, 0, 0, .55), 0 0 0 1px color-mix(in srgb, var(--vibe-accent) 30%, transparent), 0 0 70px color-mix(in srgb, var(--vibe-accent) 16%, transparent); }
+}
+@keyframes scroll-reveal {
+  from { opacity: 0; transform: translateY(22px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* --------------------------------------------------------- reduced motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .public-shell::before,
+  .discover-intro h1,
+  .tutorial-head h1,
+  .vibe-keep-card .button.primary::after,
+  .recipe-grid > *,
+  .recipe-strip-track > *,
+  .tutorial-grid > li,
+  .console-app-list > li,
+  .vibe-keep-card:not(.claimed),
+  .console-secret,
+  .console-owner,
+  .vibe-browser,
+  .discovery-page > section,
+  .tutorial-body > h2,
+  .tutorial-body > .markdown-code {
+    animation: none;
+  }
+  .discover-intro h1,
+  .tutorial-head h1 { background-position: 0 0; }
+  .recipe-card,
+  .recipe-chip,
+  .tutorial-card,
+  .console-app-card,
+  .mongo-badge,
+  .mongo-badge svg,
+  .tutorial-step,
+  .public-header nav > a,
+  .public-footer nav a { transition-duration: .01ms; }
+  .recipe-card:hover,
+  .recipe-chip:hover,
+  .tutorial-card:hover,
+  .mongo-badge:hover { transform: none; }
+}

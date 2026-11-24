@@ -617,6 +617,8 @@ func (app *application) handleBuilderApp(w http.ResponseWriter, r *http.Request,
 		app.builderAppUsage(w, r, ownerID, appID)
 	case len(segments) == 2 && (segments[1] == "skill.md" || segments[1] == "starter.zip"):
 		app.builderAppVibeAsset(w, r, ownerID, appID, segments[1])
+	case len(segments) == 2 && segments[1] == "owner":
+		app.builderAppOwner(w, r, ownerID, appID)
 	case len(segments) == 2 && segments[1] == "users":
 		app.listBuilderAppUsers(w, r, ownerID, appID)
 	case len(segments) == 3 && segments[1] == "users":

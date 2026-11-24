@@ -1040,6 +1040,7 @@ func (app *application) updateAdminBuilder(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		set["password"] = string(passwordHash)
+		set["credentialsChangedAt"] = time.Now().UTC()
 		// Invalidate existing browser sessions so a reset password takes hold.
 		if _, err := app.database.Collection(sessionCollectionName).
 			UpdateMany(ctx, bson.M{"userId": builderID, "revokedAt": bson.M{"$exists": false}}, bson.M{"$set": bson.M{"revokedAt": time.Now().UTC()}}); err != nil {
@@ -1123,9 +1124,12 @@ func (app *application) deleteAdminBuilder(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
-	// Revoke sessions and remove the account.
+	// Revoke sessions, unlink social logins, and remove the account.
 	if _, err := app.database.Collection(sessionCollectionName).DeleteMany(ctx, bson.M{"userId": builderID}); err != nil {
 		app.logger.Error("could not delete builder sessions", "error", err)
+	}
+	if _, err := app.database.Collection(identityCollectionName).DeleteMany(ctx, bson.M{"appId": bson.NilObjectID, "userId": builderID}); err != nil {
+		app.logger.Error("could not delete builder identities", "error", err)
 	}
 	if _, err := app.database.Collection("_users").DeleteOne(ctx, bson.M{"_id": builderID}); err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not delete builder")

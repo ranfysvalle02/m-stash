@@ -59,7 +59,7 @@ export default function StashersCounter({ compact = false }: { compact?: boolean
             <strong>{format(stats.liveApps)}</strong> live {plural(stats.liveApps, "app", "apps")}
           </li>
           <li>
-            <strong>{format(stats.records)}</strong> {plural(stats.records, "record", "records")} stashed
+            <strong>{format(stats.records)}</strong> {plural(stats.records, "record", "records")} stashed in MongoDB
           </li>
           {stats.vibes30d > 0 && (
             <li>

@@ -593,6 +593,10 @@ func oauthErrorCode(err error) string {
 		return "email_unverified"
 	case errors.Is(err, errOAuthUserLimit):
 		return "app_full"
+	case errors.Is(err, errBuilderSignupClosed):
+		return "signup_closed"
+	case errors.Is(err, errBuilderSignupFull):
+		return "signup_capacity"
 	default:
 		return "server_error"
 	}
@@ -637,6 +641,10 @@ func (app *application) handleOAuthStart(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusNotFound, "Unknown or disabled identity provider")
 		return
 	}
+	if r.URL.Query().Get("console") == "1" {
+		app.handleBuilderOAuthStart(w, r, provider)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	key := appKeyFromRequest(r)
@@ -673,6 +681,13 @@ func (app *application) prepareOAuthRedirect(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		return "", err
 	}
+	return app.sealOAuthRedirect(w, r, adapter, provider, record.ID.Hex(), linkUserID, redirectURI)
+}
+
+// sealOAuthRedirect binds a signed state JWT (target app, redirect, PKCE
+// verifier) to an HttpOnly nonce cookie and returns the provider authorize URL.
+// appID is the nil ObjectID for the builder console, which has no app.
+func (app *application) sealOAuthRedirect(w http.ResponseWriter, r *http.Request, adapter OAuthAdapter, provider, appID, linkUserID, redirectURI string) (string, error) {
 	verifier, err := newCodeVerifier()
 	if err != nil {
 		return "", err
@@ -684,7 +699,7 @@ func (app *application) prepareOAuthRedirect(w http.ResponseWriter, r *http.Requ
 	now := time.Now()
 	state := oauthStateClaims{
 		Nonce:       nonce,
-		AppID:       record.ID.Hex(),
+		AppID:       appID,
 		Provider:    provider,
 		RedirectURI: redirectURI,
 		Verifier:    verifier,
@@ -750,6 +765,12 @@ func (app *application) handleOAuthCallback(w http.ResponseWriter, r *http.Reque
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
+	// The builder console signs in with the same registered callback; its state
+	// carries the nil app id because the control plane has no app.
+	if appID.IsZero() {
+		app.finishBuilderOAuth(ctx, w, r, adapter, provider, claims, code)
+		return
+	}
 	record, err := app.lookupAppByID(ctx, appID)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "Unknown application")

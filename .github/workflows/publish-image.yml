@@ -35,6 +35,7 @@ jobs:
         run: |
           npm --prefix frontend ci
           npm --prefix frontend run lint
+          npm --prefix frontend test
           npm --prefix frontend run build
 
       - name: Verify Go source

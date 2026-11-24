@@ -24,6 +24,7 @@ import {
   Database,
   Download,
   GraduationCap,
+  KeyRound,
   ExternalLink,
   FilePenLine,
   Globe2,
@@ -88,8 +89,17 @@ import {
 } from "./api";
 import { ApiLoopRunner } from "./runner/ApiLoopRunner";
 import { TryItLiveSection } from "./runner/TryItLiveSection";
-import { claimStorageKey, loadClaimToken, saveClaimToken } from "./runner/claimStorage";
+import {
+  adoptClaimFragment,
+  claimStorageKey,
+  keepAnywhereLink,
+  keepPath,
+  loadClaimToken,
+  saveClaimToken,
+} from "./runner/claimStorage";
 import { ToastProvider } from "./console/Toast";
+import { useToast } from "./console/toastContext";
+import { consoleAuthMode, onceByKey, takeOAuthReturn, type ConsoleAuthMode } from "./console/oauthReturn";
 import { AiPromptPanel } from "./console/AiPromptPanel";
 import { AppInspector } from "./console/AppInspector";
 import { ConfirmButton } from "./console/ConfirmButton";
@@ -100,7 +110,10 @@ import {
 } from "./vibe/previewBridge";
 import "./App.css";
 import "./vibe/vibe.css";
+// Last on purpose: the polish layer refines the base styles above.
+import "./polish/polish.css";
 import StashersCounter from "./stats/StashersCounter";
+import { usableSandboxOwner } from "./vibe/ownerLogin";
 
 type SessionState =
   | { kind: "loading" }
@@ -2453,7 +2466,7 @@ function VibeCopyField({ label, value }: { label: string; value: string }) {
   );
 }
 
-function VibeOwnerCard({ owner }: { owner: VibeOwner | null }) {
+function VibeOwnerCard({ owner, claimed = false }: { owner: VibeOwner | null; claimed?: boolean }) {
   return (
     <div className="vibe-owner-card">
       <span className="vibe-owner-badge">
@@ -2469,9 +2482,14 @@ function VibeOwnerCard({ owner }: { owner: VibeOwner | null }) {
         </>
       ) : (
         <p className="vibe-owner-lede">
-          Your one-time owner sign-in isn’t stored on this device. The app is
-          still live — sign in from the app, or start a fresh idea to get new
-          owner keys.
+          {claimed ? (
+            <>
+              Set or reset the owner sign-in anytime under <strong>Owner login</strong>{" "}
+              in the <Link to="/console">console</Link>.
+            </>
+          ) : (
+            "Your one-time owner sign-in isn’t stored on this device. The app is still live — keep it to set your own owner login, or start a fresh idea for new owner keys."
+          )}
         </p>
       )}
     </div>
@@ -2663,15 +2681,43 @@ function VibeUnderTheHood({
   );
 }
 
+// useBuilderSignupOpen reports whether visitors can create a builder account
+// here (null while loading), so "keep this app" copy never promises a signup
+// the deployment doesn't offer.
+function useBuilderSignupOpen() {
+  const [open, setOpen] = useState<boolean | null>(null);
+  useEffect(() => {
+    let active = true;
+    api
+      .getServiceManifest()
+      .then((caps) => {
+        if (active) setOpen(caps.builderSignup);
+      })
+      .catch(() => {
+        if (active) setOpen(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  return open;
+}
+
 function VibeKeepCard({
   publishableKey,
   claimToken,
   claimed,
+  appName,
+  expiresAt,
 }: {
   publishableKey: string | null;
   claimToken: string | null;
   claimed: boolean;
+  appName: string;
+  expiresAt?: string;
 }) {
+  const signupOpen = useBuilderSignupOpen();
+  const [linkCopied, setLinkCopied] = useState(false);
   if (claimed) {
     return (
       <div className="vibe-keep-card claimed">
@@ -2679,7 +2725,8 @@ function VibeKeepCard({
           <Check aria-hidden="true" size={14} /> Kept
         </span>
         <p className="vibe-owner-lede">
-          This app lives in a builder console now — it no longer expires.
+          This app lives in a builder console now — it no longer expires.{" "}
+          <Link to="/console">Open the console</Link>
         </p>
       </div>
     );
@@ -2691,11 +2738,22 @@ function VibeKeepCard({
           <Sparkles aria-hidden="true" size={14} /> Keep this app
         </span>
         <p className="vibe-owner-lede">
-          The one-time claim token for this sandbox isn’t on this device, so it
-          can only be kept from the device that first generated it.
+          Keeping needs this sandbox's one-time claim token, which only the
+          device that built it has. Open this page there and use{" "}
+          <strong>Keep on another device</strong> to send yourself a link.
         </p>
       </div>
     );
+  }
+  async function copyKeepLink() {
+    if (!publishableKey || !claimToken) return;
+    try {
+      await navigator.clipboard.writeText(keepAnywhereLink(publishableKey, claimToken, appName));
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 1800);
+    } catch {
+      setLinkCopied(false);
+    }
   }
   return (
     <div className="vibe-keep-card">
@@ -2703,12 +2761,21 @@ function VibeKeepCard({
         <Sparkles aria-hidden="true" size={14} /> Keep this app
       </span>
       <p className="vibe-owner-lede">
-        Claim this exact app into a free builder account — same key, all data
-        kept. It stops expiring the moment you do.
+        {signupOpen === false
+          ? "Move this exact app into your builder account — same key, all data kept. It stops expiring the moment you do."
+          : "Keep this exact app in a free builder account — same key, all data kept. It stops expiring the moment you do."}
+        {expiresAt && <> Otherwise it {expiresLabel(expiresAt).toLowerCase()}.</>}
       </p>
-      <Link className="button primary full-width" to={`/console?claim=${encodeURIComponent(publishableKey)}`}>
+      <Link className="button primary full-width" to={keepPath(publishableKey, appName)}>
         Keep this app <ArrowUpRight aria-hidden="true" size={16} />
       </Link>
+      <button className="text-button vibe-keep-link" onClick={() => void copyKeepLink()} type="button">
+        {linkCopied ? <Check aria-hidden="true" size={14} /> : <Link2 aria-hidden="true" size={14} />}{" "}
+        {linkCopied ? "Keep link copied — open it on any device" : "Keep on another device"}
+      </button>
+      {signupOpen === false && (
+        <p className="vibe-keep-note">New builder accounts here are created by the deployment's operator.</p>
+      )}
     </div>
   );
 }
@@ -2809,9 +2876,15 @@ function VibeSidePanel({
 
   return (
     <aside className="vibe-live-side">
-      <VibeKeepCard claimToken={claimToken} claimed={claimed} publishableKey={publishableKey} />
+      <VibeKeepCard
+        appName={spec.name}
+        claimToken={claimToken}
+        claimed={claimed}
+        expiresAt={share.expiresAt}
+        publishableKey={publishableKey}
+      />
       <Wiretap events={events} />
-      <VibeOwnerCard owner={owner} />
+      <VibeOwnerCard claimed={claimed} owner={owner} />
 
       <div className="vibe-side-actions">
         <a className="button primary full-width" download href={toSameOriginPath(share.zipUrl)}>
@@ -2944,7 +3017,8 @@ function VibeStorefront({
   refineError: string;
 }) {
   const previewUrl = share.previewUrl ?? "";
-  const previewSrc = vibePreviewSrc(previewUrl, owner);
+  const liveOwner = usableSandboxOwner(owner, share.claimed ?? false);
+  const previewSrc = vibePreviewSrc(previewUrl, liveOwner);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const { persona, setPersona, events, handles } = useVibePreviewBridge(iframeRef, true);
 
@@ -2985,7 +3059,7 @@ function VibeStorefront({
         <VibeSidePanel
           claimToken={claimToken}
           events={events}
-          owner={owner}
+          owner={liveOwner}
           publishableKey={publishableKey}
           share={share}
           snippets={snippets}
@@ -4481,16 +4555,53 @@ type BuilderState =
   | { kind: "anonymous" }
   | { kind: "authenticated"; builder: BuilderIdentity };
 
+// consoleOAuthErrorMessage maps oauth_error codes to builder-console copy.
+function consoleOAuthErrorMessage(code: string) {
+  switch (code) {
+    case "account_exists_link_required":
+      return "A builder account with this email already exists. Sign in with your email and password.";
+    case "signup_closed":
+      return "New builder accounts aren't open on this deployment. Sign in with an existing account.";
+    case "signup_capacity":
+      return "Builder signups are at capacity for today. Please try again tomorrow.";
+    default:
+      return oauthErrorMessage(code);
+  }
+}
+
+// One shared redemption per code, so StrictMode's double effect can't spend it twice.
+const exchangeBuilderCodeOnce = onceByKey((code: string) => api.builderExchangeOAuthCode(code));
+
 function ConsolePage() {
-  const [state, setState] = useState<BuilderState>({ kind: "loading" });
-  const [capabilities, setCapabilities] = useState<ServiceCapabilities | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   // A ?claim=<pk> deep link survives sign-in or signup because it lives in the
   // URL, which ConsolePage reads regardless of auth state.
   const claimPk = searchParams.get("claim");
+  const claimName = searchParams.get("name");
+  // Read once on first render: a keep link's #t=<token> and a provider return.
+  const [oauthReturn] = useState(() => {
+    adoptClaimFragment(claimPk);
+    return takeOAuthReturn();
+  });
+  const [state, setState] = useState<BuilderState>({ kind: "loading" });
+  const [capabilities, setCapabilities] = useState<ServiceCapabilities | null>(null);
+  const [authError, setAuthError] = useState(
+    oauthReturn.error ? consoleOAuthErrorMessage(oauthReturn.error) : "",
+  );
 
   useEffect(() => {
     let active = true;
+    async function finishOAuth(code: string) {
+      try {
+        const result = await exchangeBuilderCodeOnce(code);
+        if (active) setState({ kind: "authenticated", builder: result.builder });
+      } catch (requestError) {
+        if (active) {
+          setAuthError(messageFromError(requestError));
+          setState({ kind: "anonymous" });
+        }
+      }
+    }
     async function restore() {
       try {
         const builder = await api.builderMe();
@@ -4507,11 +4618,12 @@ function ConsolePage() {
         if (active) setState({ kind: "anonymous" });
       }
     }
-    void restore();
+    if (oauthReturn.code) void finishOAuth(oauthReturn.code);
+    else void restore();
     return () => {
       active = false;
     };
-  }, []);
+  }, [oauthReturn]);
 
   useEffect(() => {
     let active = true;
@@ -4531,6 +4643,7 @@ function ConsolePage() {
   function clearClaim() {
     const next = new URLSearchParams(searchParams);
     next.delete("claim");
+    next.delete("name");
     setSearchParams(next, { replace: true });
   }
 
@@ -4541,7 +4654,10 @@ function ConsolePage() {
       ) : state.kind === "anonymous" ? (
         <ConsoleLogin
           signupEnabled={capabilities?.builderSignup ?? false}
+          providers={capabilities?.oauthProviders ?? []}
           claimPk={claimPk}
+          claimName={claimName}
+          initialError={authError}
           onAuthenticated={(builder) =>
             setState({ kind: "authenticated", builder })
           }
@@ -4550,6 +4666,7 @@ function ConsolePage() {
         <ConsoleDashboard
           builder={state.builder}
           claimPk={claimPk}
+          claimName={claimName}
           onClaimConsumed={clearClaim}
           onSignedOut={() => setState({ kind: "anonymous" })}
         />
@@ -4659,18 +4776,30 @@ function ConsoleLogin({
   onAuthenticated,
   signupEnabled,
   claimPk,
+  claimName = null,
+  providers = [],
+  initialError = "",
   admin = false,
 }: {
   onAuthenticated: (builder: BuilderIdentity) => void;
   signupEnabled: boolean;
   claimPk: string | null;
+  claimName?: string | null;
+  providers?: string[];
+  initialError?: string;
   admin?: boolean;
 }) {
-  const [mode, setMode] = useState<"signin" | "signup">(signupEnabled && claimPk ? "signup" : "signin");
+  // null until the visitor picks a tab. The manifest (signupEnabled) arrives
+  // after first render, so the default is derived, not frozen at mount: a keep
+  // link opens on "Create account" once signup is known to be open.
+  const [mode, setMode] = useState<ConsoleAuthMode | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
   const [submitting, setSubmitting] = useState(false);
+  const effectiveMode = consoleAuthMode(signupEnabled, mode, claimPk);
+  const socialProviders = admin ? [] : providers;
+  const keeping = claimName ? `“${claimName}”` : "the app you just built";
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -4678,15 +4807,26 @@ function ConsoleLogin({
     setSubmitting(true);
     try {
       const result =
-        mode === "signup"
+        effectiveMode === "signup"
           ? await api.builderSignup(email, password)
           : await api.builderLogin(email, password);
       onAuthenticated(result.builder);
     } catch (requestError) {
-      setError(messageFromError(requestError));
+      // An existing builder who landed on "Create account" just needs to sign in.
+      if (effectiveMode === "signup" && requestError instanceof APIError && requestError.status === 409) {
+        setMode("signin");
+        setPassword("");
+        setError("You already have a builder account with this email. Sign in to continue.");
+      } else {
+        setError(messageFromError(requestError));
+      }
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function startSocial(provider: string) {
+    window.location.assign(api.builderOAuthStartUrl(provider, window.location.pathname + window.location.search));
   }
 
   return (
@@ -4696,15 +4836,21 @@ function ConsoleLogin({
         <h1>
           {admin
             ? "Sign in to the deployment admin."
-            : mode === "signup"
-              ? "Create your builder account."
-              : "Sign in to manage your apps."}
+            : claimPk
+              ? effectiveMode === "signup"
+                ? `Create a free account to keep ${keeping}.`
+                : `Sign in to keep ${keeping}.`
+              : effectiveMode === "signup"
+                ? "Create your builder account."
+                : "Sign in to manage your apps."}
         </h1>
         <p>
           {admin
             ? "Sign in with your operator credentials — the ADMIN_EMAIL / ADMIN_PASSWORD set on this deployment — to tune live settings, manage the fleet, and inspect traffic."
             : claimPk
-              ? "Sign in or create an account to keep the app you just built — the key and all its data come with you."
+              ? signupEnabled
+                ? "Your app moves into your account in one click — same publishable key, every user and record kept, and it stops expiring."
+                : "Sign in to your builder account and the app moves in with the same key and all its data. New builder accounts on this deployment are created by its operator."
               : signupEnabled
                 ? "Create a free builder account or sign in. This console never sees the platform token."
                 : "Sign in to manage your apps. This console never sees the platform token."}
@@ -4712,10 +4858,10 @@ function ConsoleLogin({
       </header>
       {signupEnabled && (
         <div className="console-auth-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={mode === "signin"} className={mode === "signin" ? "active" : ""} onClick={() => setMode("signin")}>
+          <button type="button" role="tab" aria-selected={effectiveMode === "signin"} className={effectiveMode === "signin" ? "active" : ""} onClick={() => setMode("signin")}>
             Sign in
           </button>
-          <button type="button" role="tab" aria-selected={mode === "signup"} className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>
+          <button type="button" role="tab" aria-selected={effectiveMode === "signup"} className={effectiveMode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>
             Create account
           </button>
         </div>
@@ -4734,10 +4880,10 @@ function ConsoleLogin({
         <label>
           Password
           <input
-            autoComplete={mode === "signup" ? "new-password" : "current-password"}
-            minLength={mode === "signup" ? 12 : undefined}
+            autoComplete={effectiveMode === "signup" ? "new-password" : "current-password"}
+            minLength={effectiveMode === "signup" ? 12 : undefined}
             onChange={(event) => setPassword(event.target.value)}
-            placeholder={mode === "signup" ? "at least 12 characters" : undefined}
+            placeholder={effectiveMode === "signup" ? "at least 12 characters" : undefined}
             required
             type="password"
             value={password}
@@ -4755,21 +4901,45 @@ function ConsoleLogin({
             ) : (
               <ChevronRight aria-hidden="true" size={17} />
             )}{" "}
-            {mode === "signup" ? "Create account" : "Sign in"}
+            {effectiveMode === "signup" ? (claimPk ? "Create account and keep app" : "Create account") : claimPk ? "Sign in and keep app" : "Sign in"}
           </button>
         </div>
       </form>
-      {mode === "signup" ? (
+      {socialProviders.length > 0 && (
+        <div className="oauth-options console-oauth">
+          <div className="oauth-divider">
+            <span>or</span>
+          </div>
+          {socialProviders.map((provider) => (
+            <button
+              className="button secondary full-width"
+              disabled={submitting}
+              key={provider}
+              onClick={() => startSocial(provider)}
+              type="button"
+            >
+              <LogIn aria-hidden="true" size={17} /> {oauthLabel(provider)}
+            </button>
+          ))}
+        </div>
+      )}
+      {effectiveMode === "signup" ? (
         <p className="information-note">
           Free accounts aren’t email-verified. Use an address you control; your
           plan has per-app limits you can see once you’re in.
         </p>
-      ) : !signupEnabled ? (
+      ) : !signupEnabled && !admin ? (
         <p className="information-note">
-          No builder account yet? Ask your operator to run the bootstrap in the{" "}
-          <Link to="/guide">builder guide</Link>.
+          No builder account yet? New accounts on this deployment are created by
+          its operator — see the <Link to="/guide">builder guide</Link>.
         </p>
       ) : null}
+      {!admin && effectiveMode === "signin" && socialProviders.length > 0 && (
+        <p className="information-note">
+          Signed up with {socialProviders.map(oauthProviderName).join(" or ")}? Use
+          that button — those accounts have no password.
+        </p>
+      )}
     </main>
   );
 }
@@ -4780,16 +4950,22 @@ function ConsoleLogin({
 // from a different device than the one that built the sandbox.
 function ClaimSandboxDialog({
   publishableKey,
+  appName,
+  atAppCap,
+  maxApps,
   onClaimed,
   onClose,
 }: {
   publishableKey: string;
+  appName: string | null;
+  atAppCap: boolean;
+  maxApps?: number;
   onClaimed: (app: BuilderApp, secretKey: string) => void;
   onClose: () => void;
 }) {
   const storedToken = loadClaimToken(publishableKey);
   const [token, setToken] = useState(storedToken ?? "");
-  const [displayName, setDisplayName] = useState("");
+  const [displayName, setDisplayName] = useState(appName ?? "");
   const [origin, setOrigin] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -4825,12 +5001,18 @@ function ClaimSandboxDialog({
       <p className="eyebrow">
         <Sparkles aria-hidden="true" size={15} /> Keep your sandbox
       </p>
-      <h2>Claim this app</h2>
+      <h2>{appName ? `Keep “${appName}”` : "Keep this app"}</h2>
       <p>
-        Promote <code>{publishableKey}</code> into your account. The publishable
-        key and all of its data stay exactly as they are; a fresh secret key is
-        shown once.
+        It moves into your account and stops expiring. The publishable key{" "}
+        <code>{publishableKey}</code> and every user and record stay exactly as
+        they are; a fresh secret key is shown once.
       </p>
+      {atAppCap && (
+        <p className="form-error" role="alert">
+          Your free plan holds {maxApps ?? "a limited number of"} apps and you're at the limit.
+          Delete an app below to make room, then keep this one.
+        </p>
+      )}
       <form className="profile-form" onSubmit={submit}>
         {!storedToken && (
           <label>
@@ -4842,7 +5024,11 @@ function ClaimSandboxDialog({
               spellCheck={false}
               value={token}
             />
-            <small>Shown once when the sandbox was created. Not stored on this device.</small>
+            <small>
+              This device doesn't have it. On the device that built the app, use
+              “Keep on another device” to send yourself a link, or paste the token
+              from your <code>POST /v1/try</code> response.
+            </small>
           </label>
         )}
         <div className="form-grid">
@@ -4861,7 +5047,7 @@ function ClaimSandboxDialog({
           </p>
         )}
         <div className="form-actions">
-          <button className="button primary" disabled={busy || !token.trim()} type="submit">
+          <button className="button primary" disabled={busy || !token.trim() || atAppCap} type="submit">
             {busy ? <LoaderCircle aria-hidden="true" className="spin" size={17} /> : <Check aria-hidden="true" size={17} />} Keep this app
           </button>
           <button className="text-button" onClick={onClose} type="button">
@@ -4876,11 +5062,13 @@ function ClaimSandboxDialog({
 function ConsoleDashboard({
   builder,
   claimPk,
+  claimName = null,
   onClaimConsumed,
   onSignedOut,
 }: {
   builder: BuilderIdentity;
   claimPk: string | null;
+  claimName?: string | null;
   onClaimConsumed: () => void;
   onSignedOut: () => void;
 }) {
@@ -4890,6 +5078,7 @@ function ConsoleDashboard({
     app: BuilderApp;
     secretKey: string;
     rotated: boolean;
+    claimed?: boolean;
   }>();
   const [displayName, setDisplayName] = useState("");
   const [slug, setSlug] = useState("");
@@ -4931,7 +5120,7 @@ function ConsoleDashboard({
   const atAppCap = isFreePlan && typeof me?.maxApps === "number" && me.maxApps > 0 && appCount >= me.maxApps;
 
   function handleClaimed(claimedApp: BuilderApp, secretKey: string) {
-    setReveal({ app: claimedApp, secretKey, rotated: false });
+    setReveal({ app: claimedApp, secretKey, rotated: false, claimed: true });
     setApps((current) => {
       const rest = (current ?? []).filter((item) => item.id !== claimedApp.id);
       return [claimedApp, ...rest];
@@ -5058,7 +5247,15 @@ function ConsoleDashboard({
       )}
 
       {claimPk && (
-        <ClaimSandboxDialog key={claimPk} publishableKey={claimPk} onClaimed={handleClaimed} onClose={onClaimConsumed} />
+        <ClaimSandboxDialog
+          appName={claimName}
+          atAppCap={atAppCap}
+          key={claimPk}
+          maxApps={me?.maxApps}
+          onClaimed={handleClaimed}
+          onClose={onClaimConsumed}
+          publishableKey={claimPk}
+        />
       )}
 
       {reveal && (
@@ -5075,6 +5272,13 @@ function ConsoleDashboard({
             The secret key is shown once. Store it on your server; it is never
             displayed again{reveal.rotated ? ", and the previous key no longer works" : ""}.
           </p>
+          {reveal.claimed && (
+            <p className="console-secret-next">
+              <strong>Next:</strong> set an owner login you'll remember under{" "}
+              <strong>Owner login</strong> on the app card below — it's how you
+              sign in to your app to manage its public data.
+            </p>
+          )}
           <div className="key-row">
             <span>Publishable key</span>
             <code>{reveal.app.publishableKey}</code>
@@ -5251,6 +5455,9 @@ function ConsoleAppRow({
   const [usage, setUsage] = useState<BuilderAppUsage>();
   const [connectTab, setConnectTab] = useState<"" | "run" | "code" | "ai">("");
   const [showInspector, setShowInspector] = useState(false);
+  // A freshly kept vibe app opens straight to its owner login, the one thing
+  // the sandbox's throwaway credentials can't give the builder.
+  const [showOwner, setShowOwner] = useState(() => highlight && Boolean(app.vibe));
   const cardRef = useRef<HTMLLIElement>(null);
 
   const loadUsage = useCallback(() => {
@@ -5484,6 +5691,14 @@ function ConsoleAppRow({
           >
             <Database aria-hidden="true" size={15} /> {showInspector ? "Hide data" : "Inspect data"}
           </button>
+          <button
+            aria-expanded={showOwner}
+            className="button secondary"
+            onClick={() => setShowOwner((value) => !value)}
+            type="button"
+          >
+            <KeyRound aria-hidden="true" size={15} /> Owner login
+          </button>
           <a
             className="button secondary"
             download
@@ -5561,6 +5776,7 @@ function ConsoleAppRow({
             <AppInspector appId={app.id} appName={app.displayName} onChanged={loadUsage} />
           </div>
         )}
+        {showOwner && <OwnerLoginPanel appId={app.id} appName={app.displayName} />}
         {connectTab !== "" && (
           <div className="console-connect">
             <div className="console-connect-tabs" role="tablist">
@@ -5589,6 +5805,97 @@ function ConsoleAppRow({
         )}
       </div>
     </li>
+  );
+}
+
+// OwnerLoginPanel shows and sets an app's owner login — the app-level admin
+// account a builder signs in with inside their own app to manage its shared,
+// public data. The password is write-only; the current one is never shown.
+function OwnerLoginPanel({ appId, appName }: { appId: string; appName: string }) {
+  const toast = useToast();
+  const [emails, setEmails] = useState<string[] | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    api
+      .getAppOwner(appId)
+      .then((value) => {
+        if (active) setEmails(value.emails);
+      })
+      .catch((requestError) => {
+        if (active) setError(messageFromError(requestError));
+      });
+    return () => {
+      active = false;
+    };
+  }, [appId]);
+
+  const generated = (emails ?? []).filter((value) => value.endsWith("@sandbox.invalid"));
+  const real = (emails ?? []).filter((value) => !value.endsWith("@sandbox.invalid"));
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api.setAppOwner(appId, { email, password });
+      setEmails((await api.getAppOwner(appId)).emails);
+      setPassword("");
+      toast.success(`Owner login saved. Sign in to ${appName} as ${result.email}.`);
+    } catch (requestError) {
+      setError(messageFromError(requestError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="console-owner" aria-label="Owner login">
+      <h3>
+        <KeyRound aria-hidden="true" size={15} /> Owner login
+      </h3>
+      <p>
+        The owner signs in <em>inside your app</em> to write its shared, public
+        data. {emails === null ? "" : real.length > 0 ? (
+          <>Current owner{real.length > 1 ? "s" : ""}: <strong>{real.join(", ")}</strong>.</>
+        ) : generated.length > 0 ? (
+          <>It still uses the sandbox's generated owner (<code>{generated[0]}</code>); set your own to replace it.</>
+        ) : (
+          "This app has no owner login yet."
+        )}{" "}
+        Saving an existing owner's email resets their password and signs them out everywhere.
+      </p>
+      <form className="profile-form console-owner-form" onSubmit={(event) => void save(event)}>
+        <label>
+          Owner email
+          <input autoComplete="off" onChange={(event) => setEmail(event.target.value)} required type="email" value={email} />
+        </label>
+        <label>
+          New password
+          <input
+            autoComplete="new-password"
+            minLength={12}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="at least 12 characters"
+            required
+            type="password"
+            value={password}
+          />
+        </label>
+        <button className="button primary" disabled={busy || !email || password.length < 12} type="submit">
+          {busy ? <LoaderCircle aria-hidden="true" className="spin" size={15} /> : <Save aria-hidden="true" size={15} />} Save owner login
+        </button>
+      </form>
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -5680,6 +5987,12 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
           <Link to="/faq">FAQ</Link>
           <Link to="/privacy">Privacy Policy</Link>
         </nav>
+        <a className="mongo-badge" href="https://www.mongodb.com/atlas" rel="noreferrer" target="_blank">
+          <svg aria-hidden="true" fill="currentColor" height="15" viewBox="0 0 24 24" width="15">
+            <path d="M12.2 1.5c-.2.9-.6 1.6-1.2 2.4C8.6 6.7 6.4 9.4 6.4 13.2c0 3.6 2.4 6.3 5 7.3l.3 2h1l.3-2c2.6-1 5-3.7 5-7.3 0-4-2.5-7-5.8-11.7Zm.3 17.7-.3 1.4-.3-1.4V8.8l.3-.6.3.6v10.4Z" />
+          </svg>
+          Runs on MongoDB
+        </a>
         <p>Stash it. ’Stache it. — application data, owned by design.</p>
       </footer>
     </div>

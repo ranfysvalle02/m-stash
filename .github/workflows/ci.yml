@@ -38,9 +38,21 @@ jobs:
         run: |
           npm --prefix frontend ci
           npm --prefix frontend run lint
+          npm --prefix frontend test
           npm --prefix frontend run build
 
+      # Integration tests drive the real HTTP handler against a real replica set
+      # (claim, owner login, social sign-in, token revocation, ledger, stats).
+      - name: Start MongoDB replica set
+        run: |
+          docker run -d --name mongo -p 127.0.0.1:27017:27017 mongo:8 --replSet rs0 --bind_ip_all
+          for _ in $(seq 1 60); do docker exec mongo mongosh --quiet --eval "db.adminCommand('ping').ok" && break; sleep 1; done
+          docker exec mongo mongosh --quiet --eval "rs.initiate({_id: 'rs0', members: [{_id: 0, host: '127.0.0.1:27017'}]})"
+          for _ in $(seq 1 60); do [ "$(docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary')" = "true" ] && break; sleep 1; done
+
       - name: Verify Go source
+        env:
+          MSTASH_TEST_MONGO_URI: mongodb://127.0.0.1:27017/?replicaSet=rs0&directConnection=true
         run: |
           go vet ./...
           go test -race ./...

@@ -660,3 +660,14 @@ input, textarea { transition: border-color .2s ease, box-shadow .25s ease, backg
 .markdown-copy { background: rgba(104, 242, 255, .1); border: 1px solid var(--line); border-radius: 6px; color: var(--aqua); cursor: pointer; font-family: var(--font-sans); font-size: .75rem; padding: .2rem .6rem; position: absolute; right: .6rem; top: .55rem; }
 .markdown-copy:hover { border-color: var(--aqua); }
 .visually-hidden { border: 0; clip: rect(0 0 0 0); height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; white-space: nowrap; width: 1px; }
+
+/* Keep flow + owner login */
+.console-oauth { margin-top: 1rem; max-width: 28rem; }
+.console-secret-next { border-left: 3px solid var(--mongo); color: var(--muted); font-size: .9rem; line-height: 1.5; margin: .2rem 0 .4rem; padding-left: .8rem; }
+.console-owner { border-top: 1px solid var(--line); display: grid; gap: .6rem; margin-top: 1rem; padding-top: 1rem; }
+.console-owner h3 { align-items: center; color: var(--text); display: inline-flex; font-size: 1rem; gap: .4rem; margin: 0; }
+.console-owner > p { color: var(--muted); font-size: .88rem; line-height: 1.55; margin: 0; }
+.console-owner code { background: rgba(3, 17, 23, .72); border-radius: 4px; color: var(--mongo); font-family: var(--font-mono); font-size: .82em; padding: .05rem .35rem; }
+.console-owner-form { align-items: end; display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); }
+.vibe-keep-link { align-items: center; color: var(--aqua); display: inline-flex; font-size: .84rem; gap: .35rem; justify-content: center; }
+.vibe-keep-note { color: var(--muted-quiet); font-size: .78rem; margin: 0; }

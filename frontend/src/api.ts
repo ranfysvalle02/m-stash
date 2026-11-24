@@ -852,6 +852,33 @@ export const api = {
     })
   },
 
+  // builderOAuthStartUrl begins social sign-in for the builder console. next
+  // must be a /console path; the server rejects anything else.
+  builderOAuthStartUrl(provider: string, next: string) {
+    const params = new URLSearchParams({ console: '1', next })
+    return `/v1/auth/oauth/${encodeURIComponent(provider)}/start?${params.toString()}`
+  },
+
+  async builderExchangeOAuthCode(code: string) {
+    return request<{ token: string; isNewUser: boolean; builder: { id: string; email: string; plan?: string; operator?: boolean } }>('/v1/builder/auth/oauth/exchange', {
+      method: 'POST', body: { code }, retrySession: false,
+    })
+  },
+
+  // getAppOwner lists the owner (app admin) logins of an owned app.
+  async getAppOwner(id: string) {
+    const response = await request<APIEnvelope<{ emails: string[] }>>(`/v1/builder/apps/${encodeURIComponent(id)}/owner`, { retrySession: false })
+    return response.data
+  },
+
+  // setAppOwner sets the owner login a builder signs in with inside their app.
+  async setAppOwner(id: string, input: { email: string; password: string }) {
+    const response = await request<APIEnvelope<{ email: string }>>(`/v1/builder/apps/${encodeURIComponent(id)}/owner`, {
+      method: 'PUT', body: input, retrySession: false,
+    })
+    return response.data
+  },
+
   async builderSignup(email: string, password: string) {
     return request<{ token: string; builder: { id: string; email: string; plan?: string; operator?: boolean } }>('/v1/builder/auth/signup', {
       method: 'POST', body: { email, password }, retrySession: false,

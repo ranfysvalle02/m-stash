@@ -12,6 +12,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -43,17 +44,20 @@ type Claims struct {
 }
 
 type User struct {
-	ID           bson.ObjectID `bson:"_id,omitempty" json:"id"`
-	AppID        bson.ObjectID `bson:"appId" json:"-"`
-	Email        string        `bson:"email" json:"email"`
+	ID    bson.ObjectID `bson:"_id,omitempty" json:"id"`
+	AppID bson.ObjectID `bson:"appId" json:"-"`
+	Email string        `bson:"email" json:"email"`
 	// PasswordHash is empty for OAuth-only accounts, which can never satisfy a
 	// password login. omitempty keeps password-less users out of the stored field.
-	PasswordHash string        `bson:"password,omitempty" json:"-"`
-	Role         string        `bson:"role" json:"role"`
+	PasswordHash string `bson:"password,omitempty" json:"-"`
+	Role         string `bson:"role" json:"role"`
 	// Plan applies to builder (control-plane) accounts: "free" for self-serve
 	// signups, empty for platform-provisioned builders which are unbounded.
 	Plan      string    `bson:"plan,omitempty" json:"plan,omitempty"`
 	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
+	// CredentialsChangedAt is stamped when someone else resets this account's
+	// login; privileged tokens issued before it stop working.
+	CredentialsChangedAt *time.Time `bson:"credentialsChangedAt,omitempty" json:"-"`
 }
 
 func normalizeEmail(email string) string {
@@ -114,6 +118,13 @@ func (app *application) authenticate(next func(w http.ResponseWriter, r *http.Re
 		}
 		if appID, ok := appIDFromContext(r.Context()); ok && claims.AppID != appID.Hex() {
 			writeError(w, http.StatusForbidden, "Token does not belong to this application")
+			return
+		}
+		if current, checkErr := app.privilegedTokenCurrent(r.Context(), claims); checkErr != nil {
+			writeError(w, http.StatusServiceUnavailable, "Could not verify session")
+			return
+		} else if !current {
+			writeError(w, http.StatusForbidden, "Invalid or expired token")
 			return
 		}
 		if source == cookieAuthentication && requiresCSRFProtection(r.Method) && !validCSRFToken(r) {
@@ -303,6 +314,48 @@ func handleTokenVerification(w http.ResponseWriter, r *http.Request, claims *Cla
 			"expiresAt": claims.ExpiresAt,
 		},
 	})
+}
+
+// privilegedTokenCurrent re-checks tokens for roles that can write data other
+// people read (app admin, builder, operator). Bearer tokens are stateless and
+// live for days, so without this a replaced owner or reset password would keep
+// working until expiry. A deleted account, or one whose credentials changed
+// after the token was issued, is refused. Ordinary member tokens skip the read.
+func (app *application) privilegedTokenCurrent(ctx context.Context, claims *Claims) (bool, error) {
+	if app.database == nil {
+		return true, nil
+	}
+	switch claims.Role {
+	case "admin", builderRole, operatorRole:
+	default:
+		return true, nil
+	}
+	userID, err := bson.ObjectIDFromHex(claims.UID)
+	if err != nil {
+		return false, nil
+	}
+	var account struct {
+		CredentialsChangedAt *time.Time `bson:"credentialsChangedAt"`
+	}
+	err = app.database.Collection("_users").FindOne(ctx, bson.M{"_id": userID},
+		options.FindOne().SetProjection(bson.M{"credentialsChangedAt": 1})).Decode(&account)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return tokenSurvivesReset(claims.IssuedAt, account.CredentialsChangedAt), nil
+}
+
+// tokenSurvivesReset reports whether a token issued at iat is still valid
+// given the account's last credential reset. JWT iat has one-second precision,
+// so the reset time is compared at that granularity.
+func tokenSurvivesReset(iat *jwt.NumericDate, credentialsChangedAt *time.Time) bool {
+	if credentialsChangedAt == nil {
+		return true
+	}
+	return iat != nil && !iat.Time.Before(credentialsChangedAt.Truncate(time.Second))
 }
 
 func (app *application) generateJWT(uid, email, role, appID string) (string, error) {

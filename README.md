@@ -85,6 +85,8 @@ A per-app `secretKey` can be supplied to a trusted backend for shared resource m
 | `GET /mstash.js` | The zero-dependency client (browsers and Node 18+), importable from any origin: `import { createClient } from "https://<deployment>/mstash.js"`. |
 | `GET /v1/tutorials`, `/v1/tutorials/{slug}`, `/v1/tutorials/{slug}.md` | Step-by-step tutorials from `tutorials/*.md`, stamped with this deployment's origin. Rendered at `/tutorials`. |
 | `GET /v1/stats` | Public, aggregate counts (registered stashers, live apps, records, recent vibes) when `PUBLIC_STATS` is on. Counts only. |
+| `GET /v1/auth/oauth/{provider}/start?console=1&next=/console…` | Builder console social login (GitHub/Google). Uses the same registered callback; new accounts follow `BUILDER_SIGNUP` and its daily cap, and an existing password builder is never adopted. Finish with `POST /v1/builder/auth/oauth/exchange { code }`. |
+| `GET` / `PUT /v1/builder/apps/{id}/owner` | List or set an owned app's owner login (its in-app admin). Replaces a vibe sandbox's generated owner, resets an existing owner's password, or adds one. A replaced or reset login stops working at once: its sessions are revoked and admin, builder, and operator bearer tokens issued before the change are refused. |
 | `POST /v1/builder/apps/claim` | Keep a sandbox as a live app. Needs a builder session and the sandbox's claim token; the `pk_` and all data stay, and a new secret key is returned once. |
 
 Social login is optional. When GitHub or Google credentials are set, `/login` and `/signup` offer those providers. Send the browser to `/v1/auth/oauth/{provider}/start`; the user comes back to `redirect_uri?oauth_code=otc_…`, and the app exchanges that code within 60 seconds. The code is single-use, the JWT never travels in a URL, and `redirect_uri` must be this deployment's origin or an allowed origin. Client secrets stay in environment variables. The security model is written up in [blog-auth.md](blog-auth.md).
@@ -133,7 +135,7 @@ The landing page shows live, aggregate numbers from `GET /v1/stats`: **registere
 Every m-stash app is either a **sandbox** (no owner, expires, tight limits, carries a one-time claim token) or a **live** app (owned, no expiry, limits set by the owner's plan). A visitor can try the service against a real backend, then keep that exact app — the publishable key never changes, so a downloaded `.zip` or pasted cURL keeps working.
 
 - **Try** — with `TRY_SANDBOX=on`, `POST /v1/try` provisions a blank, expiring sandbox. The `/guide` page and every `/console` app card run the full Register → Log in → Create → View-yours → View-public loop live in the browser.
-- **Keep** — with `BUILDER_SIGNUP=open`, a visitor creates a free builder account and claims the sandbox with its claim token. Claiming flips the app to live in place and keeps all users and records; a fresh secret key is shown once.
+- **Keep** — a visitor signs in (or, with `BUILDER_SIGNUP=open`, creates a free builder account — email or GitHub/Google) and claims the sandbox with its claim token. Claiming flips the app to live in place and keeps all users and records; a fresh secret key is shown once. The claim token lives on the device that built the sandbox; **Keep on another device** copies a link that carries it in the URL fragment (never sent to a server). After keeping, set your own **Owner login** on the app card — vibe sandboxes start with a generated owner shown only once.
 - **Limits** — free-plan builders are capped at `FREE_TIER_MAX_APPS` apps, and each app is bounded by `FREE_TIER_MAX_USERS`, `FREE_TIER_MAX_RECORDS` (per namespace), and `FREE_TIER_MAX_RECORD_BYTES` (a zero value means unlimited). Operator-provisioned builders (via `PLATFORM_TOKEN`) remain unbounded.
 
 > **Note:** self-serve signup does **not** verify email addresses — there is no email transport. The `BUILDER_SIGNUP` flag, the per-IP and daily signup caps, and the free-tier quotas are the controls. Leave `BUILDER_SIGNUP=off` if you need verified accounts.
@@ -189,3 +191,13 @@ npm --prefix frontend run dev
 ```
 
 The production UI is embedded in the Go binary, so the Go build consumes `frontend/dist`. Use `make build`, `make test`, and `make check` rather than raw `go` commands, because they run `make ui-build` first; a bare `go test ./...` fails until the UI is built. Run `make help` to list every target. `/healthz`, `/readyz`, and `/.well-known/m-stash.json` support operations and discovery.
+
+### Tests
+
+| Command | What it covers |
+| --- | --- |
+| `make test` | Go unit tests: validation, prompts, skills, tutorials, stats cache, token rules. No database needed. |
+| `make test-ui` | Frontend unit tests (Vitest): keep links and claim-token handling, console sign-in return, link routing. |
+| `make test-integration` | The real HTTP handler against a real MongoDB replica set: builder social sign-in, keeping a sandbox, owner login reset, token revocation, deleted-builder recovery, the vibe ledger and funnel, build-kit privacy, secret-key write-only, public stats. Starts a throwaway replica set in Docker, or uses `MSTASH_TEST_MONGO_URI`. |
+
+Integration tests skip themselves when `MSTASH_TEST_MONGO_URI` is unset, so `go test ./...` stays offline. CI starts a replica set and runs all three on every push.
