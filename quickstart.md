@@ -9,6 +9,7 @@ Deploy m-stash once to give an application two server-enforced data scopes: pers
 3. Set `MONGO_URI` to an Atlas or self-hosted **replica set or sharded** URI. Set `MONGO_DB` when `app_db` is not appropriate.
 4. Set a 32-character-or-longer `JWT_SECRET` when your platform does not generate it.
 5. Set a 32-character-or-longer `PLATFORM_TOKEN`. It authorizes provisioning new applications through `POST /v1/apps`.
+6. Using a custom domain? Add it under the service's **Settings → Custom Domains** and set `PUBLIC_BASE_URL` to it (for example `https://m-stash.com`) once the domain resolves and serves HTTPS. Share links, canonical tags, and the sitemap then use that origin, and UI pages on the `*.onrender.com` host redirect there. Update any OAuth provider callback URLs to the new origin too.
 
 Render sets secure cookies and trusted-proxy behavior for its HTTPS edge. Configure exact `ALLOWED_ORIGINS` (globally, or per app) before using browser authentication from a different origin.
 

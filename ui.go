@@ -25,6 +25,18 @@ func (app *application) handleFrontend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if app.redirectToCanonicalHost(w, r) {
+		return
+	}
+	switch r.URL.Path {
+	case "/robots.txt":
+		app.handleRobots(w, r)
+		return
+	case "/sitemap.xml":
+		app.handleSitemap(w, r)
+		return
+	}
+
 	requestedPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 	if requestedPath != "" && requestedPath != "index.html" && fs.ValidPath(requestedPath) {
 		if serveEmbeddedFrontendFile(w, r, requestedPath) {
@@ -40,13 +52,15 @@ func (app *application) handleFrontend(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveIndexHTML injects the UI's publishable key so the bundled SPA knows which
-// tenant to call without any build-time or manual configuration.
+// tenant to call without any build-time or manual configuration, plus
+// route-specific SEO and link-preview tags for crawlers that do not run JS.
 func (app *application) serveIndexHTML(w http.ResponseWriter, r *http.Request) {
 	contents, err := embeddedFrontend.ReadFile("frontend/dist/index.html")
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
+	contents = injectSEOHead(contents, renderSEOHead(app.publicBaseURL(r), r.URL.Path, app.pageMetaFor(r.Context(), r.URL.Path)))
 	if app.uiAppKey != "" {
 		meta := `<meta name="m-stash-app" content="` + html.EscapeString(app.uiAppKey) + `" />`
 		contents = bytes.Replace(contents, []byte("</head>"), []byte("    "+meta+"\n  </head>"), 1)

@@ -6,7 +6,7 @@ m-stash is a small, self-hostable, multi-tenant API between your app and MongoDB
 
 Use it for profiles, preferences, game saves, and app-wide configuration. Personal records belong to users; shared records belong to the app. New records are private by default, with deliberate options for signed-in or public access.
 
-**Start building:** new here? The [5-minute build guide](quick.md) goes from a new app to per-user data. To run your own instance, follow the [Quickstart](quickstart.md) to deploy m-stash and provision an app. The hosted site is a demo, not a developer-account portal; app provisioning uses a platform token.
+**Start building:** new here? The [5-minute build guide](quick.md) goes from a new app to per-user data. To run your own instance, follow the [Quickstart](quickstart.md) to deploy m-stash and provision an app. The [hosted site](https://m-stash.com/discover) is a demo, not a developer-account portal; app provisioning uses a platform token.
 
 ## Applications
 
@@ -111,7 +111,7 @@ Every m-stash app is either a **sandbox** (no owner, expires, tight limits, carr
 | `MONGO_URI` | Yes | Replica-set or sharded MongoDB URI. |
 | `MONGO_DB` | Yes | Database name. |
 | `JWT_SECRET` | Yes | At least 32 characters; signs access and session tokens. |
-| `PUBLIC_BASE_URL` | No | Canonical public origin, such as `https://m-stash.example`. Used for OAuth callbacks and shared links. Register `{PUBLIC_BASE_URL}/v1/auth/oauth/github/callback` and `…/google/callback` with each provider. |
+| `PUBLIC_BASE_URL` | No | Canonical public origin, such as `https://m-stash.example`. Used for OAuth callbacks, shared links, canonical/Open Graph URLs, `robots.txt`, and `sitemap.xml`; UI pages requested on any other host (such as `*.onrender.com` or `www.`) 301-redirect to it, while API routes are never redirected. Register `{PUBLIC_BASE_URL}/v1/auth/oauth/github/callback` and `…/google/callback` with each provider. |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | No | Enables GitHub sign-in. Set both or neither; a half-set pair fails boot. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | No | Enables Google sign-in. Set both or neither; a half-set pair fails boot. |
 | `PLATFORM_TOKEN` | Yes | At least 32 characters; authorizes `POST /v1/apps` to provision applications. |

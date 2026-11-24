@@ -179,11 +179,59 @@ function useBrowserSession() {
   return { session, restore, setSession };
 }
 
+const SITE_TITLE = "m-stash — Auth and user data for AI-built apps";
+const STATIC_PAGE_TITLES: Record<string, string> = {
+  "/": SITE_TITLE,
+  "/discover": SITE_TITLE,
+  "/guide": "Build guide: ship the app, skip the backend setup — m-stash",
+  "/vibe": "Vibe lab: describe your app, get its backend — m-stash",
+  "/public": "Live public data — m-stash",
+  "/faq": "FAQ — m-stash",
+  "/privacy": "Privacy Policy — m-stash",
+  "/console": "Builder console — m-stash",
+  "/admin": "Operator console — m-stash",
+  "/login": "Log in — m-stash",
+  "/signup": "Sign up — m-stash",
+};
+
+// Mirrors the server-rendered titles (seo.go) so client-side navigation keeps
+// the tab title in sync; record pages refine it once their data loads.
+function titleForPath(pathname: string): string {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  if (STATIC_PAGE_TITLES[path]) return STATIC_PAGE_TITLES[path];
+  if (path === "/app" || path.startsWith("/app/")) return "Workspace — m-stash";
+  const [first, second, third] = path.slice(1).split("/");
+  if (first === "vibe") return "A backend sketched with m-stash";
+  if (first === "public") {
+    return third
+      ? `${third} · ${second} — m-stash`
+      : `${second} · public data — m-stash`;
+  }
+  if (third) return `${third} · ${second} by @${first} — m-stash`;
+  if (second) return `${second} by @${first} — m-stash`;
+  return `@${first} — m-stash`;
+}
+
+function RouteTitle() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    document.title = titleForPath(pathname);
+  }, [pathname]);
+  return null;
+}
+
+function usePageTitle(title: string | undefined) {
+  useEffect(() => {
+    if (title) document.title = title;
+  }, [title]);
+}
+
 function App() {
   const browserSession = useBrowserSession();
   return (
     <BrowserRouter>
       <ToastProvider>
+      <RouteTitle />
       <SessionContext.Provider value={browserSession.session}>
         <Routes>
           <Route path="/" element={<Navigate replace to="/discover" />} />
@@ -2978,6 +3026,9 @@ function VibePage() {
       active = false;
     };
   }, [shareId, loadedShareId]);
+  usePageTitle(
+    shareId && spec?.name ? `${spec.name} — backend sketched with m-stash` : undefined,
+  );
 
   // Load the launchpad recipes and whether AI spec generation is configured.
   useEffect(() => {
@@ -3623,6 +3674,7 @@ function PublicSharedResourcePage() {
       active = false;
     };
   }, [slug, type]);
+  usePageTitle(resource?.title && `${resource.title} — m-stash`);
   return (
     <PublicLayout>
       {error ? (
@@ -3680,6 +3732,11 @@ function PublicNamespacePage() {
       active = false;
     };
   }, [username]);
+  usePageTitle(
+    namespace?.displayName && namespace.displayName !== username
+      ? `${namespace.displayName} (@${username}) — m-stash`
+      : undefined,
+  );
   return (
     <PublicLayout>
       {error ? (
@@ -3846,6 +3903,7 @@ function PublicResourcePage() {
       active = false;
     };
   }, [slug, type, username]);
+  usePageTitle(resource?.title && `${resource.title} by @${username} — m-stash`);
   return (
     <PublicLayout>
       {error ? (

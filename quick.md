@@ -7,7 +7,7 @@ Zero to auth + per-user data in ~5 minutes. No database wiring, no security rule
 ## 1. Point at a deployment
 
 ```sh
-export API_URL='https://m-stash.onrender.com'   # your deployment
+export API_URL='https://m-stash.com'   # or your own deployment
 ```
 
 ## 2. Create your app

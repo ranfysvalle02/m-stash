@@ -7,7 +7,7 @@ For a no-build browser reference, serve [examples/browser/index.html](examples/b
 Set the API URL and your app's publishable key once. One deployment hosts many isolated apps; every request names its app with the `X-M-Stash-App` header (or an `?app=` query parameter for anonymous browser reads).
 
 ```sh
-export API_URL='https://m-stash.onrender.com'
+export API_URL='https://m-stash.com'
 export APP_KEY='pk_...'   # the publishable key returned by POST /v1/apps
 ```
 
