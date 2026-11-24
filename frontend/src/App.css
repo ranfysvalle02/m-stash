@@ -619,3 +619,44 @@ input, textarea { transition: border-color .2s ease, box-shadow .25s ease, backg
 .console-operator-banner span { flex: 1; font-size: .88rem; color: var(--muted); }
 .console-operator-banner strong { color: var(--text); }
 .console-operator-banner svg:last-child { color: var(--aqua); flex-shrink: 0; }
+
+/* Build in the open: public stashers counter */
+.stash-stats { align-items: center; display: flex; flex-wrap: wrap; gap: .5rem 1.4rem; margin: .4rem 0 1.4rem; }
+.stash-stats-headline { align-items: center; color: var(--text); display: inline-flex; font-family: var(--font-display); font-size: 1.05rem; gap: .55rem; margin: 0; }
+.stash-stats-headline strong { color: var(--mongo); font-family: var(--font-mono); font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.stash-stats-pulse { animation: stash-pulse 2.2s ease-out infinite; background: var(--mongo); border-radius: 50%; box-shadow: 0 0 0 0 rgba(66, 245, 141, .55); height: .55rem; width: .55rem; }
+.stash-stats-list { color: var(--muted); display: flex; flex-wrap: wrap; font-size: .88rem; gap: .35rem 1.1rem; list-style: none; margin: 0; padding: 0; }
+.stash-stats-list strong { color: var(--text); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.stash-stats.compact { margin: 1rem 0 0; }
+@keyframes stash-pulse { 0% { box-shadow: 0 0 0 0 rgba(66, 245, 141, .55); } 70% { box-shadow: 0 0 0 .55rem rgba(66, 245, 141, 0); } 100% { box-shadow: 0 0 0 0 rgba(66, 245, 141, 0); } }
+@media (prefers-reduced-motion: reduce) { .stash-stats-pulse { animation: none; } }
+
+/* Tutorials */
+.tutorial-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); list-style: none; margin: 2.2rem 0 0; padding: 0; }
+.tutorial-card { background: rgba(3, 17, 23, .5); border: 1px solid var(--line); border-radius: 14px; color: inherit; display: flex; flex-direction: column; gap: .55rem; height: 100%; padding: 1.25rem; text-decoration: none; transition: border-color .15s ease, transform .15s ease; }
+.tutorial-card:hover, .tutorial-card:focus-visible { border-color: var(--aqua); transform: translateY(-2px); }
+.tutorial-card h2 { color: var(--text); font-family: var(--font-display); font-size: 1.2rem; line-height: 1.2; margin: 0; }
+.tutorial-card p { color: var(--muted); font-size: .92rem; line-height: 1.45; margin: 0; }
+.tutorial-step { color: var(--mongo); font-family: var(--font-mono); font-size: .8rem; letter-spacing: .08em; }
+.tutorial-meta { align-items: center; color: var(--muted-quiet); display: inline-flex; font-size: .8rem; gap: .35rem; margin-top: auto; }
+.tutorial-shortcuts { border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: .7rem; margin-top: 2.5rem; padding-top: 1.6rem; }
+
+.tutorial-page { max-width: 52rem; }
+.tutorial-back { align-items: center; color: var(--aqua); display: inline-flex; font-size: .9rem; gap: .35rem; text-decoration: none; }
+.tutorial-head { border-bottom: 1px solid var(--line); margin: 1.2rem 0 1.6rem; padding-bottom: 1.4rem; }
+.tutorial-head h1 { color: var(--text); font-size: clamp(2rem, 5vw, 3.2rem); line-height: 1.05; margin: .4rem 0 .6rem; }
+.tutorial-head > p:not(.eyebrow) { color: var(--muted); font-size: 1.1rem; line-height: 1.5; margin: 0; }
+.tutorial-body { font-family: var(--font-sans); font-size: 1.02rem; line-height: 1.7; }
+.tutorial-body table { border-collapse: collapse; display: block; font-size: .92rem; margin: 1rem 0; overflow-x: auto; }
+.tutorial-body th, .tutorial-body td { border: 1px solid var(--line); padding: .45rem .7rem; text-align: left; vertical-align: top; }
+.tutorial-body blockquote { border-left: 3px solid var(--mongo); color: var(--muted); margin: 1rem 0; padding: .2rem 0 .2rem 1rem; }
+.tutorial-foot { align-items: center; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; margin-top: 2.5rem; padding-top: 1.4rem; }
+.tutorial-raw { color: var(--muted); font-size: .88rem; }
+
+.markdown-code { position: relative; }
+.markdown-code pre { border-radius: 10px; padding-top: 2.2rem; }
+.tutorial-body pre { font-size: .86rem; line-height: 1.5; }
+.tutorial-body pre code { font-size: inherit; }
+.markdown-copy { background: rgba(104, 242, 255, .1); border: 1px solid var(--line); border-radius: 6px; color: var(--aqua); cursor: pointer; font-family: var(--font-sans); font-size: .75rem; padding: .2rem .6rem; position: absolute; right: .6rem; top: .55rem; }
+.markdown-copy:hover { border-color: var(--aqua); }
+.visually-hidden { border: 0; clip: rect(0 0 0 0); height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; white-space: nowrap; width: 1px; }

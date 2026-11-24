@@ -36,7 +36,9 @@ type Config struct {
 	VibeShareTTL        time.Duration
 	VibeMaxSandboxes    int
 	// VibeLearn lets claimed vibe apps serve (structure only) as reference designs for new generations.
-	VibeLearn     bool
+	VibeLearn bool
+	// PublicStats exposes aggregate counts (stashers, live apps, records) at /v1/stats.
+	PublicStats   bool
 	PublicBaseURL string
 	// OAuth client credentials for social-login adapters. A provider is enabled
 	// only when both its ID and secret are set; a half-configured pair fails boot.
@@ -91,6 +93,10 @@ func loadConfig() (Config, error) {
 		return Config{}, err
 	}
 	vibeLearn, err := getEnvBool("VIBE_LEARN", true)
+	if err != nil {
+		return Config{}, err
+	}
+	publicStats, err := getEnvBool("PUBLIC_STATS", true)
 	if err != nil {
 		return Config{}, err
 	}
@@ -187,6 +193,7 @@ func loadConfig() (Config, error) {
 		VibeShareTTL:        vibeShareTTL,
 		VibeMaxSandboxes:    vibeMaxSandboxes,
 		VibeLearn:           vibeLearn,
+		PublicStats:         publicStats,
 		PublicBaseURL:       getEnv("PUBLIC_BASE_URL", ""),
 
 		GitHubClientID:     githubClientID,

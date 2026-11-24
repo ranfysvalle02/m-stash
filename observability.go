@@ -183,6 +183,14 @@ func metricRoute(path string) string {
 		return "/v1/try"
 	case path == "/skill.md":
 		return "/skill.md"
+	case path == "/mstash.js":
+		return "/mstash.js"
+	case path == "/v1/stats":
+		return "/v1/stats"
+	case path == "/v1/tutorials":
+		return "/v1/tutorials"
+	case strings.HasPrefix(path, "/v1/tutorials/"):
+		return "/v1/tutorials/{slug}"
 	case path == "/v1/vibe":
 		return "/v1/vibe"
 	case path == "/v1/vibe/recipes":

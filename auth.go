@@ -127,7 +127,9 @@ func (app *application) authenticate(next func(w http.ResponseWriter, r *http.Re
 func (app *application) authenticateSharedResource(next func(w http.ResponseWriter, r *http.Request, claims *Claims)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if app.matchesAppSecret(r.Context(), r.Header.Get("Authorization")) {
-			if r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodDelete {
+			// PATCH is the atomic increment; like PUT it is a shared mutation, and
+			// without it a server could never maintain a shared counter.
+			if r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodPatch && r.Method != http.MethodDelete {
 				writeError(w, http.StatusForbidden, "Service credentials are limited to shared resource mutations")
 				return
 			}

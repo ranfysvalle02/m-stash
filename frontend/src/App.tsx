@@ -12,6 +12,7 @@ import {
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowRight,
   ArrowUpRight,
   BookOpen,
   Check,
@@ -22,6 +23,7 @@ import {
   Copy,
   Database,
   Download,
+  GraduationCap,
   ExternalLink,
   FilePenLine,
   Globe2,
@@ -72,6 +74,8 @@ import {
   type ResourceInput,
   type ResourcePreview,
   type ServiceCapabilities,
+  type Tutorial,
+  type TutorialMeta,
   type UserClaims,
   type UserIdentity,
   type VibeOwner,
@@ -96,6 +100,7 @@ import {
 } from "./vibe/previewBridge";
 import "./App.css";
 import "./vibe/vibe.css";
+import StashersCounter from "./stats/StashersCounter";
 
 type SessionState =
   | { kind: "loading" }
@@ -185,6 +190,7 @@ const STATIC_PAGE_TITLES: Record<string, string> = {
   "/": SITE_TITLE,
   "/discover": SITE_TITLE,
   "/guide": "Build guide: ship the app, skip the backend setup — m-stash",
+  "/tutorials": "Tutorials: build on m-stash in minutes — m-stash",
   "/vibe": "Vibe lab: describe your app, get its backend — m-stash",
   "/public": "Live public data — m-stash",
   "/faq": "FAQ — m-stash",
@@ -203,6 +209,7 @@ function titleForPath(pathname: string): string {
   if (path === "/app" || path.startsWith("/app/")) return "Workspace — m-stash";
   const [first, second, third] = path.slice(1).split("/");
   if (first === "vibe") return "A backend sketched with m-stash";
+  if (first === "tutorials") return "Tutorial — m-stash";
   if (first === "public") {
     return third
       ? `${third} · ${second} — m-stash`
@@ -238,6 +245,8 @@ function App() {
           <Route path="/" element={<Navigate replace to="/discover" />} />
           <Route path="/discover" element={<NamespaceLookupPage />} />
           <Route path="/guide" element={<GuidePage />} />
+          <Route path="/tutorials" element={<TutorialsPage />} />
+          <Route path="/tutorials/:slug" element={<TutorialPage />} />
           <Route path="/vibe" element={<VibePage />} />
           <Route path="/vibe/:shareId" element={<VibePage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
@@ -3454,6 +3463,7 @@ function NamespaceLookupPage() {
             <Compass aria-hidden="true" size={15} /> For AI app builders
           </p>
           <h1>Give your AI-built app a backend.</h1>
+          <StashersCounter />
           <p>
             Add sign-up, login, and private per-user data without wiring a
             database or writing security rules. m-stash handles identity and
@@ -3463,14 +3473,9 @@ function NamespaceLookupPage() {
             <a className="button primary" href="#try-live">
               <Sparkles aria-hidden="true" size={17} /> Try it live now
             </a>
-            <a
-              className="button secondary"
-              href="https://github.com/ranfysvalle02/m-stash/blob/main/quick.md"
-              rel="noreferrer"
-              target="_blank"
-            >
-              <ArrowUpRight aria-hidden="true" size={17} /> Build your first app
-            </a>
+            <Link className="button secondary" to="/tutorials/first-app-in-5-minutes">
+              <GraduationCap aria-hidden="true" size={17} /> Build your first app
+            </Link>
             {vibeOn ? (
               <Link className="discover-guide-link" to="/vibe">
                 <Wand2 aria-hidden="true" size={16} /> Vibe a backend for your
@@ -4036,6 +4041,156 @@ function PublicResourcePage() {
           </article>
         </main>
       )}
+    </PublicLayout>
+  );
+}
+
+// TutorialsPage lists the step-by-step tutorials served from tutorials/*.md.
+function TutorialsPage() {
+  const [tutorials, setTutorials] = useState<TutorialMeta[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    api
+      .listTutorials()
+      .then((list) => {
+        if (active) setTutorials(list);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  return (
+    <PublicLayout>
+      <main className="discovery-page tutorials-page">
+        <div className="discover-intro">
+          <p className="eyebrow">
+            <GraduationCap aria-hidden="true" size={15} /> Tutorials
+          </p>
+          <h1>Build on m-stash in minutes.</h1>
+          <p>
+            Short, copy-paste tutorials that run against this deployment as
+            written. Start with an idea, end with an app you own — auth,
+            private data, public pages, and a backend, no database setup.
+          </p>
+          <StashersCounter compact />
+        </div>
+        {failed ? (
+          <p className="form-error" role="alert">
+            Tutorials couldn't load. Refresh to try again.
+          </p>
+        ) : tutorials === null ? (
+          <p className="vibe-checking">Loading tutorials…</p>
+        ) : (
+          <ol className="tutorial-grid">
+            {tutorials.map((entry, index) => (
+              <li key={entry.slug}>
+                <Link className="tutorial-card" to={`/tutorials/${entry.slug}`}>
+                  <span className="tutorial-step">{String(index + 1).padStart(2, "0")}</span>
+                  <h2>{entry.title}</h2>
+                  <p>{entry.summary}</p>
+                  <span className="tutorial-meta">
+                    <Clock aria-hidden="true" size={13} /> {entry.minutes} min · {entry.level}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ol>
+        )}
+        <section className="tutorial-shortcuts" aria-label="Shortcuts">
+          <a className="button secondary" href="/mstash.js" download>
+            <Download aria-hidden="true" size={15} /> mstash.js client
+          </a>
+          <a className="button secondary" href="/skill.md?download=1" download>
+            <Sparkles aria-hidden="true" size={15} /> Agent SKILL.md
+          </a>
+          <a className="button secondary" href="/llms.txt" rel="noreferrer" target="_blank">
+            <BookOpen aria-hidden="true" size={15} /> API reference (llms.txt)
+          </a>
+        </section>
+      </main>
+    </PublicLayout>
+  );
+}
+
+// TutorialPage renders one tutorial's Markdown, stamped server-side with this
+// deployment's origin so every snippet runs as pasted.
+function TutorialPage() {
+  const { slug = "" } = useParams();
+  const [tutorial, setTutorial] = useState<Tutorial | null>(null);
+  const [all, setAll] = useState<TutorialMeta[]>([]);
+  const [failedSlug, setFailedSlug] = useState("");
+  useEffect(() => {
+    let active = true;
+    Promise.all([api.getTutorial(slug), api.listTutorials().catch(() => [] as TutorialMeta[])])
+      .then(([next, list]) => {
+        if (!active) return;
+        setTutorial(next);
+        setAll(list);
+        window.scrollTo({ top: 0 });
+      })
+      .catch(() => {
+        if (active) setFailedSlug(slug);
+      });
+    return () => {
+      active = false;
+    };
+  }, [slug]);
+  const current = tutorial?.slug === slug ? tutorial : null;
+  usePageTitle(current ? `${current.title} — m-stash tutorials` : undefined);
+  const index = all.findIndex((entry) => entry.slug === slug);
+  const next = index >= 0 ? all[index + 1] : undefined;
+
+  return (
+    <PublicLayout>
+      <main className="setup-page tutorial-page">
+        <Link className="tutorial-back" to="/tutorials">
+          <ArrowLeft aria-hidden="true" size={15} /> All tutorials
+        </Link>
+        {failedSlug === slug ? (
+          <section className="empty-state">
+            <h1>That tutorial doesn't exist.</h1>
+            <p>
+              <Link to="/tutorials">Browse all tutorials</Link>.
+            </p>
+          </section>
+        ) : !current ? (
+          <p className="vibe-checking">Loading…</p>
+        ) : (
+          <>
+            <header className="tutorial-head">
+              <p className="eyebrow">
+                <GraduationCap aria-hidden="true" size={15} />
+                {index >= 0 ? ` Tutorial ${index + 1} of ${all.length}` : " Tutorial"} · {current.minutes} min · {current.level}
+              </p>
+              <h1>{current.title}</h1>
+              <p>{current.summary}</p>
+            </header>
+            <article className="markdown-body tutorial-body">
+              <Suspense fallback={<p className="vibe-checking">Loading…</p>}>
+                <LazyMarkdown content={current.markdown} interactive />
+              </Suspense>
+            </article>
+            <footer className="tutorial-foot">
+              <a className="tutorial-raw" href={`/v1/tutorials/${current.slug}.md`} rel="noreferrer" target="_blank">
+                View as Markdown
+              </a>
+              {next ? (
+                <Link className="button primary" to={`/tutorials/${next.slug}`}>
+                  Next: {next.title} <ArrowRight aria-hidden="true" size={15} />
+                </Link>
+              ) : (
+                <Link className="button primary" to="/console">
+                  Open the console <ArrowRight aria-hidden="true" size={15} />
+                </Link>
+              )}
+            </footer>
+          </>
+        )}
+      </main>
     </PublicLayout>
   );
 }
@@ -5500,6 +5655,7 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
             Try it live
           </Link>
           <Link to="/vibe">Vibe</Link>
+          <Link to="/tutorials">Tutorials</Link>
           <Link to="/guide">For builders</Link>
           <Link to="/public">Live demo</Link>
           <Link to="/console">Console</Link>
@@ -5520,6 +5676,7 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
         </Link>
         <nav aria-label="Help and policies">
           <Link to="/guide">How it works</Link>
+          <Link to="/tutorials">Tutorials</Link>
           <Link to="/faq">FAQ</Link>
           <Link to="/privacy">Privacy Policy</Link>
         </nav>

@@ -35,6 +35,7 @@ var settingOverrideBSONKeys = map[string]string{
 	"vibeDailyLimit":          "vibeDailyLimit",
 	"vibeShareTTL":            "vibeShareTTL",
 	"vibeLearn":               "vibeLearn",
+	"publicStats":             "publicStats",
 }
 
 // appExists loads any app by id, regardless of owner. Operator routes use this
@@ -179,6 +180,7 @@ type adminSettingsPatch struct {
 	VibeDailyLimit          *int     `json:"vibeDailyLimit"`
 	VibeShareTTL            *string  `json:"vibeShareTTL"`
 	VibeLearn               *bool    `json:"vibeLearn"`
+	PublicStats             *bool    `json:"publicStats"`
 	ResetKeys               []string `json:"resetKeys"`
 	ResetAll                bool     `json:"resetAll"`
 }
@@ -274,6 +276,7 @@ func (app *application) patchAdminSettings(w http.ResponseWriter, r *http.Reques
 		"demoSeed":          patch.DemoSeed,
 		"webhookDelivery":   patch.WebhookDelivery,
 		"vibeLearn":         patch.VibeLearn,
+		"publicStats":       patch.PublicStats,
 	} {
 		if value != nil {
 			set[key] = *value

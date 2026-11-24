@@ -168,6 +168,7 @@ type SettingsDraft = {
   demoSeed: boolean
   webhookDelivery: boolean
   vibeLearn: boolean
+  publicStats: boolean
   trySandboxTTL: string
   vibeShareTTL: string
   builderSignupDailyLimit: number
@@ -179,7 +180,7 @@ type SettingsDraft = {
   vibeDailyLimit: number
 }
 
-const BOOLEAN_KEYS = ["trySandbox", "builderSignupOpen", "demoSeed", "webhookDelivery", "vibeLearn"] as const
+const BOOLEAN_KEYS = ["trySandbox", "builderSignupOpen", "demoSeed", "webhookDelivery", "vibeLearn", "publicStats"] as const
 const DURATION_KEYS = ["trySandboxTTL", "vibeShareTTL"] as const
 const NUMBER_KEYS = [
   "builderSignupDailyLimit",
@@ -198,6 +199,7 @@ function draftFrom(effective: ResolvedSettings): SettingsDraft {
     demoSeed: effective.demoSeed,
     webhookDelivery: effective.webhookDelivery,
     vibeLearn: effective.vibeLearn,
+    publicStats: effective.publicStats,
     trySandboxTTL: effective.trySandboxTTL,
     vibeShareTTL: effective.vibeShareTTL,
     builderSignupDailyLimit: effective.builderSignupDailyLimit,
@@ -527,6 +529,7 @@ function PulsePanel() {
           {boolRow("demoSeed", "Demo data", "Seed the storytelling demo on the default app")}
           {boolRow("webhookDelivery", "Webhook delivery", "Run the outbox delivery worker")}
           {boolRow("vibeLearn", "Vibe learning", "Use claimed apps' structure (never names or data) as reference designs for similar ideas")}
+          {boolRow("publicStats", "Public stats", "Show aggregate counts (stashers, live apps, records) on the landing page via /v1/stats")}
           {durationRow("trySandboxTTL", "Try-it TTL", "Lifetime of a try-it sandbox, e.g. 24h")}
           {durationRow("vibeShareTTL", "Vibe share TTL", "Lifetime of a vibe sandbox, e.g. 72h")}
           {numberRow("builderSignupDailyLimit", "Signup / day", "0 = unlimited")}

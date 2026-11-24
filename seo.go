@@ -56,6 +56,10 @@ var staticPageMeta = map[string]pageMeta{
 		Title:       "Live public data — m-stash",
 		Description: "Every record here is a live m-stash API response: the same backend an AI-built app calls for auth and per-user data.",
 	},
+	"/tutorials": {
+		Title:       "Tutorials: build on m-stash in minutes — m-stash",
+		Description: "Step-by-step tutorials: your first app in five minutes, login and private data on any page, public profiles and counters, a backend with your secret key, and building with your AI agent.",
+	},
 	"/faq": {
 		Title:       "FAQ — m-stash",
 		Description: "Builder-first answers about m-stash: auth, per-user data, ownership, self-hosting, and the hosted demo.",
@@ -71,7 +75,7 @@ var staticPageMeta = map[string]pageMeta{
 }
 
 // sitemapStaticPaths lists the indexable top-level pages in priority order.
-var sitemapStaticPaths = []string{"/discover", "/guide", "/vibe", "/public", "/faq", "/privacy"}
+var sitemapStaticPaths = []string{"/discover", "/guide", "/tutorials", "/vibe", "/public", "/faq", "/privacy"}
 
 // redirectToCanonicalHost permanently redirects browser pages served on a
 // secondary host (for example the platform's default *.onrender.com domain or
@@ -129,6 +133,17 @@ func (app *application) pageMetaFor(ctx context.Context, requestPath string) pag
 		segments[index] = normalizeResourcePathSegment(segments[index])
 	}
 	notFound := pageMeta{Title: "Page not found — m-stash", Description: seoDefaultDescription, Path: cleanPath, NoIndex: true}
+
+	if segments[0] == "tutorials" {
+		if len(segments) != 2 {
+			return notFound
+		}
+		found, ok := findTutorial(segments[1])
+		if !ok {
+			return notFound
+		}
+		return pageMeta{Title: found.Title + " — m-stash tutorials", Description: found.Summary, Path: cleanPath, Type: "article"}
+	}
 
 	if segments[0] == "vibe" {
 		// Share IDs are case-sensitive, so use the raw segment rather than the
@@ -462,6 +477,11 @@ func (app *application) handleSitemap(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, staticPath := range sitemapStaticPaths {
 		writeURL(staticPath, time.Time{})
+	}
+	if tutorials, err := loadTutorials(); err == nil {
+		for _, entry := range tutorials {
+			writeURL("/tutorials/"+entry.Slug, time.Time{})
+		}
 	}
 	for _, resource := range app.publicSharedResourcesForSitemap(r.Context()) {
 		writeURL("/public/"+resource.Type+"/"+resource.Slug, resource.UpdatedAt)

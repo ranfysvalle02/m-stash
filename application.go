@@ -41,6 +41,8 @@ type application struct {
 	vibeExemplars vibeExemplarCache
 	// vibeFunnel caches the operator funnel report between overview polls.
 	vibeFunnel vibeFunnelCache
+	// publicStats caches the landing page's aggregate counts.
+	publicStats publicStatsCache
 }
 
 func newApplication(appConfig Config, database *mongo.Database, client *mongo.Client) *application {
@@ -105,6 +107,10 @@ func (app *application) Handler(rateLimiter *authRateLimiter) http.Handler {
 	mux.HandleFunc("/v1/shared/webhooks/", app.resolveApp(app.corsMiddleware(app.authenticateSharedResource(app.handleSharedWebhooks))))
 	mux.HandleFunc("/.well-known/m-stash.json", app.corsMiddleware(app.handleServiceManifest))
 	mux.HandleFunc("/skill.md", app.corsMiddleware(app.handleSkill))
+	mux.HandleFunc("/mstash.js", app.handleClientScript)
+	mux.HandleFunc("/v1/stats", app.corsMiddleware(app.handlePublicStats))
+	mux.HandleFunc("/v1/tutorials", app.corsMiddleware(app.handleTutorials))
+	mux.HandleFunc("/v1/tutorials/", app.corsMiddleware(app.handleTutorials))
 	mux.HandleFunc("/v1/vibe", app.corsMiddleware(app.handleVibe))
 	mux.HandleFunc("/v1/vibe/recipes", app.corsMiddleware(app.handleVibeRecipes))
 	mux.HandleFunc("/v1/vibe/", app.corsMiddleware(app.handleVibeShare))
@@ -177,6 +183,17 @@ func (app *application) handleServiceManifest(w http.ResponseWriter, r *http.Req
 			// stamped with this deployment's origin.
 			"agentSkill": map[string]any{
 				"endpoint": "/skill.md",
+			},
+			// client is the zero-dependency JS client, importable from any origin.
+			"client": map[string]any{
+				"endpoint": "/mstash.js",
+			},
+			"tutorials": map[string]any{
+				"endpoint": "/v1/tutorials",
+			},
+			"publicStats": map[string]any{
+				"enabled":  settings.PublicStats,
+				"endpoint": "/v1/stats",
 			},
 			"trySandbox": map[string]any{
 				"enabled":  settings.TrySandbox,

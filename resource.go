@@ -725,6 +725,12 @@ func (app *application) handleResourceDocument(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusInternalServerError, "Could not update resource")
 			return
 		}
+		// A secret key is write-only: returning the updated document would let an
+		// increment (even by 0) read any shared record, so service callers get no body.
+		if claims.Role == sharedServiceRole {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"data": result})
 
 	default:

@@ -3,6 +3,7 @@
 .cursor
 .env
 *.md
+!tutorials/**
 *.ipynb
 *.test
 *.out

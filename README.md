@@ -75,13 +75,16 @@ A per-app `secretKey` can be supplied to a trusted backend for shared resource m
 | `GET` / `POST /v1/me/resources/{type}` | List or create personal resources. List supports `?filter=`, `?q=`, and `?count=1`. |
 | `GET` / `PUT` / `PATCH` / `DELETE /v1/me/resources/{type}/{slug}` | Work with a personal resource (`PATCH` atomically increments a numeric `data.*` field). |
 | `GET /v1/shared/namespace` | Read shared scope metadata as an authenticated user. |
-| `GET` / `POST /v1/shared/resources/{type}` | Read shared data; writes require admin or the app's secret key. List supports `?filter=`, `?q=`, and `?count=1`. |
+| `GET` / `POST /v1/shared/resources/{type}` | Read shared data; writes require admin or the app's secret key (`POST`/`PUT`/`PATCH`/`DELETE` only — a secret key cannot read). List supports `?filter=`, `?q=`, and `?count=1`. |
 | `GET` / `PUT` / `PATCH` / `DELETE /v1/shared/resources/{type}/{slug}` | Work with one shared resource (`PATCH` atomically increments a numeric `data.*` field). |
 | `GET` / `POST /v1/shared/webhooks`, `DELETE /v1/shared/webhooks/{id}` | Admin-only: register, list, and remove HMAC-signed outbox event webhooks. |
 | `GET /v1/public/{username}/{type}/{slug}` | Read one public personal resource. |
 | `GET /v1/public/shared/resources/{type}/{slug}` | Read one public shared resource. |
 | `POST /v1/try` | Start a blank live sandbox (when `TRY_SANDBOX=on`). Returns a publishable key, an expiry, and a one-time claim token. |
 | `POST /v1/builder/auth/signup` | Self-serve builder account (when `BUILDER_SIGNUP=open`). Returns a session on the free plan. |
+| `GET /mstash.js` | The zero-dependency client (browsers and Node 18+), importable from any origin: `import { createClient } from "https://<deployment>/mstash.js"`. |
+| `GET /v1/tutorials`, `/v1/tutorials/{slug}`, `/v1/tutorials/{slug}.md` | Step-by-step tutorials from `tutorials/*.md`, stamped with this deployment's origin. Rendered at `/tutorials`. |
+| `GET /v1/stats` | Public, aggregate counts (registered stashers, live apps, records, recent vibes) when `PUBLIC_STATS` is on. Counts only. |
 | `POST /v1/builder/apps/claim` | Keep a sandbox as a live app. Needs a builder session and the sandbox's claim token; the `pk_` and all data stay, and a new secret key is returned once. |
 
 Social login is optional. When GitHub or Google credentials are set, `/login` and `/signup` offer those providers. Send the browser to `/v1/auth/oauth/{provider}/start`; the user comes back to `redirect_uri?oauth_code=otc_…`, and the app exchanges that code within 60 seconds. The code is single-use, the JWT never travels in a URL, and `redirect_uri` must be this deployment's origin or an allowed origin. Client secrets stay in environment variables. The security model is written up in [blog-auth.md](blog-auth.md).
@@ -119,6 +122,12 @@ Every app card in `/console` has a **Build kit** button (`GET /v1/builder/apps/{
 
 Vibe shares download the same kit from their share link.
 
+## Tutorials and building in the open
+
+`/tutorials` walks people from zero to shipped: their first app in five minutes, login and private data on any web page, public profiles and counters, a backend with the secret key, and building with an AI agent. Every snippet is stamped with the deployment's own origin and runs as pasted. The tutorials are Markdown files in [tutorials/](tutorials) (frontmatter: `title`, `summary`, `minutes`, `level`, `order`), embedded at build time, so adding one is a docs-only pull request.
+
+The landing page shows live, aggregate numbers from `GET /v1/stats`: **registered stashers** (builders plus the users of live apps), live apps, records stashed (every stored record, from the collection's metadata), and apps vibed in the last 30 days. Sandbox users are excluded from stashers because they expire. The counts refresh at most once a minute, never block on a slow database, and carry no names or data; turn them off with `PUBLIC_STATS=off` or live from `/admin`.
+
 ## Try it, run it, keep it
 
 Every m-stash app is either a **sandbox** (no owner, expires, tight limits, carries a one-time claim token) or a **live** app (owned, no expiry, limits set by the owner's plan). A visitor can try the service against a real backend, then keep that exact app — the publishable key never changes, so a downloaded `.zip` or pasted cURL keeps working.
@@ -149,6 +158,7 @@ Every m-stash app is either a **sandbox** (no owner, expires, tight limits, carr
 | `GEMINI_MODEL` | No | Model for the vibe lab. Defaults to `gemini-3.5-flash-lite`. |
 | `VIBE_DAILY_LIMIT` | No | Global daily cap on model generations (plus a per-IP limit). Past the cap, or whenever the model fails, the lab answers from built-in blueprints. Defaults to `500`. |
 | `VIBE_SHARE_TTL` | No | How long a vibe's share link, live demo, and `.zip` starter stay available before MongoDB expires them. Defaults to `72h`; capped at `120h` (5 days). |
+| `PUBLIC_STATS` | No | Publish aggregate build-in-the-open counts at `GET /v1/stats` and on the landing page. Counts only, never names or data. Defaults to `on`; can be toggled live in `/admin`. |
 | `VIBE_LEARN` | No | Let claimed vibe apps act as reference designs for similar new ideas. Only their section and field structure is used, never names, ideas, or records. Curated recipes are always used. Defaults to `on`; can be toggled live in `/admin`. |
 | `VIBE_MAX_SANDBOXES` | No | Global cap on live sandbox tenants (vibe + try-it). Past it the lab still returns a spec and snippets, just without a live demo. Defaults to `1000`. |
 | `TRY_SANDBOX` | No | Set `on` to enable the blank `POST /v1/try` sandbox used by the guide and console, and to unlock the Vibe lab's instant recipes and blueprints (no `GEMINI_API_KEY` needed). Defaults to `off` (endpoint returns 404). |

@@ -235,6 +235,31 @@ export interface MetricsSnapshot {
   outboxEvents: Record<string, number>
 }
 
+// PublicStats are the deployment's aggregate, build-in-the-open counts from
+// GET /v1/stats. Counts only; never names or data.
+export interface PublicStats {
+  stashers: number
+  builders: number
+  appUsers: number
+  liveApps: number
+  records: number
+  vibes30d: number
+  vibesWindowDays: number
+  updatedAt: string
+}
+
+export interface TutorialMeta {
+  slug: string
+  title: string
+  summary: string
+  minutes: number
+  level: string
+}
+
+export interface Tutorial extends TutorialMeta {
+  markdown: string
+}
+
 // VibeFunnelCohort is one group of vibe runs (same mode, source, model, and
 // prompt version) and how far its apps got, from GET /v1/admin/overview.
 export interface VibeFunnelCohort {
@@ -285,6 +310,7 @@ export interface ResolvedSettings {
   vibeMaxSandboxes: number
   vibeDailyLimit: number
   vibeLearn: boolean
+  publicStats: boolean
   trySandboxTTL: string
   vibeShareTTL: string
 }
@@ -306,6 +332,7 @@ export interface SettingsOverrides {
   vibeDailyLimit?: number
   vibeShareTTL?: string
   vibeLearn?: boolean
+  publicStats?: boolean
 }
 
 // EnvironmentPosture reports read-only, boot-fixed deployment configuration. No
@@ -349,6 +376,7 @@ export interface AdminSettingsPatch {
   vibeDailyLimit?: number
   vibeShareTTL?: string
   vibeLearn?: boolean
+  publicStats?: boolean
   resetKeys?: string[]
   resetAll?: boolean
 }
@@ -771,6 +799,21 @@ export const api = {
     const body = typeof input === 'string' ? { idea: input } : input
     const response = await request<APIEnvelope<VibeSpec> & { share?: VibeShare; snippets?: VibeSnippet[]; owner?: VibeOwner; claim?: { token: string }; publishableKey?: string; refinements?: string[] }>('/v1/vibe', { method: 'POST', body, retrySession: false })
     return { spec: response.data, share: response.share, snippets: response.snippets, owner: response.owner, claim: response.claim, publishableKey: response.publishableKey, refinements: response.refinements }
+  },
+
+  async getPublicStats(): Promise<PublicStats> {
+    const response = await request<APIEnvelope<PublicStats>>('/v1/stats', { retrySession: false })
+    return response.data
+  },
+
+  async listTutorials(): Promise<TutorialMeta[]> {
+    const response = await request<APIEnvelope<TutorialMeta[]>>('/v1/tutorials', { retrySession: false })
+    return response.data
+  },
+
+  async getTutorial(slug: string): Promise<Tutorial> {
+    const response = await request<APIEnvelope<Tutorial>>(`/v1/tutorials/${encodeURIComponent(slug)}`, { retrySession: false })
+    return response.data
   },
 
   // listVibeRecipes returns the curated launchpad cards.
