@@ -233,19 +233,28 @@ func writeAppSkillProcedures(b *strings.Builder) {
 	b.WriteString("2. **Add a section**: give it a new `type` (3-32 lowercase letters, digits, or single hyphens; it becomes the URL segment), an `audience` (`owner` = app-wide data the owner writes and everyone reads; `member` = private per user; `member-public` = per user, public on their page), a `view` (`grid`, `list`, `checklist`, `timeline`, `ranked`), and fields. No server setup is needed.\n")
 	b.WriteString("3. **Counters** (likes, votes, stock): `PATCH` the record with `{ \"op\": \"increment\", \"field\": \"data.likes\", \"by\": 1 }`; it is atomic, so never read-modify-write.\n")
 	b.WriteString("4. **Never rename** an existing field `key` or section `type` that already holds records; add a new one instead. Labels and titles are safe to change.\n")
-	b.WriteString("5. **Custom UI** beyond the built-in views: keep calling the same endpoints with `fetch`; the server enforces ownership whatever the frontend does.\n\n")
+	b.WriteString("5. **Custom UI or a backend**: import the kit's zero-dependency `mstash.js` (`createClient({ api, app })`, browser or Node 18+) or call the same endpoints with `fetch`; the server enforces ownership whatever the client does.\n\n")
 }
 
 // writeAppSkillVerify gives a concrete, copy-paste check for this app's own
 // sections so an agent can prove a change works instead of assuming it does.
 func writeAppSkillVerify(b *strings.Builder, spec vibeSpec, baseURL, publishableKey string) {
 	b.WriteString("## Verify a change\n\n")
-	b.WriteString("Run this after any change (it creates one throwaway user; use a sandbox or dev app). Every call must return 2xx; `curl -f` exits non-zero otherwise.\n\n")
+	b.WriteString("Run this after any change (it creates one throwaway user; use a sandbox or dev app). Every call must return 2xx; `curl -f` exits non-zero otherwise. The build kit ships the same script as `verify.sh`.\n\n")
 	b.WriteString("```bash\n")
-	fmt.Fprintf(b, "API=%s\nKEY=%s\n", shellQuote(baseURL), shellQuote(publishableKey))
+	b.WriteString(appVerifyScript(spec, baseURL, publishableKey))
+	b.WriteString("```\n\n")
+}
+
+// appVerifyScript is the bash body shared by the skill and the kit's verify.sh:
+// public owner sections are readable, and a new member can write and read
+// each member section. Bodies are JSON-encoded and shell-quoted.
+func appVerifyScript(spec vibeSpec, baseURL, publishableKey string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "API=%s\nKEY=%s\n", shellQuote(baseURL), shellQuote(publishableKey))
 	for _, section := range spec.ownerSections() {
-		fmt.Fprintf(b, "# Public %s are readable without login\n", section.Type)
-		fmt.Fprintf(b, `curl -fsS "$API/v1/public/shared/resources/%s" -H "X-M-Stash-App: $KEY"`+"\n", section.Type)
+		fmt.Fprintf(&b, "# Public %s are readable without login\n", section.Type)
+		fmt.Fprintf(&b, `curl -fsS "$API/v1/public/shared/resources/%s" -H "X-M-Stash-App: $KEY"`+"\n", section.Type)
 	}
 	if members := spec.memberSections(); len(members) > 0 {
 		b.WriteString("# A new member can sign up, then write and read their own records\n")
@@ -262,12 +271,12 @@ func writeAppSkillVerify(b *strings.Builder, spec vibeSpec, baseURL, publishable
 			if err != nil {
 				continue
 			}
-			fmt.Fprintf(b, `curl -fsS -X POST "$API/v1/me/resources/%s" -H "X-M-Stash-App: $KEY" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \`+"\n", section.Type)
-			fmt.Fprintf(b, "  -d %s\n", shellQuote(string(body)))
-			fmt.Fprintf(b, `curl -fsS "$API/v1/me/resources/%s" -H "X-M-Stash-App: $KEY" -H "Authorization: Bearer $TOKEN"`+"\n", section.Type)
+			fmt.Fprintf(&b, `curl -fsS -X POST "$API/v1/me/resources/%s" -H "X-M-Stash-App: $KEY" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \`+"\n", section.Type)
+			fmt.Fprintf(&b, "  -d %s\n", shellQuote(string(body)))
+			fmt.Fprintf(&b, `curl -fsS "$API/v1/me/resources/%s" -H "X-M-Stash-App: $KEY" -H "Authorization: Bearer $TOKEN"`+"\n", section.Type)
 		}
 	}
-	b.WriteString("```\n\n")
+	return b.String()
 }
 
 // shellQuote wraps a value in single quotes for POSIX shells.

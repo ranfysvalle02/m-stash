@@ -105,7 +105,7 @@ func TestBuildVibeStarterZip(t *testing.T) {
 		handle.Close()
 		files[file.Name] = string(contents)
 	}
-	for _, name := range []string{"README.md", "AGENTS.md", "SKILL.md", "index.html", "app.js", "app.css", "views.js", "mstash.json"} {
+	for _, name := range []string{"README.md", "AGENTS.md", "SKILL.md", "index.html", "app.js", "app.css", "views.js", "mstash.json", "mstash.js", ".env.example", ".gitignore", "verify.sh"} {
 		if _, ok := files["m-stash-starter/"+name]; !ok {
 			t.Fatalf("zip missing %s; got %v", name, keys(files))
 		}
@@ -130,6 +130,18 @@ func TestBuildVibeStarterZip(t *testing.T) {
 	}
 	if !strings.Contains(files["m-stash-starter/AGENTS.md"], "https://example.test/llms.txt") {
 		t.Fatal("AGENTS.md missing llms.txt reference")
+	}
+	for _, file := range reader.File {
+		if file.Name == "m-stash-starter/verify.sh" && file.Mode()&0o111 == 0 {
+			t.Fatal("verify.sh must be executable")
+		}
+	}
+	env := files["m-stash-starter/.env.example"]
+	if !strings.Contains(env, "M_STASH_API=https://example.test\n") || !strings.Contains(env, "M_STASH_SECRET_KEY=\n") {
+		t.Fatalf(".env.example must carry the API base and leave the secret blank:\n%s", env)
+	}
+	if !strings.HasPrefix(files["m-stash-starter/verify.sh"], "#!/usr/bin/env bash\n") {
+		t.Fatal("verify.sh needs a bash shebang")
 	}
 	// The owner password is never known to the share, so it can never land in the zip.
 	if strings.Contains(strings.ToLower(files["m-stash-starter/mstash.json"]), "password") {

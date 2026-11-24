@@ -101,8 +101,23 @@ Every generation feeds the next one:
 - **Self-repair** — the validator records every fix it had to make (a dropped section, an unknown field kind, an owner section with no samples, ...). When it finds any, the model gets one repair turn with those findings, and whichever spec has fewer issues ships. A repair can only improve the result.
 - **Reference designs** — each idea is matched against the curated recipes and, while `VIBE_LEARN` is on, the apps people actually claimed. The best one or two matches go into the prompt as examples. Claimed apps contribute section and field structure only: never names, ideas, or records.
 - **Refine** — on a live vibe, describe a change ("add reviews with a 1-5 rating"). `POST /v1/vibe` with `{ "parent": "<shareId>", "idea": "<change>" }` rebuilds the app as a new sandbox through the same validated pipeline, keeping existing field keys so saved data still fits. Refine needs `GEMINI_API_KEY` and returns `503` rather than guessing.
-- **Durable spec** — a vibe app stores its spec and provenance on the app record, so it survives a claim. Builders can download a claimed app's starter and tailored `SKILL.md` from `/console` (`GET /v1/builder/apps/{id}/starter.zip` and `/skill.md`) long after the share link expires.
+- **Durable spec** — a vibe app stores its spec and provenance on the app record, so it survives a claim and keeps powering its build kit and `SKILL.md` long after the share link expires.
 - **Measured** — a run ledger (`_m_stash_vibe_runs`, kept 180 days, never storing idea text) tracks each generation's mode, source, model, prompt version, and repairs, plus whether its app was previewed, downloaded, handed to an agent, refined, or claimed. `/admin` shows the 30-day funnel per cohort and the most common repairs, so prompt and model changes are judged on what people keep.
+
+## Build kit: take any app anywhere
+
+Every app card in `/console` has a **Build kit** button (`GET /v1/builder/apps/{id}/starter.zip`, owner only) and a **SKILL.md** button (`/skill.md`). The kit is a folder you can open in any editor or agent:
+
+| File | What it is |
+| --- | --- |
+| `index.html`, `app.js`, `views.js`, `app.css` | A runnable, no-build UI for the app's data. |
+| `mstash.js` | A zero-dependency client for browsers and Node 18+: `createClient({ api, app })` with auth, `me` / `shared` / `public` resources, and atomic `increment`. |
+| `mstash.json` | The app's data model. Vibe apps use their stored spec; any other app gets one inferred from the record types and field keys it already uses. Record values never leave the server. |
+| `.env.example`, `.gitignore` | API base and publishable key for server code. The secret key stays blank: it is only shown when issued, so rotate it in the console to get one. |
+| `verify.sh` | An end-to-end check (needs `curl` and `jq`): public data is readable, and a new member can write and read their own records. |
+| `SKILL.md`, `AGENTS.md` | Agent rules tailored to this app, for Cursor, Claude Code, or Codex. |
+
+Vibe shares download the same kit from their share link.
 
 ## Try it, run it, keep it
 

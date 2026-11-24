@@ -396,6 +396,10 @@ func buildVibeStarterZip(record *vibeShareRecord, baseURL string, claimed bool) 
 	if err != nil {
 		return nil, err
 	}
+	clientJS, err := vibeStarterFiles.ReadFile("vibe_starter/mstash.js")
+	if err != nil {
+		return nil, err
+	}
 	specJSON, err := json.MarshalIndent(record.Spec, "", "  ")
 	if err != nil {
 		return nil, err
@@ -414,10 +418,20 @@ func buildVibeStarterZip(record *vibeShareRecord, baseURL string, claimed bool) 
 		{"app.js", appJS},
 		{"app.css", appCSS},
 		{"views.js", viewsJS},
+		{"mstash.js", clientJS},
 		{"mstash.json", specJSON},
+		{".env.example", []byte(kitEnvExample(baseURL, publishableKey))},
+		{".gitignore", []byte(".env\n.env.*\n!.env.example\nnode_modules/\n")},
+		{"verify.sh", []byte("#!/usr/bin/env bash\n# Smoke-tests this app against m-stash. Needs curl and jq. Creates one throwaway user.\nset -euo pipefail\n\n" + appVerifyScript(record.Spec, baseURL, publishableKey) + "echo \"m-stash verify: OK\"\n")},
 	}
 	for _, file := range files {
-		entry, err := writer.CreateHeader(&zip.FileHeader{Name: "m-stash-starter/" + file.name, Method: zip.Deflate, Modified: record.CreatedAt})
+		header := &zip.FileHeader{Name: "m-stash-starter/" + file.name, Method: zip.Deflate, Modified: record.CreatedAt}
+		if strings.HasSuffix(file.name, ".sh") {
+			header.SetMode(0o755)
+		} else {
+			header.SetMode(0o644)
+		}
+		entry, err := writer.CreateHeader(header)
 		if err != nil {
 			return nil, err
 		}
@@ -455,7 +469,11 @@ func vibeStarterReadme(record *vibeShareRecord, baseURL string, claimed bool) st
 	if spec.Tagline != "" {
 		fmt.Fprintf(&b, "> %s\n\n", spec.Tagline)
 	}
-	fmt.Fprintf(&b, "A ready-to-run starter the m-stash vibe lab generated from this idea:\n\n> %s\n\n", record.Idea)
+	if record.Idea != "" {
+		fmt.Fprintf(&b, "A ready-to-run starter the m-stash vibe lab generated from this idea:\n\n> %s\n\n", record.Idea)
+	} else {
+		b.WriteString("A ready-to-run build kit for this m-stash app. Its data model was read from the record types and fields the app already uses.\n\n")
+	}
 	if len(record.Refinements) > 0 {
 		b.WriteString("Then refined with:\n\n")
 		for _, refinement := range record.Refinements {
@@ -528,10 +546,26 @@ func vibeStarterReadme(record *vibeShareRecord, baseURL string, claimed bool) st
 		}
 	}
 
+	b.WriteString("## Build your own frontend or backend\n\n")
+	b.WriteString("`mstash.js` is a zero-dependency client for browsers and Node 18+. Copy it into any project:\n\n")
+	b.WriteString("```js\nimport { createClient } from \"./mstash.js\";\n\n")
+	fmt.Fprintf(&b, "const stash = createClient({ api: %q, app: %q });\n", baseURL, starterKeyOrPlaceholder(record.PublishableKey))
+	b.WriteString("await stash.login({ email, password });            // or stash.signup({ email, password, username })\n")
+	if members := spec.memberSections(); len(members) > 0 {
+		fmt.Fprintf(&b, "const mine = await stash.me.list(%q);          // the signed-in user's own records\n", members[0].Type)
+	}
+	if owners := spec.ownerSections(); len(owners) > 0 {
+		fmt.Fprintf(&b, "const everyone = await stash.public.list(%q);  // public app data, no login\n", owners[0].Type)
+	}
+	b.WriteString("```\n\n")
+	b.WriteString("- `.env.example` holds the API base and publishable key. Copy it to `.env` for a backend; `.gitignore` already keeps `.env` out of git.\n")
+	b.WriteString("- Shared (app-wide) data is written by the app owner, or by a **server** using the secret key: `createClient({ api, app, token: process.env.M_STASH_SECRET_KEY })`. The secret is shown only when it is issued — rotate it in the console to get a fresh one. Never put it in browser code.\n")
+	fmt.Fprintf(&b, "- Calling from a new browser origin (say `http://localhost:5173`)? If you see a CORS error, add that origin under **Allowed browser origins** for this app at %s/console.\n", baseURL)
+	b.WriteString("- `./verify.sh` (needs `curl` and `jq`) checks the app end to end: public data is readable and a new member can write and read their own records.\n\n")
+
 	b.WriteString("## Hand it to your coding agent\n\n")
 	b.WriteString("`SKILL.md` is a plug-and-play agent skill pre-filled with this app's key and sections. Drop it in so Cursor, Claude Code, or Codex can build against m-stash with zero setup:\n\n")
-	b.WriteString("- Cursor: `.cursor/skills/m-stash/SKILL.md`\n")
-	b.WriteString("- Claude Code: `.claude/skills/m-stash/SKILL.md`\n\n")
+	b.WriteString("```sh\nmkdir -p .cursor/skills/m-stash && cp SKILL.md .cursor/skills/m-stash/   # Cursor\nmkdir -p .claude/skills/m-stash && cp SKILL.md .claude/skills/m-stash/   # Claude Code\n```\n\n")
 	fmt.Fprintf(&b, "`AGENTS.md` has the full set of API rules a coding agent should follow, and the machine-readable reference lives at %s/llms.txt.\n", baseURL)
 	return b.String()
 }
@@ -582,6 +616,12 @@ func vibeStarterAgents(record *vibeShareRecord, baseURL string) string {
 	}
 	b.WriteString("\n")
 
+	b.WriteString("## Tools in this folder\n\n")
+	b.WriteString("- `mstash.js` — zero-dependency client (`createClient({ api, app })`) for browsers and Node 18+. Prefer it over hand-written fetch calls.\n")
+	b.WriteString("- `mstash.json` — the app's data model. The UI renders from the `m-stash-config` block in `index.html`; keep the two in sync.\n")
+	b.WriteString("- `verify.sh` — run it after every change; it must print `m-stash verify: OK`.\n")
+	b.WriteString("- `.env.example` — API base and publishable key for server code. The secret key stays blank here and never goes in frontend files.\n\n")
+
 	b.WriteString("## A record body\n\n")
 	b.WriteString("```json\n{\n  \"slug\": \"unique-slug\",\n  \"title\": \"Human title\",\n  \"visibility\": \"public\",\n  \"data\": { \"fieldKey\": \"value\" }\n}\n```\n\n")
 	fmt.Fprintf(&b, "Full machine-readable reference: %s/llms.txt\n", baseURL)
@@ -608,8 +648,9 @@ func derefTime(value *time.Time) time.Time {
 	return *value
 }
 
-// builderAppVibeAsset serves an owned app's tailored SKILL.md or starter .zip
-// from the spec stored on the app itself. Neither carries a secret.
+// builderAppVibeAsset serves an owned app's tailored SKILL.md or build kit .zip.
+// Vibe apps use their stored spec; others get one inferred from their records.
+// Neither carries a secret or a record value.
 func (app *application) builderAppVibeAsset(w http.ResponseWriter, r *http.Request, ownerID, appID bson.ObjectID, asset string) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
@@ -621,12 +662,13 @@ func (app *application) builderAppVibeAsset(w http.ResponseWriter, r *http.Reque
 		app.writeOwnedAppLookupError(w, err, "Could not load application")
 		return
 	}
-	if record.Vibe == nil {
-		writeError(w, http.StatusNotFound, "This app wasn't created in the vibe lab")
+	share, err := app.kitRecordForApp(ctx, record)
+	if err != nil {
+		app.logger.Error("build kit spec failed", "request_id", requestIDFromContext(ctx), "error", err)
+		writeError(w, http.StatusInternalServerError, "Could not build the kit")
 		return
 	}
 	baseURL := app.publicBaseURL(r)
-	share := vibeRecordFromApp(record)
 	if asset == "skill.md" {
 		writeSkill(w, r, vibeAppSkill(share, baseURL))
 		return
@@ -638,7 +680,26 @@ func (app *application) builderAppVibeAsset(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", `attachment; filename="m-stash-starter-`+record.Slug+`.zip"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="m-stash-kit-`+record.Slug+`.zip"`)
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(archive)
+}
+
+func starterKeyOrPlaceholder(publishableKey string) string {
+	if publishableKey == "" {
+		return vibeStarterPlaceholder
+	}
+	return publishableKey
+}
+
+// kitEnvExample is the env template for a backend built on the app. The secret
+// key is deliberately blank: it is stored hashed and can only be (re)issued.
+func kitEnvExample(baseURL, publishableKey string) string {
+	return "# m-stash connection for this app. Copy to .env for server-side code.\n" +
+		"M_STASH_API=" + baseURL + "\n" +
+		"# Publishable key: names the app, safe in browser code.\n" +
+		"M_STASH_APP_KEY=" + publishableKey + "\n" +
+		"# Secret key (sk_...): SERVER ONLY, for shared-data writes. Shown once when issued;\n" +
+		"# rotate it in the m-stash console to get a fresh one. Never commit or ship it to a browser.\n" +
+		"M_STASH_SECRET_KEY=\n"
 }

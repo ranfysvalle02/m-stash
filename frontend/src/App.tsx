@@ -5329,25 +5329,22 @@ function ConsoleAppRow({
           >
             <Database aria-hidden="true" size={15} /> {showInspector ? "Hide data" : "Inspect data"}
           </button>
-          {app.vibe && (
-            <>
-              <a
-                className="button secondary"
-                download
-                href={`/v1/builder/apps/${encodeURIComponent(app.id)}/starter.zip`}
-              >
-                <Download aria-hidden="true" size={15} /> Starter
-              </a>
-              <a
-                className="button secondary"
-                download
-                href={`/v1/builder/apps/${encodeURIComponent(app.id)}/skill.md?download=1`}
-                title="Agent skill tailored to this app, for Cursor, Claude Code, or Codex"
-              >
-                <Sparkles aria-hidden="true" size={15} /> SKILL.md
-              </a>
-            </>
-          )}
+          <a
+            className="button secondary"
+            download
+            href={`/v1/builder/apps/${encodeURIComponent(app.id)}/starter.zip`}
+            title="A ready-to-run starter, mstash.js client, .env template, verify script, and agent rules for this app"
+          >
+            <Download aria-hidden="true" size={15} /> Build kit
+          </a>
+          <a
+            className="button secondary"
+            download
+            href={`/v1/builder/apps/${encodeURIComponent(app.id)}/skill.md?download=1`}
+            title="Agent skill tailored to this app, for Cursor, Claude Code, or Codex"
+          >
+            <Sparkles aria-hidden="true" size={15} /> SKILL.md
+          </a>
           <ConfirmButton
             className="button secondary danger-button"
             disabled={busy !== ""}
