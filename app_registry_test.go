@@ -174,6 +174,17 @@ func TestProvisionAppInputValidation(t *testing.T) {
 	}
 }
 
+func TestProvisionAppHonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	app := newApplication(Config{}, nil, nil)
+	_, _, _, err := app.provisionApp(ctx, provisionAppInput{AdminEmail: "owner@example.com", AdminPassword: "password"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("provision with canceled context: got %v, want context.Canceled", err)
+	}
+}
+
 func TestAuthenticateRejectsTokenFromAnotherApp(t *testing.T) {
 	app := newApplication(Config{
 		JWTSecret:   "test-secret-with-at-least-32-characters",

@@ -87,7 +87,6 @@ func newHarness(t *testing.T, identities map[string]VerifiedIdentity) *harness {
 		VibeLearn: true, PublicStats: true,
 	}
 	app := newApplication(cfg, db, client)
-	app.logger = discardLogger()
 	app.oauthAdapters = map[string]OAuthAdapter{"github": fakeIdP{identities: identities}}
 	limiter := newAuthRateLimiter(db, 10_000, time.Minute)
 	app.vibeLimiter, app.vibeDailyLimiter, app.builderSignupLimiter = limiter, limiter, limiter

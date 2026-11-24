@@ -383,12 +383,13 @@ func (app *application) createBuilderApp(w http.ResponseWriter, r *http.Request,
 		input.Limits = &limits
 	}
 
-	record, secretKey, admin, err := app.provisionApp(ctx, input)
+	record, secretKey, admin, err := app.provisionApp(r.Context(), input)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			writeError(w, http.StatusConflict, "An application with this slug already exists")
 			return
 		}
+		app.logger.Error("application provisioning failed", "request_id", requestIDFromContext(r.Context()), "error", err)
 		writeError(w, http.StatusInternalServerError, "Could not provision application")
 		return
 	}

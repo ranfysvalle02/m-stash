@@ -417,14 +417,13 @@ func (app *application) handleApps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	record, secretKey, admin, err := app.provisionApp(ctx, input)
+	record, secretKey, admin, err := app.provisionApp(r.Context(), input)
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			writeError(w, http.StatusConflict, "An application with this slug already exists")
 			return
 		}
+		app.logger.Error("application provisioning failed", "request_id", requestIDFromContext(r.Context()), "error", err)
 		writeError(w, http.StatusInternalServerError, "Could not provision application")
 		return
 	}
@@ -437,6 +436,9 @@ func (app *application) handleApps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *application) provisionApp(ctx context.Context, input provisionAppInput) (AppRecord, string, *User, error) {
+	if err := ctx.Err(); err != nil {
+		return AppRecord{}, "", nil, err
+	}
 	publishableKey, err := generateAppKey(publishableKeyPrefix)
 	if err != nil {
 		return AppRecord{}, "", nil, err
@@ -468,7 +470,27 @@ func (app *application) provisionApp(ctx context.Context, input provisionAppInpu
 		UpdatedAt:      now,
 	}
 	var admin *User
+	if input.AdminEmail != "" {
+		if err := ctx.Err(); err != nil {
+			return AppRecord{}, "", nil, err
+		}
+		passwordHash, err := bcrypt.GenerateFromPassword([]byte(input.AdminPassword), bcryptCost)
+		if err != nil {
+			return AppRecord{}, "", nil, err
+		}
+		admin = &User{
+			ID:           bson.NewObjectID(),
+			AppID:        record.ID,
+			Email:        input.AdminEmail,
+			PasswordHash: string(passwordHash),
+			Role:         "admin",
+			CreatedAt:    now,
+		}
+	}
 
+	// Bound database work separately from the CPU cost of hashing credentials.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	session, err := app.mongoClient.StartSession()
 	if err != nil {
 		return AppRecord{}, "", nil, err
@@ -483,23 +505,10 @@ func (app *application) provisionApp(ctx context.Context, input provisionAppInpu
 		if _, err := app.database.Collection(namespaceCollectionName).InsertOne(transactionContext, sharedNamespace); err != nil {
 			return nil, err
 		}
-		if input.AdminEmail != "" {
-			passwordHash, err := bcrypt.GenerateFromPassword([]byte(input.AdminPassword), bcryptCost)
-			if err != nil {
+		if admin != nil {
+			if _, err := app.database.Collection("_users").InsertOne(transactionContext, admin); err != nil {
 				return nil, err
 			}
-			adminUser := User{
-				ID:           bson.NewObjectID(),
-				AppID:        record.ID,
-				Email:        input.AdminEmail,
-				PasswordHash: string(passwordHash),
-				Role:         "admin",
-				CreatedAt:    now,
-			}
-			if _, err := app.database.Collection("_users").InsertOne(transactionContext, adminUser); err != nil {
-				return nil, err
-			}
-			admin = &adminUser
 		}
 		return nil, nil
 	}, options.Transaction().SetWriteConcern(writeconcern.Majority()))
