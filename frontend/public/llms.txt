@@ -14,12 +14,15 @@ Every request identifies its app with the header `X-M-Stash-App: <publishableKey
 ## Endpoints
 
 - `POST /v1/apps` — provision an app (needs the platform token). Returns a publishable key (`pk_...`, safe in the browser) and a one-time secret key (`sk_...`, backend only).
-- `POST /v1/auth/signup` — body `{ email, password, username }`. Your users sign up in your app.
+- `POST /v1/auth/signup` — body `{ email, password, username }`. Passwords are 12–72 UTF-8 bytes. Usernames are 3–32 lowercase ASCII letters, digits, hyphens or underscores, start and end with a letter or digit, have no adjacent separators, and cannot be reserved. Email and username are trimmed and lowercased. A 409 response has `code: "email_taken"`, `"username_taken"`, or `"account_conflict"` when the conflicting field cannot be determined.
 - `POST /v1/auth/login` — body `{ email, password }`. Browser flows also set HttpOnly session cookies.
+- `GET /v1/auth/verify` — send the app key and `Authorization: Bearer <token>` from your backend. A valid token returns `{ "active": true, "claims": { "uid": "...", "appId": "...", "expiresAt": 0, ... } }`; tokens for another app and invalid or expired tokens are rejected. Use the verified `uid` to scope every database query, including vector searches. Never trust a decoded but unverified token. To find an app ID independently, sign in as its builder and list `GET /v1/builder/apps`; match `publishableKey` and read `id`.
+- `POST /v1/auth/refresh` and `POST /v1/auth/logout` — cookie-session refresh and logout, requiring the CSRF cookie/header. Logout does not revoke the bearer token returned by login or signup; those tokens expire after seven days.
 - `GET /v1/auth/providers` — list the social-login providers this deployment enabled, e.g. `{ "data": { "providers": ["github","google"] } }`. Empty when no OAuth credentials are set.
 - OAuth2 + PKCE social login (only when a provider is configured): send the browser to `GET /v1/auth/oauth/{provider}/start?app={pk_...}&redirect_uri={yourUrl}` (full-page navigation, not fetch). After consent the user is redirected to `redirect_uri?oauth_code=otc_...` (or `?oauth_error=...`). Exchange the one-time code within 60s with `POST /v1/auth/oauth/exchange` body `{ code }` (include the `X-M-Stash-App` header). It returns `{ token, user, namespace, isNewUser }` and sets the same HttpOnly session cookies as password login. Never put the JWT in a URL; `redirect_uri` must be same-origin or an allowed origin. OAuth client IDs/secrets live only in deployment env vars.
 - `GET /v1/me/identities`, `POST /v1/me/identities/start?provider={provider}`, `DELETE /v1/me/identities/{provider}` — authenticated: list, link (returns `{ data: { authorizeUrl } }` to navigate to), and unlink social providers. Unlinking your only sign-in method is refused.
 - `GET|POST /v1/me/resources/{type}` and `GET|PUT|DELETE /v1/me/resources/{type}/{slug}` — personal data. Body `{ slug, title, data, visibility }`.
+- A single record is returned as `{ "data": { "slug": "...", "title": "...", "data": { ... } } }`. `PUT` returns 404 if missing and replaces the record's writable fields including `data`; it is not an upsert or merge. `PATCH` supports atomic increments only.
 - `GET|POST /v1/shared/resources/{type}` and `/{type}/{slug}` — shared app data; writes require admin or the app secret key.
 - `GET /v1/public/shared/resources/{type}/{slug}` — read one public shared record (no auth).
 - `GET /v1/public/{username}/{type}/{slug}` — read one public personal record (no auth).
@@ -36,6 +39,14 @@ Every request identifies its app with the header `X-M-Stash-App: <publishableKey
 - An app is either a **sandbox** (no owner, expires, tight limits, has a one-time claim token) or **live** (owned, no expiry, plan limits). Claiming flips it in place, so a downloaded zip or pasted cURL keeps working.
 - Free-plan builders are capped: `FREE_TIER_MAX_APPS` apps, and each app is bounded by `FREE_TIER_MAX_USERS`, `FREE_TIER_MAX_RECORDS` (per namespace), and `FREE_TIER_MAX_RECORD_BYTES`. A zero limit means unlimited.
 - Hitting a user limit returns 429; a record count or size limit returns 429/413 with a message naming the plan or sandbox cap.
+- Sandbox apps allow all browser origins. Live apps use their configured **Allowed browser origins** in the console, or the deployment default if none are configured. Add the exact localhost origin including port for local development. If the browser reports `Failed to fetch` and the console says CORS, check the origin or call from your backend. A preflight can succeed even when the actual request's origin is rejected.
+- The kit's `verify.sh` creates a new user each run; use a sandbox or dev app and account for user quotas. App owners can remove test users and their personal data under **Inspect data** in the console; existing member bearer tokens remain valid until expiry.
+
+## Backend integration
+
+For applications with their own database, proxy authentication over HTTPS and keep the bearer token in a Secure, HttpOnly, SameSite cookie. Protect state-changing requests against CSRF and apply per-client login limits. Verify it with `/v1/auth/verify` before using `claims.uid` as the owner of every query and mutation. Verification of ordinary member tokens does not check whether the user was deleted. If caching verification, limit the cache to the token expiry and understand that account changes may not be observed immediately. Cold starts may take tens of seconds, so allow an appropriate timeout.
+
+When testing token tampering, change a middle signature character or the payload: changing the final base64url character can change only unused padding bits.
 
 ## Example
 

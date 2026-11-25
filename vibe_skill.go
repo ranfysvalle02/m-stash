@@ -92,13 +92,14 @@ func genericVibeSkill(baseURL string, trySandbox bool) string {
 
 	b.WriteString("## Connect\n\n")
 	fmt.Fprintf(&b, "- API base: `%s`\n", baseURL)
-	b.WriteString("- Identify the app on EVERY request with the header `X-M-Stash-App: <publishableKey>` (a `pk_...` key, safe in frontend code). Browsers that drop custom headers on preflight can use `?app=<publishableKey>` instead.\n")
+	b.WriteString("- Identify the app on EVERY request with the header `X-M-Stash-App: <publishableKey>` (a `pk_...` key, safe in frontend code), or `?app=<publishableKey>`.\n")
 	b.WriteString("- Call `fetch(url, { credentials: \"omit\" })`; m-stash never relies on cookies from a third-party frontend.\n")
 	b.WriteString("- After signup/login keep the returned bearer `token`; send `Authorization: Bearer <token>` on authenticated calls.\n\n")
 
 	b.WriteString("## Endpoints\n\n")
 	b.WriteString("- `POST /v1/auth/signup` `{ email, password, username }` -> `{ token, user, namespace }`. Your users sign up in your app.\n")
 	b.WriteString("- `POST /v1/auth/login` `{ email, password }` -> `{ token, user }`. The app owner (admin) signs in here too.\n")
+	b.WriteString("- `GET /v1/auth/verify` with the app key and bearer token -> `{ active: true, claims: { uid, appId, email, role, expiresAt, ... } }`. Reject non-200 responses.\n")
 	b.WriteString("- Social login (only if `GET /v1/auth/providers` lists a provider): full-page navigate to `/v1/auth/oauth/{provider}/start?app=<key>&redirect_uri=<yourUrl>`; the user returns to `redirect_uri?oauth_code=otc_...`; within 60s call `POST /v1/auth/oauth/exchange` `{ code }` (with the `X-M-Stash-App` header) -> `{ token, user, namespace, isNewUser }`. Never place the JWT in a URL; the `otc_` code is single-use.\n")
 	b.WriteString("- `GET|POST /v1/me/resources/{type}` and `GET|PUT|PATCH|DELETE /v1/me/resources/{type}/{slug}` — the signed-in user's PRIVATE records. `PATCH` atomically increments a numeric `data.*` field.\n")
 	b.WriteString("- `GET|POST /v1/shared/resources/{type}` and `/{type}/{slug}` — app-wide records. Reads need any signed-in user; writes need an admin session or the app secret key (`sk_`, server only).\n")
@@ -108,6 +109,7 @@ func genericVibeSkill(baseURL string, trySandbox bool) string {
 	b.WriteString("## A record body\n\n")
 	b.WriteString("```json\n{\n  \"slug\": \"unique-slug\",\n  \"title\": \"Human title\",\n  \"visibility\": \"private\",\n  \"data\": { \"fieldKey\": \"value\" }\n}\n```\n\n")
 	writeSkillRecordRules(&b)
+	writeSkillAuthentication(&b)
 
 	if trySandbox {
 		b.WriteString("## Zero-setup sandbox\n\n")
@@ -185,6 +187,7 @@ func vibeAppSkill(record *vibeShareRecord, baseURL string) string {
 	b.WriteString("## A record body\n\n")
 	b.WriteString("```json\n{\n  \"slug\": \"unique-slug\",\n  \"title\": \"Human title\",\n  \"visibility\": \"private\",\n  \"data\": { \"fieldKey\": \"value\" }\n}\n```\n\n")
 	writeSkillRecordRules(&b)
+	writeSkillAuthentication(&b)
 	writeAppSkillProcedures(&b)
 	writeAppSkillVerify(&b, spec, baseURL, publishableKey)
 	writeSkillFailures(&b, false)
@@ -202,6 +205,18 @@ func vibeAppSkill(record *vibeShareRecord, baseURL string) string {
 // enforces it, so an agent's first write succeeds.
 func writeSkillRecordRules(b *strings.Builder) {
 	b.WriteString("Every create needs `slug` (3-64 lowercase letters, digits, or hyphens; unique per type), `title` (1-200 chars), and `visibility`; `data` is free-form JSON. `visibility` is REQUIRED and must be `private` (owner only), `authenticated` (any signed-in user; shared resources only), or `public` (anyone).\n\n")
+	b.WriteString("A single-record response is `{ \"data\": { \"slug\": \"...\", \"title\": \"...\", \"data\": { ... } } }`: the outer `data` is the response envelope, the inner `data` is your payload. `PUT` requires an existing record (404 otherwise) and replaces the entire payload and other writable fields, not a merge. To save a new record, `POST` to the collection; handle a concurrent 409 before retrying. `PATCH` only supports atomic increments, not general merging.\n\n")
+}
+
+func writeSkillAuthentication(b *strings.Builder) {
+	b.WriteString("## Sign-up and browser origins\n\n")
+	b.WriteString("Sign-up requires a valid email, a password of 12-72 UTF-8 bytes, and a username of 3-32 lowercase ASCII letters, digits, hyphens or underscores. The username must start and end with a letter or digit, have no adjacent separators, and not be reserved; email and username are trimmed and lowercased. On 409, `code` is `email_taken`, `username_taken`, or `account_conflict` when the conflict cannot be identified; existing `error` text remains available.\n\n")
+	b.WriteString("Sandbox apps allow all origins. Live apps use their configured **Allowed browser origins** in the console, or the deployment default when none are configured. Add the exact localhost origin (including port) for local development. A browser `Failed to fetch` with a CORS console error means the origin may not be allowed; configure it or call from your backend. A successful preflight alone does not mean the actual app request is allowed.\n\n")
+	b.WriteString("## Verify a token on your backend\n\n")
+	b.WriteString("Send the publishable app key and bearer token to `GET /v1/auth/verify`; use only the verified `claims.uid` as your database owner and scope every query, update, delete and vector search to it. The endpoint rejects tokens for a different app; `claims.appId` is the verified app ID. To find your app ID independently, sign in as its builder and list `GET /v1/builder/apps`: each app has an `id` and `publishableKey`. Never trust an unverified JWT payload. Fail closed on errors.\n\n")
+	b.WriteString("Python (API, APP_KEY, TOKEN are server-side variables):\n\n```python\nimport json, urllib.request\nreq = urllib.request.Request(API + '/v1/auth/verify', headers={'X-M-Stash-App': APP_KEY, 'Authorization': 'Bearer ' + TOKEN})\nwith urllib.request.urlopen(req, timeout=60) as response:\n    claims = json.load(response)['claims']\nowner = claims['uid']\n```\n\n")
+	b.WriteString("Node 18+ (API, APP_KEY, TOKEN are server-side variables):\n\n```js\nconst response = await fetch(`${API}/v1/auth/verify`, { headers: { 'X-M-Stash-App': APP_KEY, Authorization: `Bearer ${TOKEN}` } });\nif (!response.ok) throw new Error(`Token verification failed: ${response.status}`);\nconst { claims } = await response.json();\nconst owner = claims.uid;\n```\n\n")
+	b.WriteString("For a backend-for-frontend, proxy sign-in over HTTPS and keep the bearer token in a Secure, HttpOnly, SameSite cookie; protect state-changing requests against CSRF and apply per-client login limits. If caching verification, bound the cache by token expiry and accept delayed account-change detection. Signup/login bearer tokens expire after 7 days and are not revoked by browser logout; verification of ordinary member tokens does not check whether the user was deleted. Browser cookie sessions have separate shorter-lived access tokens and refresh/logout endpoints; see the integration reference. Cold starts may take tens of seconds, so use an appropriate timeout. When testing tampering, change a middle signature character or the payload: changing the final base64url character may only alter unused padding bits.\n\n")
 }
 
 // writeSkillFailures maps the API's real failure responses to their fixes.
@@ -219,8 +234,9 @@ func writeSkillFailures(b *strings.Builder, includeCredentials bool) {
 	b.WriteString("| 401 | `Unknown application key` | Wrong `pk_` key, or the sandbox expired. Keep it from the console before it expires, or provision a new one. |\n")
 	b.WriteString("| 401 | `Missing or invalid Authorization` | Send `Authorization: Bearer <token>` from signup/login. |\n")
 	b.WriteString("| 403 | `Invalid or expired token` | Sign in again and replace the stored token. |\n")
+	b.WriteString("| Browser | `Failed to fetch` / CORS | Add your exact origin in the app console, or call from your backend. |\n")
 	b.WriteString("| 403 | `Only administrators can write shared` | Members write to `/v1/me/resources/...`; shared data is written by the owner (admin login) or a server holding `sk_`. |\n")
-	b.WriteString("| 409 | `already exists` | Pick a different slug, email, or username. |\n")
+	b.WriteString("| 409 | `email_taken` / `username_taken` (code) | Use another email or username. A record conflict needs a different slug. |\n")
 	b.WriteString("| 413 / 429 | `too large` / `limit` / `full` | A quota was reached: smaller records, fewer records, or keep the app from the console for higher limits. |\n\n")
 }
 
@@ -240,7 +256,7 @@ func writeAppSkillProcedures(b *strings.Builder) {
 // sections so an agent can prove a change works instead of assuming it does.
 func writeAppSkillVerify(b *strings.Builder, spec vibeSpec, baseURL, publishableKey string) {
 	b.WriteString("## Verify a change\n\n")
-	b.WriteString("Run this after any change (it creates one throwaway user; use a sandbox or dev app). Every call must return 2xx; `curl -f` exits non-zero otherwise. The build kit ships the same script as `verify.sh`.\n\n")
+	b.WriteString("Run this after any change (it creates one throwaway user on every run, counting against user limits; use a sandbox or dev app). App owners can remove test users and their personal data under **Inspect data** in the console; existing member bearer tokens remain valid until expiry. Every call must return 2xx; `curl -f` exits non-zero otherwise. The build kit ships the same script as `verify.sh`.\n\n")
 	b.WriteString("```bash\n")
 	b.WriteString(appVerifyScript(spec, baseURL, publishableKey))
 	b.WriteString("```\n\n")

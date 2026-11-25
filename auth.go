@@ -226,7 +226,12 @@ func (app *application) handleSignUp(w http.ResponseWriter, r *http.Request) {
 	// A sandbox customer is throwaway, so skip the seeded public welcome record.
 	if err := app.createAccountWithPersonalNamespace(ctx, user, namespace, !record.Sandbox); err != nil {
 		if mongo.IsDuplicateKeyError(err) {
-			writeError(w, http.StatusConflict, "Email or username is already claimed")
+			code, lookupErr := app.signupConflictCode(ctx, appID, request.Email, request.Username)
+			if lookupErr != nil {
+				writeError(w, http.StatusServiceUnavailable, "Could not check account availability")
+				return
+			}
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "Email or username is already claimed", "code": code})
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "Failed to create user")
@@ -243,6 +248,24 @@ func (app *application) handleSignUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"token": token, "user": user, "namespace": namespace})
+}
+
+func (app *application) signupConflictCode(ctx context.Context, appID bson.ObjectID, email, username string) (string, error) {
+	err := app.database.Collection("_users").FindOne(ctx, bson.M{"appId": appID, "email": email}).Err()
+	if err == nil {
+		return "email_taken", nil
+	}
+	if !errors.Is(err, mongo.ErrNoDocuments) {
+		return "", err
+	}
+	err = app.database.Collection(namespaceCollectionName).FindOne(ctx, bson.M{"appId": appID, "slug": username}).Err()
+	if err == nil {
+		return "username_taken", nil
+	}
+	if !errors.Is(err, mongo.ErrNoDocuments) {
+		return "", err
+	}
+	return "account_conflict", nil
 }
 
 func (app *application) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -305,6 +328,7 @@ func handleTokenVerification(w http.ResponseWriter, r *http.Request, claims *Cla
 		"claims": map[string]any{
 			"sub":       claims.Subject,
 			"uid":       claims.UID,
+			"appId":     claims.AppID,
 			"email":     claims.Email,
 			"role":      claims.Role,
 			"iss":       claims.Issuer,

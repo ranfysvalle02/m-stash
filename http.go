@@ -42,19 +42,30 @@ func (app *application) corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		origin := r.Header.Get("Origin")
 		allowed := false
 		allowedOrigins := app.config.AllowedOrigins
-		if record, ok := appFromContext(r.Context()); ok && len(record.AllowedOrigins) > 0 {
+		record, appResolved := appFromContext(r.Context())
+		if appResolved && len(record.AllowedOrigins) > 0 {
 			allowedOrigins = record.AllowedOrigins
 		}
 
+		w.Header().Add("Vary", "Origin")
 		if origin != "" {
-			for _, allowedOrigin := range allowedOrigins {
-				if allowedOrigin == "*" || allowedOrigin == origin {
-					allowed = true
-					w.Header().Set("Access-Control-Allow-Origin", origin)
-					if allowedOrigin != "*" {
-						w.Header().Set("Access-Control-Allow-Credentials", "true")
+			// A browser's preflight omits the app-key header. The actual request
+			// resolves the tenant and must still satisfy its origin policy.
+			appPreflight, _ := r.Context().Value(appPreflightContextKey).(bool)
+			if appPreflight && r.Header.Get("Access-Control-Request-Method") != "" && requestedHeader(r.Header.Get("Access-Control-Request-Headers"), appKeyHeader) {
+				allowed = true
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			} else {
+				for _, allowedOrigin := range allowedOrigins {
+					if allowedOrigin == "*" || allowedOrigin == origin {
+						allowed = true
+						w.Header().Set("Access-Control-Allow-Origin", origin)
+						if allowedOrigin != "*" {
+							w.Header().Set("Access-Control-Allow-Credentials", "true")
+						}
+						break
 					}
-					break
 				}
 			}
 		} else {
@@ -65,15 +76,30 @@ func (app *application) corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token, "+appKeyHeader)
 
 		if r.Method == http.MethodOptions {
-			if !allowed && origin != "" && len(allowedOrigins) > 0 && allowedOrigins[0] != "*" {
+			w.Header().Add("Vary", "Access-Control-Request-Method")
+			w.Header().Add("Vary", "Access-Control-Request-Headers")
+			if !allowed && origin != "" {
 				w.WriteHeader(http.StatusForbidden)
 				return
 			}
 			w.WriteHeader(http.StatusOK)
 			return
 		}
+		if appResolved && origin != "" && !allowed {
+			writeError(w, http.StatusForbidden, "Origin is not allowed for this application")
+			return
+		}
 		next(w, r)
 	}
+}
+
+func requestedHeader(headers, name string) bool {
+	for _, header := range strings.Split(headers, ",") {
+		if strings.EqualFold(strings.TrimSpace(header), name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (app *application) originAllowed(origin string) bool {

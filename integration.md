@@ -36,6 +36,7 @@ curl --request POST "$API_URL/v1/auth/signup" \
 The response includes a bearer `token`, a `user`, and a personal `namespace`. The same call also establishes an HttpOnly browser session when called from the m-stash origin.
 
 Usernames are normalized to lowercase and must be 3-32 ASCII characters, unique within the app. They start and end with a letter or number, with single hyphens or underscores allowed between name parts. A username is permanent once claimed.
+Some names are reserved. Passwords must be 12-72 UTF-8 bytes. Signup conflicts return the existing `error` message and a `code`: `email_taken`, `username_taken`, or `account_conflict` when the conflict cannot be identified.
 
 Use normal login to restore a session:
 
@@ -46,7 +47,19 @@ curl --request POST "$API_URL/v1/auth/login" \
   --data '{"email":"ada@example.com","password":"a-long-unique-password"}'
 ```
 
-For a separate browser origin, configure `ALLOWED_ORIGINS` (globally or per app) with the exact origin before production use. The current blank setting permits all origins for development but does not enable credentialed cross-origin cookies.
+For a separate browser origin, configure the exact origin including port under **Allowed browser origins** in the app console, or use the deployment's `ALLOWED_ORIGINS` default. Sandboxes allow all origins. A blank deployment setting permits all origins but does not enable credentialed cross-origin cookies. If the browser says `Failed to fetch` and its console reports CORS, check the app's origin settings. Keyless preflight can succeed even when the actual request is rejected by the app's policy.
+
+## Verify a token on your backend
+
+```sh
+curl -f "$API_URL/v1/auth/verify" \
+  --header "X-M-Stash-App: $APP_KEY" \
+  --header "Authorization: Bearer $TOKEN"
+```
+
+The response contains `active: true` and verified `claims`, including `uid`, `appId`, and `expiresAt`. The endpoint rejects tokens belonging to another app. Find the app ID independently by signing in as the builder and matching `publishableKey` in `GET /v1/builder/apps`. Fail closed on any verification error; scope every external database query, update, delete, and vector search to the verified `uid`, never an unverified JWT payload.
+
+A backend-for-frontend can proxy sign-in over HTTPS and keep the bearer token in a Secure, HttpOnly, SameSite cookie; protect state-changing requests against CSRF and apply per-client login limits. If caching verification, never cache past token expiry and consider delayed account-change detection. Signup/login bearer tokens last seven days and are not revoked by browser logout; verification of ordinary member tokens does not check whether the user was deleted. App owners can delete test users and their personal data under **Inspect data** in the console, but their existing bearer tokens remain valid until expiry. Browser cookie sessions have separate access tokens and CSRF-protected `POST /v1/auth/refresh` and `POST /v1/auth/logout` endpoints. Allow for slow cold starts. When testing token tampering, change a middle signature character or the payload: changing the final base64url character might only alter unused padding bits.
 
 ## Personal namespace API
 
@@ -82,6 +95,7 @@ DELETE /v1/me/resources/{type}/{slug}
 ```
 
 Personal visibility is `private` or `public`. Public records resolve at `/{username}/{type}/{slug}` only if the personal namespace is public too.
+Single-record responses wrap the record in `data`, so its payload is `response.data.data`. `PUT` returns 404 for a missing record and replaces all writable fields, including the complete `data` object. Use `POST` to create a missing record and handle a concurrent 409 before retrying; `PATCH` supports atomic increments only.
 
 ## Shared application API
 

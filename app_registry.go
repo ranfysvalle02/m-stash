@@ -27,6 +27,7 @@ const (
 )
 
 const appContextKey contextKey = "app-record"
+const appPreflightContextKey contextKey = "app-preflight"
 
 // AppRecord is one tenant: an isolated application sharing the deployment.
 type AppRecord struct {
@@ -301,7 +302,7 @@ func (app *application) resolveApp(next http.HandlerFunc) http.HandlerFunc {
 		key := appKeyFromRequest(r)
 		if key == "" {
 			if r.Method == http.MethodOptions {
-				next(w, r)
+				next(w, r.WithContext(context.WithValue(r.Context(), appPreflightContextKey, true)))
 				return
 			}
 			writeError(w, http.StatusBadRequest, "Missing "+appKeyHeader+" application key")

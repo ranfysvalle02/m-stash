@@ -196,10 +196,9 @@ func TestVibeAppSkillEmbedsKeyAndStaysSampleFree(t *testing.T) {
 	if !strings.Contains(skill, "sk_") {
 		t.Fatalf("app skill should warn never to ship the secret key:\n%s", skill)
 	}
-	// The verify script's throwaway signup is the only credential-shaped text
-	// allowed; it is a fixed placeholder, never a stored value.
+	// Generic credential documentation is allowed, but stored credentials are not.
 	lower := strings.ReplaceAll(strings.ToLower(skill), `"password":"verify-password-123"`, "")
-	for _, forbidden := range []string{"password", "claim", "@sandbox.invalid"} {
+	for _, forbidden := range []string{"claimtoken", "@sandbox.invalid"} {
 		if strings.Contains(lower, forbidden) {
 			t.Fatalf("app skill leaked forbidden token %q:\n%s", forbidden, skill)
 		}
@@ -300,6 +299,19 @@ func TestGenericSkillStatesVisibilityIsRequired(t *testing.T) {
 	}
 	if !strings.Contains(skill, "`visibility` is REQUIRED") || !strings.Contains(skill, "## When a call fails") {
 		t.Fatalf("skill must state the record contract and failure fixes:\n%s", skill)
+	}
+}
+
+func TestSkillsDocumentBackendIntegration(t *testing.T) {
+	for _, skill := range []string{
+		genericVibeSkill("https://live.example", false),
+		vibeAppSkill(testVibeShareRecord(), "https://live.example"),
+	} {
+		for _, want := range []string{"## Verify a token on your backend", "/v1/auth/verify", "claims.uid", "claims.appId", "email_taken", "username_taken", "12-72 UTF-8 bytes", "CORS", "replaces the entire payload"} {
+			if !strings.Contains(skill, want) {
+				t.Errorf("skill missing %q", want)
+			}
+		}
 	}
 }
 

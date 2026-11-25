@@ -357,6 +357,7 @@ func TestIntegrationOwnerLogin(t *testing.T) {
 	if len(owners) != 1 || owners[0] != sandbox.owner.Email {
 		t.Fatalf("owners = %v", owners)
 	}
+
 	oldOwner := h.appLogin(pk, sandbox.owner.Email, sandbox.owner.Password)
 	expectStatus(t, "generated owner before reset", oldOwner, http.StatusOK)
 	oldToken := oldOwner.json()["token"].(string)
@@ -401,6 +402,29 @@ func TestIntegrationOwnerLogin(t *testing.T) {
 		expectStatus(t, "stranger reads owner", stranger.do("GET", ownerPath, nil), http.StatusNotFound)
 		expectStatus(t, "stranger sets owner", stranger.do("PUT", ownerPath, map[string]any{"email": "evil@example.com", "password": "evil-password-1234"}), http.StatusNotFound)
 	})
+}
+
+func TestIntegrationSignupConflictCodes(t *testing.T) {
+	h := newHarness(t, nil)
+	member := h.browser()
+	member.appKey = h.vibeSandbox().record.PublishableKey
+	signup := func(email, username string) response {
+		return member.do("POST", "/v1/auth/signup", map[string]any{
+			"email": email, "password": "member-password-123", "username": username,
+		})
+	}
+	expectStatus(t, "initial signup", signup("member@example.com", "member1"), http.StatusCreated)
+	for _, tc := range []struct{ email, username, code string }{
+		{"MEMBER@example.com", "other1", "email_taken"},
+		{"other@example.com", "MEMBER1", "username_taken"},
+		{"member@example.com", "member1", "email_taken"},
+	} {
+		got := signup(tc.email, tc.username)
+		expectStatus(t, tc.code, got, http.StatusConflict)
+		if got.json()["code"] != tc.code || got.json()["error"] != "Email or username is already claimed" {
+			t.Fatalf("conflict response = %s", got.body)
+		}
+	}
 }
 
 func TestIntegrationOperatorPasswordResetRetiresBuilderTokens(t *testing.T) {

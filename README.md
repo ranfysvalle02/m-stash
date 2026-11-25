@@ -67,6 +67,7 @@ A per-app `secretKey` can be supplied to a trusted backend for shared resource m
 | `POST /v1/apps` | Platform-only: provision an app and return its publishable + secret keys. Requires `PLATFORM_TOKEN`. |
 | `POST /v1/auth/signup` | Open registration: account + immutable personal namespace. |
 | `POST /v1/auth/login` | Email/password login with bearer token and browser session. |
+| `GET /v1/auth/verify` | Verify a bearer token for the selected app and return its claims, including `uid` and `appId`. |
 | `GET /v1/auth/providers` | Lists configured social-login providers (`github`, `google`). Empty when none are set. |
 | `GET /v1/auth/oauth/{provider}/start` | Begins OAuth2 + PKCE. Full-page navigation, not `fetch`. Query: `app` (publishable key) and `redirect_uri`. |
 | `POST /v1/auth/oauth/exchange` | Trades the one-time `oauth_code` from the callback for a bearer token and browser session. |
