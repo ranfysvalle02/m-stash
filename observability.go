@@ -185,6 +185,8 @@ func metricRoute(path string) string {
 		return "/skill.md"
 	case path == "/mstash.js":
 		return "/mstash.js"
+	case path == "/mstash-embed.js":
+		return "/mstash-embed.js"
 	case path == "/mstash.d.ts":
 		return "/mstash.d.ts"
 	case path == "/v1/stats":

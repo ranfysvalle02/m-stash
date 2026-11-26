@@ -156,10 +156,8 @@ func (app *application) handleTutorials(w http.ResponseWriter, r *http.Request) 
 	}})
 }
 
-// handleClientScript serves the zero-dependency mstash.js client and its
-// TypeScript declarations, so a page can import it straight from the deployment
-// with no install step. They are public, credential-free static files, so any
-// origin may load them.
+// handleClientScript serves the client module, declarations, and classic-script
+// embed. These public, credential-free files can be loaded from any origin.
 func (app *application) handleClientScript(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -174,8 +172,22 @@ func (app *application) handleClientScript(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "Not found")
 		return
 	}
+	if r.URL.Path == "/mstash-embed.js" {
+		const exports = "\nexport { MStashError, createClient };\n"
+		client, ok := strings.CutSuffix(string(contents), exports)
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "Client script is invalid")
+			return
+		}
+		wrapper, err := vibeStarterFiles.ReadFile("vibe_starter/mstash-embed.js")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Embed script is unavailable")
+			return
+		}
+		contents = []byte("(function () {\n" + client + "\n" + string(wrapper) + "\n})();\n")
+	}
 	w.Header().Set("Content-Type", contentType)
-	if name == "mstash.js" {
+	if r.URL.Path == "/mstash.js" {
 		// Deno and other URL-importing runtimes follow this to the declarations.
 		w.Header().Set("X-TypeScript-Types", "/mstash.d.ts")
 	}

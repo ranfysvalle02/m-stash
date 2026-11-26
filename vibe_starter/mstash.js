@@ -11,7 +11,7 @@
 // Never ship a secret key (sk_…) to a browser; the publishable key (pk_…) is safe there.
 // TypeScript: keep mstash.d.ts next to this file and the types are picked up automatically.
 
-export class MStashError extends Error {
+class MStashError extends Error {
   constructor(status, body) {
     super((body && body.error) || `m-stash request failed with HTTP ${status}`);
     this.name = "MStashError";
@@ -20,7 +20,7 @@ export class MStashError extends Error {
   }
 }
 
-export function createClient({ api, app, token = null, fetch: fetchImpl = globalThis.fetch } = {}) {
+function createClient({ api, app, token = null, fetch: fetchImpl = globalThis.fetch } = {}) {
   if (!api || !app) throw new Error("createClient needs { api, app }");
   const base = String(api).replace(/\/+$/, "");
   let bearer = token;
@@ -101,3 +101,5 @@ export function createClient({ api, app, token = null, fetch: fetchImpl = global
     },
   };
 }
+
+export { MStashError, createClient };

@@ -110,6 +110,7 @@ func (app *application) Handler(rateLimiter *authRateLimiter) http.Handler {
 	mux.HandleFunc("/skill.md", app.corsMiddleware(app.handleSkill))
 	mux.HandleFunc("/mstash.js", app.handleClientScript)
 	mux.HandleFunc("/mstash.d.ts", app.handleClientScript)
+	mux.HandleFunc("/mstash-embed.js", app.handleClientScript)
 	mux.HandleFunc("/v1/stats", app.corsMiddleware(app.handlePublicStats))
 	mux.HandleFunc("/v1/tutorials", app.corsMiddleware(app.handleTutorials))
 	mux.HandleFunc("/v1/tutorials/", app.corsMiddleware(app.handleTutorials))

@@ -84,6 +84,7 @@ A per-app `secretKey` can be supplied to a trusted backend for shared resource m
 | `POST /v1/try` | Start a blank live sandbox (when `TRY_SANDBOX=on`). Returns a publishable key, an expiry, and a one-time claim token. |
 | `POST /v1/builder/auth/signup` | Self-serve builder account (when `BUILDER_SIGNUP=open`). Returns a session on the free plan. |
 | `GET /mstash.js` | The zero-dependency client (browsers and Node 18+), importable from any origin: `import { createClient } from "https://<deployment>/mstash.js"`. |
+| `GET /mstash-embed.js` | Standalone classic browser script; configure it with `data-app-key` and optionally `data-api-url`. See [integration.md](integration.md#standalone-browser-script). |
 | `GET /mstash.d.ts` | TypeScript declarations for the client. Save it next to `mstash.js` and imports are typed, including your own record shapes: `stash.me.get<Note>("notes", "first")`. `/mstash.js` also points to it with an `X-TypeScript-Types` header for Deno. |
 | `GET /v1/tutorials`, `/v1/tutorials/{slug}`, `/v1/tutorials/{slug}.md` | Step-by-step tutorials from `tutorials/*.md`, stamped with this deployment's origin. Rendered at `/tutorials`. |
 | `GET /v1/stats` | Public, aggregate counts (registered stashers, live apps, records, recent vibes) when `PUBLIC_STATS` is on. Counts only. |

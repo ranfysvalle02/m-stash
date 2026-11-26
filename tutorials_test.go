@@ -82,11 +82,21 @@ func TestClientScriptIsImportableFromAnyOrigin(t *testing.T) {
 	rec := httptest.NewRecorder()
 	(&application{}).handleClientScript(rec, httptest.NewRequest(http.MethodGet, "/mstash.js", nil))
 	if rec.Code != http.StatusOK || rec.Header().Get("Access-Control-Allow-Origin") != "*" ||
-		!strings.HasPrefix(rec.Header().Get("Content-Type"), "text/javascript") || !strings.Contains(rec.Body.String(), "export function createClient") {
+		!strings.HasPrefix(rec.Header().Get("Content-Type"), "text/javascript") || !strings.Contains(rec.Body.String(), "export { MStashError, createClient }") {
 		t.Fatalf("status=%d headers=%v", rec.Code, rec.Header())
 	}
 	if rec.Header().Get("X-TypeScript-Types") != "/mstash.d.ts" {
 		t.Fatalf("X-TypeScript-Types = %q", rec.Header().Get("X-TypeScript-Types"))
+	}
+
+	rec = httptest.NewRecorder()
+	(&application{}).handleClientScript(rec, httptest.NewRequest(http.MethodGet, "/mstash-embed.js", nil))
+	if rec.Code != http.StatusOK || rec.Header().Get("Access-Control-Allow-Origin") != "*" ||
+		!strings.HasPrefix(rec.Header().Get("Content-Type"), "text/javascript") ||
+		rec.Header().Get("X-TypeScript-Types") != "" ||
+		strings.Contains(rec.Body.String(), "export { MStashError, createClient }") ||
+		!strings.Contains(rec.Body.String(), "global.mStash = instance") {
+		t.Fatalf("embed: status=%d headers=%v", rec.Code, rec.Header())
 	}
 
 	rec = httptest.NewRecorder()

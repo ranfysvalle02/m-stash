@@ -49,6 +49,31 @@ curl --request POST "$API_URL/v1/auth/login" \
 
 For a separate browser origin, configure the exact origin including port under **Allowed browser origins** in the app console, or use the deployment's `ALLOWED_ORIGINS` default. Sandboxes allow all origins. A blank deployment setting permits all origins but does not enable credentialed cross-origin cookies. If the browser says `Failed to fetch` and its console reports CORS, check the app's origin settings. Keyless preflight can succeed even when the actual request is rejected by the app's policy.
 
+## Standalone browser script
+
+Load a classic script directly from your deployment, or copy `/mstash-embed.js` to a CDN or static host. It initializes `window.mStash` synchronously and exposes `window.MStashClient` for additional instances. Supply your publishable `pk_...` key; never put a secret key or platform token in browser code.
+
+```html
+<script src="https://m-stash.com/mstash-embed.js"
+        data-api-url="https://m-stash.com"
+        data-app-key="pk_your_publishable_key"></script>
+<script>
+  async function createProfile(email, password, username) {
+    await window.mStash.signup({ email, password, username });
+    await window.mStash.savePersonal("profile", {
+      slug: "main", title: "Player one", data: { favoriteMode: "arcade" },
+      visibility: "private"
+    });
+    const result = await window.mStash.getPersonal("profile", "main");
+    return result.data;
+  }
+</script>
+```
+
+`data-api-url` defaults to the script's origin; set it explicitly when hosting the file on a different CDN. Configure the **page's** origin in the app's allowed origins (or deployment default). The script uses the signup/login bearer token in memory and sends `credentials: "omit"`; it does not rely on cross-site cookies. Reloading the page loses the token. `logout()` only forgets it locally.
+
+`savePersonal` creates with POST; use `updatePersonal(type, slug, record)` for a full PUT replacement, not another POST. `getShared` reads authenticated shared records, while `getPublicShared` reads public shared records without login. The embed has no shared-write methods: use an admin session or a trusted backend with the secret key. Additional clients use `new window.MStashClient({ apiUrl, appKey, token })`; the token, if supplied, must be a user bearer token.
+
 ## Verify a token on your backend
 
 ```sh
